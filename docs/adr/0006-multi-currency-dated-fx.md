@@ -1,10 +1,13 @@
 # ADR 0006: Multi-currency is first-class, converted at dated FX rates
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0017
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
-- **Related:** ADR-0005, ADR-0008, ADR-0011, ARCHITECTURE.md §2
-- **Note:** likely to gain a follow-up ADR on cross-currency transfers and FX gain/loss pending review.
+- **Related:** ADR-0005, ADR-0008, ADR-0011, ADR-0017 (supersedes this), ARCHITECTURE.md §2
+- **Note:** A design review found this ADR over-claimed multi-currency (it implied per-transaction currency
+  independent of the account, which contradicts the single-currency balance/snapshot model). **ADR-0017**
+  replaces it with the concrete, decided model: single-currency accounts, `base_amount` as an invalidatable
+  cache, high-precision dated rates, and a currency-revaluation line. Kept for the reasoning trail.
 
 ## Context
 

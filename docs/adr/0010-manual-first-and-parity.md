@@ -25,5 +25,5 @@ Two linked rules:
 - **Positive:** correctness before convenience; sync can't write anything the model doesn't already support;
   users are never stuck when automation fails.
 - **Negative / costs:** defers integration risk to Phase 2 — mitigated by building the mock SimpleFIN server
-  and validating the provider→manual-model mapping early in WS-0, not at Phase 2 start.
+  and validating the provider→manual-model mapping early in WS-T (P0 spike, ADR-0022), not at Phase 2 start.
 - **Follow-ups:** a manual-parity acceptance bar per automated capability; early spike on SimpleFIN data shape.

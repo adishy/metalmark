@@ -30,7 +30,7 @@ load-bearing choice.
 | [0003](0003-boring-stack.md) | Boring stack: FastAPI + Postgres + React/TS + ECharts | Accepted |
 | [0004](0004-postgres-job-queue-no-redis.md) | Postgres-backed job queue; no Redis | Accepted |
 | [0005](0005-money-decimal-never-float.md) | Money as NUMERIC/Decimal; never float | Accepted |
-| [0006](0006-multi-currency-dated-fx.md) | Multi-currency is first-class, converted at dated FX rates | Accepted |
+| [0006](0006-multi-currency-dated-fx.md) | Multi-currency is first-class, converted at dated FX rates | Superseded by 0017 |
 | [0007](0007-field-provenance.md) | Field-level provenance governs sync-vs-human writes | Accepted |
 | [0008](0008-transfers-linked-excluded.md) | Transfers are linked groups, excluded from cash-flow | Accepted |
 | [0009](0009-ledger-decoupled-from-connections.md) | The ledger is decoupled from connections | Accepted |
@@ -41,3 +41,10 @@ load-bearing choice.
 | [0014](0014-tenant-isolation-scoping-layer.md) | Tenant isolation via one mandatory scoping layer / RLS | Accepted |
 | [0015](0015-test-harness-first-class.md) | Test harness is a first-class workstream (red-green) | Accepted |
 | [0016](0016-admin-sync-observability.md) | Admin-grade sync observability | Accepted |
+| [0017](0017-currency-single-account-model.md) | Currency & FX: single-currency accounts, base_amount cache, revaluation line | Accepted |
+| [0018](0018-cross-currency-transfers.md) | Cross-currency transfers: match on base amount, surface FX cost | Accepted |
+| [0019](0019-provenance-manual-origin-boundary.md) | Provenance: the manual-origin boundary for sync merges | Accepted |
+| [0020](0020-investment-cost-basis-average.md) | Investment cost basis: average cost for v1; lots deferred | Accepted |
+| [0021](0021-investment-balance-source.md) | Investment balance source: derived vs stated + reconciling plug | Accepted |
+| [0022](0022-derisk-sync-p0-spike.md) | De-risk sync early: P0 SimpleFIN spike + Phase-1 vertical slice | Accepted |
+| [0023](0023-phase1-split-1a-1b.md) | Split Phase 1 into 1a/1b; carve FX into its own module | Accepted |

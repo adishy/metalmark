@@ -12,7 +12,7 @@ testing harness built as a first-class citizen. Financial correctness bugs are s
 
 ## Decision
 
-Testing is **WS-0**, built before feature code, with red-green as the default workflow. It provides:
+Testing is **WS-T**, built before feature code, with red-green as the default workflow. It provides:
 `testcontainers` Postgres for integration tests, a **mock SimpleFIN server** driven by golden + adversarial
 fixtures (id-instability, disappearing pendings, reconnect-remap, transfer pairs, duplicate re-import,
 multi-currency), property tests (Hypothesis/fast-check) for money/FX/splits, Playwright e2e over a seeded

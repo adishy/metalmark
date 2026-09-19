@@ -41,25 +41,41 @@ that updates this document.
 Amounts: `NUMERIC(19,4)`, mapped to `Decimal`. Timestamps: `timestamptz`, stored UTC (bucketed to the
 household timezone for reporting). All rows scoped to a `household` for authorization.
 
-**Currency (first-class, v1):** every household has a `base_currency` (the rollup/display currency). Accounts
-and transactions carry their **own native currency**, which may differ. Money is stored in native currency +
-currency code; the base-currency value is computed via an **`fx_rates`** table:
-- `fx_rates` — `base_currency, quote_currency, rate_date, rate, source (auto|manual)`. Unique
-  `(base_currency, quote_currency, rate_date)`.
-- **Which rate:** "current" views (today's net worth, an account balance) convert at the latest rate;
-  **time-series** views (net-worth-over-time, cash-flow by month) convert each point at that date's rate, so
-  history doesn't rewrite itself when rates move. The rate used is stored alongside computed base amounts for
-  reproducibility.
-- Rates are pulled daily from a free source (Frankfurter/ECB) by the worker; **manual rate entry** is a
-  first-class fallback (manual parity) for currencies the source lacks.
+**Currency model (v1 — decided; see ADR-0017):** accounts are **single-currency**. Each household has one
+**immutable** `base_currency`. Each account has a fixed `currency`; a transaction's `currency` **≡ its
+account's currency** (a foreign card purchase posts in the account's own currency — the bank already
+converted). True multi-currency "wallet" accounts (one account holding several currencies) are **out of scope
+for v1**. This removes the single-currency-balance contradiction: an account balance and its snapshots are
+always in one currency.
+- `fx_rates` — `base_currency, quote_currency, rate_date, rate NUMERIC(19,8), source (auto|manual)`. Unique
+  `(base_currency, quote_currency, rate_date)`. **Rates need high precision** (4dp is wrong — 1 JPY ≈ 0.00636
+  USD). Storage direction is documented; USD-base households needing e.g. GBP→USD triangulate through EUR in
+  the conversion service (one place, controlled rounding).
+- **`fx_rates` is the single source of truth; `transactions.base_amount` is a cache.** Reporting reads the
+  cache for speed but it is recomputed whenever a rate it depends on changes.
+- **Which rate:** convert at the rate for the **latest `rate_date` ≤ the target date** (the transaction's
+  household-local date, same date basis as month bucketing). "Current" views use the latest available rate.
+  If **no rate exists** for a currency/date, the value is flagged **"no rate"** in the UI — never silently 0
+  or left unconverted.
+- **Corrections invalidate caches.** Editing a manual rate or a revised auto rate invalidates every
+  `base_amount` **and every precomputed rollup** derived from that `(currency, rate_date)`. `base_currency` is
+  immutable in v1 (changing it would invalidate every stored base amount).
+- **FX revaluation (decided):** a foreign balance's base value moves when rates move, with no transaction
+  behind it. v1 does **not** do position-level FX P&L; instead net-worth change is decomposed into cash-flow +
+  a distinct **"currency revaluation"** line so base-currency deltas stay honest (ADR-0017).
+- Rates are pulled daily (Frankfurter/ECB) by the worker; **manual rate entry** is a first-class fallback.
 - All conversions use `Decimal` with a documented rounding policy. Never mix currencies without conversion.
 
 **Net worth correctness:** net worth = Σ(asset balances) − Σ(liability balances), using `accounts.is_asset`
-(derived from type) rather than a sign guess. Snapshots are keyed on the provider's `balance_date` (not the
-worker's wall clock), and the net-worth line **carries forward** the last known balance across days with no
-snapshot (sync outages, stale accounts). SimpleFIN gives current balance only, so history builds forward from
-first sync — there is no backfill (set that expectation in the UI). A manual investment account's balance is
-derived as Σ(`holdings.market_value`) and snapshotted the same way.
+(derived from type) rather than a sign guess. Each account balance is in its own currency and **converted to
+base at that date's rate**. Snapshots are keyed on the provider's `balance_date` (not the worker's wall
+clock), and the net-worth line **carries forward** the last known balance across days with no snapshot (sync
+outages, stale accounts). SimpleFIN gives current balance only, so history builds forward from first sync —
+there is no backfill (set that expectation in the UI). A manual investment account's balance is derived as
+Σ(`holdings.market_value`) and snapshotted the same way (unless `balance_source='stated'` — see Investments).
+- **Reconciliation with FX:** over any period, Δnet-worth (base) = cash-flow (base) + **currency revaluation**
+  (the base-value change of foreign balances from rate moves). Reports show revaluation as its own line;
+  single-currency views reconcile exactly, multi-currency views reconcile *including* that line.
 
 ### Identity & sharing
 - **users** — `id, email (unique), password_hash (argon2), display_name, created_at, is_admin`.
@@ -77,10 +93,13 @@ derived as Σ(`holdings.market_value`) and snapshotted the same way.
 - **accounts** —
   `id, household_id, connection_id (nullable → manual), external_id (SimpleFIN account id),
    external_key (org_id + account number/name, for reconnect remap — see §3), name,
-   type (depository|credit|investment|loan|other), subtype, institution, currency,
-   current_balance, available_balance, balance_date, is_asset (derived from type: depository/investment=asset,
-   credit/loan=liability), owner_user_id (nullable → joint/shared), is_manual (bool), is_hidden,
-   created_at, updated_at`.
+   type (depository|credit|investment|loan|other), subtype, institution, currency (fixed; single-currency
+   account per ADR-0017), current_balance, available_balance, balance_date, balance_source
+   (stated|derived — investment accounts only; see Investments), is_asset (derived from type:
+   depository/investment=asset, credit/loan=liability), owner_user_id (nullable → joint/shared),
+   is_manual (bool), is_hidden, created_at, updated_at`.
+  - **Unique `(household_id, external_key)`** — the stable identity used by reconnect remap (§3); without it
+    remap can't be correct.
   - **Ownership is simplified for v1** to a single `owner_user_id` per account (null = joint/shared) plus a
     per-split owner. Fractional per-transaction ownership (`share_pct`) is deferred — it was over-modeled for
     a few users and created three overlapping ownership mechanisms. **Attribution precedence:**
@@ -88,10 +107,19 @@ derived as Σ(`holdings.market_value`) and snapshotted the same way.
 - **securities** — a reusable instrument. `id, household_id, name, ticker, security_type
   (stock|etf|mutual_fund|bond|option|crypto|cash|other), currency, is_manual`.
 - **holdings** — a position in an account (SimpleFIN has no holdings object → always manual/imported).
-  `id, account_id, security_id, quantity, cost_basis, market_value, as_of`. An investment account's balance is
-  derived as Σ(market_value).
+  `id, account_id, security_id, quantity, cost_basis, as_of`. **Market value is derived**, not stored:
+  quantity × latest `security_prices.price`, converted to base. **Cost basis is average-cost for v1**
+  (ADR-0020); lot/FIFO tracking is deferred (no lot table). `cost_basis` has one writer per policy: if
+  `investment_transactions` exist for the security, basis is computed from them; otherwise the manual scalar
+  is authoritative (ADR-0020).
+- **Investment account balance source** (`accounts.balance_source`, ADR-0021): `derived` = Σ(holding market
+  values) — the default for manual accounts; `stated` = a provider/entered balance kept as-is. When a synced
+  account (stated balance, no holdings) later gets hand-added holdings, the difference is reconciled by an
+  explicit **"unaccounted cash" plug** holding rather than silently disagreeing.
 - **security_prices** — `security_id, price_date, price, currency, source (auto|manual)`. Manual entry is
-  first-class; auto price fetch is optional and pluggable.
+  first-class; auto price fetch is optional and pluggable. Prices carry an **age**; a stale price (older than a
+  threshold) is flagged in the UI the way sync freshness is — a months-old manual price must not silently
+  produce a wrong market value / net worth.
 - **investment_transactions** — individual buy/sell/dividend/interest/fee/transfer events (fixes Monarch's
   "can't see investment transactions / no dividend category" gap).
   `id, account_id, security_id, type (buy|sell|dividend|interest|fee|split|transfer), trade_date, quantity,
@@ -101,29 +129,42 @@ derived as Σ(`holdings.market_value`) and snapshotted the same way.
 ### Transactions
 - **transactions** —
   `id, household_id, account_id, external_id (nullable for manual), import_hash (dedupe key for
-   manual/CSV/OFX = sha256(account_id + transacted_at + amount + description)), posted_at, transacted_at,
-   amount (Decimal; sign: positive = money in), currency (native, defaults to account currency),
-   base_amount (Decimal; amount converted to household base currency at the txn date), fx_rate_date,
+   manual/CSV/OFX = sha256(account_id + transacted_at + amount + description + **occurrence ordinal**)),
+   posted_at, transacted_at,
+   amount (Decimal; sign: positive = money in), currency (**≡ account.currency**, denormalized + enforced),
+   base_amount (Decimal; **cache** of amount converted to base at the txn's household-local date; recomputed
+   on FX-rate change — never the source of truth), fx_rate_date,
    description (raw), merchant (cleaned),
    category_id, is_pending, review_status (needs_review|reviewed|ignored), is_hidden, is_split_parent,
    transfer_group_id (nullable → part of a transfer), field_sources (jsonb), notes,
    source (simplefin|csv|ofx|manual), created_at, updated_at`.
   - Unique index `(account_id, external_id)` where `external_id` not null; unique `(account_id, import_hash)`
-    where `external_id` is null (stops re-importing the same CSV/OFX row).
+    where `external_id` is null. The **occurrence ordinal** in `import_hash` disambiguates two *genuine*
+    identical same-day rows (two $5 coffees) so they aren't silently collapsed; a re-import of an
+    already-seen row is routed to a **"possible duplicate — review"** step, never hard-dropped.
   - **`field_sources` = the provenance model (critical).** A per-transaction map
     `{category: provider|rule|user, merchant: …, is_hidden: …, review_status: …, splits: …}`. It is the
     *only* way to distinguish a human edit from a rule- or provider-set value. **Write precedence:**
-    `user` always wins; a `rule` may overwrite `provider` or an earlier `rule`, never `user`; the provider
-    sync may overwrite only provider-owned fields (`amount, description, posted_at, is_pending`) and never a
-    `user`/`rule` field. This is the **shared contract between WS-A (sync), WS-B (model), WS-C (rules)** and
-    must be co-designed and frozen together (see PLAN.md).
+    `user` always wins; a `rule` may overwrite `provider` or an earlier `rule`, never `user`.
+  - **Manual-origin boundary (ADR-0019):** "provider-owned fields" is *not* static — it applies only to
+    **provider-origin rows**. Sync merges **only into rows it owns**, matched by `external_id`; a manual/import
+    row has no `external_id`, so **sync never overwrites a hand-entered amount**. If sync later brings what
+    looks like the same transaction a user pre-entered, it lands as a separate row surfaced in the
+    "possible duplicate" review — a human links/merges; sync never silently reconciles into manual data.
+  - This is the **shared contract between WS-SYNC, WS-L (model), WS-R (rules)**, co-designed and frozen in P0.
 - **transfer_groups** — links the two (or more) legs of a money movement (checking→savings, card/loan
-  payments). `id, household_id, matched_by (auto|manual), created_at`. Auto-matched on ingest by
-  opposite-sign amounts + near dates + cross-account (see §3). **All cash-flow/spend reporting excludes
-  transfers** (they are not income or expense); they still appear in the transaction list.
-- **transaction_splits** — `id, parent_txn_id, amount, category_id, owner_user_id, notes`.
-  A split parent keeps `is_split_parent=true`; children carry the category/owner breakdown. Percentage
-  splits round to the cent with the remainder assigned to the largest child (documented rounding policy).
+  payments). `id, household_id, matched_by (auto|manual), fx_cost_base (nullable), created_at`. Auto-matched
+  on ingest by near dates + cross-account (see §3). **All cash-flow/spend reporting excludes transfers.**
+  - **Same-currency:** legs are opposite-sign, equal magnitude.
+  - **Cross-currency (ADR-0018):** e.g. −100 EUR out, +108 USD in — legs are *not* equal in native amount, so
+    matching is on **`base_amount` within a tolerance**, or explicit user linking. The residual
+    (Σ base_amount of the legs ≠ 0) is the real FX spread/fee — stored as `fx_cost_base` and surfaced (as a
+    fee/revaluation), **never hidden** by the transfer exclusion.
+- **transaction_splits** — `id, parent_txn_id, amount, base_amount, category_id, owner_user_id, notes`.
+  A split parent keeps `is_split_parent=true`; children carry the category/owner breakdown. Children **inherit
+  the parent's currency and `fx_rate_date`**. Rounding policy: split the **native** amount to the cent
+  (remainder to the largest child), then convert each child, allocating so **Σ(child `base_amount`) ==
+  parent `base_amount`** exactly (no convert-then-round drift).
 - **tags** — `id, household_id, name, color`. **transaction_tags** — `transaction_id, tag_id`.
 - **pending_reconcile** — tracks pending rows so a pending txn that posts under a *new* id (or vanishes)
   is reconciled by `(account_id, amount, ~date, description)` rather than only by SimpleFIN `id`. See §3.
@@ -208,10 +249,11 @@ Only `SimpleFinProvider` is implemented in v1.
       absent from the response, reconcile it against a new posted row by `(account_id, amount, ~date,
       description)` and merge (carrying user edits forward); expire pendings that neither post nor reappear
       within a TTL so no phantom row lingers.
-  - **Transfer matching**: within a household, pair a new txn with an opposite-sign txn of equal magnitude in
-    a *different* account within a few days → create/attach a `transfer_group`. Manual override in the UI.
-  - **Balance snapshot**: upsert `balance_snapshots(account_id, balance_date, current_balance)` keyed on the
-    provider's `balance_date`.
+  - **Transfer matching**: within a household, pair a new txn with an opposite-sign txn in a *different*
+    account within a few days → create/attach a `transfer_group`. Same-currency pairs match on equal
+    magnitude; cross-currency on `base_amount` within tolerance (ADR-0018). Manual override in the UI.
+  - **Balance snapshot**: upsert `balance_snapshots(account_id, balance_date, balance, currency)` keyed on the
+    provider's `balance_date` (column is `balance`, consistent with §2).
   - Map SimpleFIN `errlist`: `con.auth` → connection.status=`auth_error` (UI prompts reconnect **and** fires a
     notification, see §5); `act.*` → per-account warning; anything else → `error` with `last_error`.
 - **Idempotent & re-runnable.** Amounts parsed as `Decimal(str)`. Conservative backoff on HTTP errors
@@ -250,7 +292,8 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   "joint"). Authorization = household membership; ownership drives *views*, not access.
 - **Reporting** (ECharts, all reading the same `/reports` query API; **everything converted to base currency**
   at the correct-date rate, transfers excluded from cash-flow):
-  - Net worth over time (area/line from `balance_snapshots`).
+  - Net worth over time (area/line from `balance_snapshots`), with the **currency-revaluation** contribution
+    shown as its own component so multi-currency deltas are explained, not mysterious (ADR-0017).
   - **Cash-flow Sankey**: income sources → category groups → categories for a period.
   - Spending by category (donut) with click-through drill-down to a filtered transaction list.
   - Income vs. expense trend (stacked bar), month-over-month.
@@ -258,9 +301,12 @@ provider is an adapter that produces the *same* writes a human would (tagging it
     market value.
   - **Consolidated holdings / allocation view** (explicit feature request): a single page that aggregates
     every holding across *all* accounts — the same security held in multiple accounts is summed into one row
-    (quantity, total market value in base currency, cost basis, gain/loss) — with **% allocation** of the
-    whole portfolio, and toggles to group/weight by security, `security_type`, account, or currency.
-    Reads `holdings` × latest `security_prices`, converts to base currency.
+    (quantity, total market value, cost basis, gain/loss) — with **% allocation** of the whole portfolio, and
+    toggles to group/weight by security, `security_type`, account, or currency. **Canonical valuation:**
+    market value = quantity × latest `security_prices.price` in the **price's currency → converted to base**;
+    a holding's own currency comes from its security, not its account. **Cash** is a `security_type=cash`
+    holding so allocation %s are complete; a stale price is flagged. Allocation totals **reconcile to the
+    net-worth investment total** (that's the real invariant, not "%s sum to 100").
   - Every chart is a lens over the same filter model (date range, accounts, owners, categories, currency).
 - **Admin sync observability** (you're technical peers, so this is a feature not an afterthought): a per-run
   view of `sync_runs` + `sync_run_events` — trigger, duration, HTTP timing, counts (inserted/updated/
@@ -278,7 +324,9 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   endpoint are the classic source of cross-tenant (IDOR) leaks — one missed `.filter()` exposes another
   household. Enforce it in **one place, not per-handler**: Postgres **Row-Level Security** keyed on a
   per-session GUC, or a single mandatory query-scoping layer. The model is multi-tenant even with one
-  household today.
+  household today. **The worker has no user session** yet moves the most cross-household data: it must **not**
+  run `BYPASSRLS` (that removes the backstop) — each sync job sets `SET LOCAL app.household_id` for its
+  connection's household inside the job transaction, so RLS applies to the worker exactly as to the API.
 - **Auth**: argon2id password hashing; httpOnly + SameSite session cookies; CSRF token for mutations;
   login rate-limit + lockout. Invite-only signup. (Verify SameSite=Strict doesn't break the invite-link
   landing; use Lax there if needed.) No 2FA is an accepted risk given Tailscale + invite-only — logged as such.
@@ -306,7 +354,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 |---|---|---|
 | SimpleFIN has no holdings/securities data | First-class manual holdings/prices/investment txns; balance-only auto for investment accounts | INV |
 | TreasuryDirect coverage unreliable | OFX/manual fallback (already the plan) | IMP |
-| Amounts are decimal strings; float drift | `Decimal`/`NUMERIC` everywhere; property tests | L, 0 |
+| Amounts are decimal strings; float drift | `Decimal`/`NUMERIC` everywhere; property tests | L, T |
 | pending→posted id instability / disappearing pendings | `pending_reconcile` state + match by (amount,~date,desc); low-water mark, not fixed window; adversarial fixtures | SYNC |
 | Unknown SimpleFIN rate limits | Scheduled polling, backoff, 1 concurrent req/connection | SYNC |
 | Encryption key loss = dead connections | Key from docker secret; backup separate from db dumps; re-claim flow | OPS |
@@ -316,14 +364,23 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 | **Re-importing CSV/OFX duplicates rows** | `import_hash` unique index for manual/imported txns | IMP |
 | **Cross-household (IDOR) data leak** | RLS or one mandatory scoping layer, not per-handler filters | P0, OPS |
 | Silent stale data (no webhooks, 6h poll) | Notification on `auth_error` / sync / backup failure | SYNC, OPS |
-| **Multi-currency mis-conversion / wrong net worth** | Per-txn currency + dated FX rates; conversion is `Decimal` with rounding policy; property tests over currencies | L, UR, 0 |
+| **Multi-currency mis-conversion / wrong net worth** | Single-currency accounts (ADR-0017); dated FX (latest ≤ date, else "no rate"); high-precision rates; `Decimal` + rounding policy; property tests over currencies | FX, L, UR, T |
+| **Stale/corrected FX rate leaves stale reports** | `base_amount` is a cache; rollups + caches invalidated on `(currency, rate_date)` change; base_currency immutable | FX, OPS |
+| **Unexplained net-worth vs cash-flow gap (FX revaluation)** | Decompose Δnet-worth = cash-flow + explicit currency-revaluation line (ADR-0017) | UR, L |
+| **Cross-currency transfer unmatched / FX cost hidden** | Match on base_amount within tolerance or manual link; store + surface `fx_cost_base` (ADR-0018) | SYNC, L, UR |
+| **Sync clobbers hand-entered rows** | Manual-origin boundary: sync merges only by `external_id`; manual rows untouched (ADR-0019) | SYNC, L |
+| **Investment balance: Σ(holdings) vs stated disagree** | `balance_source` per account + "unaccounted cash" plug (ADR-0021) | INV |
+| **Cost-basis unsupportable / double-written** | Average-cost v1; single authority (investment_transactions else scalar); lots deferred (ADR-0020) | INV |
+| **Stale manual security price → wrong net worth** | Price age flag in UI (like sync freshness) | INV, UINV |
+| **SimpleFIN payload doesn't fit the model, found late** | P0 sandbox spike on real demo token; fixtures derived from captured payloads; thin vertical slice in Phase 1 (ADR-0022) | T, SYNC |
 
 ---
 
 ## 7. Testing strategy (first-class — correctness is requirement #1)
 
-Built as a workstream from day one (WS-0), not bolted on. Red-green discipline: a failing test defines each
-behavior before the code.
+Built as a workstream from day one (**WS-T**), not bolted on. Red-green discipline: a failing test defines
+each behavior before the code. Fixtures are **derived from real SimpleFIN payloads captured in the P0 sandbox
+spike** (ADR-0022), not hand-authored from assumptions.
 
 - **Unit** — pure logic: money/FX math, provenance precedence, split rounding, rule evaluation, transfer
   matching, dedupe hashing. Property-based (Hypothesis / fast-check) for anything numeric or currency-related.
@@ -342,8 +399,10 @@ behavior before the code.
 - **Backend** — async FastAPI; keyset (cursor) pagination on transactions; indexes on
   `(household_id, account_id, posted_at)`, `(account_id, external_id)`, category/date; avoid N+1 (explicit
   joins / selectin loading); **precomputed rollups** for net-worth-over-time and category reports (a
-  materialized daily balance + monthly category aggregate refreshed by the worker, not recomputed per request);
-  cache FX rates. Target API p95 < 150ms warm.
+  materialized daily balance + monthly category aggregate refreshed by the worker, not recomputed per request).
+  **Rollups and `base_amount` caches are invalidated on FX-rate change**, keyed on `(currency, rate_date)`,
+  not only on transaction change — otherwise a corrected rate leaves stale reports. Cache FX rates. Target API
+  p95 < 150ms warm.
 - **Frontend** — TanStack Query caching + prefetch; **virtualized** transaction list (react-virtual);
   **optimistic updates** on swipe/categorize so review feels instant; code-splitting per route; memoized
   ECharts with downsampled series for long ranges; PWA app-shell cache. Target: 60fps list scroll, review

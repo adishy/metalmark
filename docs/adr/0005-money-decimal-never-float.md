@@ -21,4 +21,4 @@ code and tested).
 
 - **Positive:** exact arithmetic; reproducible totals; property-testable invariants (splits sum to parent).
 - **Negative / costs:** must be disciplined at every boundary (JSON, ORM, chart data) to avoid float coercion.
-- **Follow-ups:** property tests (Hypothesis/fast-check) over amounts and currencies are a WS-0/L acceptance bar.
+- **Follow-ups:** property tests (Hypothesis/fast-check) over amounts and currencies are a WS-T/L acceptance bar.
