@@ -1,0 +1,28 @@
+# Kestrel reverse proxy (production: bind to the Tailscale interface only).
+# In dev the stack is reached directly on localhost; this file documents the
+# production topology from ARCHITECTURE §1 (Caddy TLS in front of web + api).
+#
+# Replace <tailscale-name> with the machine's Tailscale MagicDNS name.
+# Caddy will provision a cert via the Tailscale/local CA.
+
+# {$KESTREL_SITE_ADDRESS} e.g. kestrel.<tailnet>.ts.net
+{$KESTREL_SITE_ADDRESS:localhost} {
+	# API
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Static PWA (built assets served by the web container)
+	handle {
+		reverse_proxy web:5173
+	}
+
+	encode gzip zstd
+
+	# Security headers (PWA data endpoints also send no-store from the app)
+	header {
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+	}
+}
