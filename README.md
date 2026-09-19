@@ -51,9 +51,12 @@ kestrel/
   docs/
     ARCHITECTURE.md    # system design, data model, sync engine, security
     PLAN.md            # phased, multi-agent execution plan
+    adr/               # Architecture Decision Records — the "why" log (record as we go)
 ```
 
 ## Read next
 
 1. `docs/ARCHITECTURE.md` — the system design every agent builds against.
 2. `docs/PLAN.md` — workstreams, dependencies, agent assignments, acceptance criteria.
+3. `docs/adr/` — why each load-bearing decision was made. **New decisions get a new ADR in the same PR**;
+   accepted ADRs are immutable and superseded rather than edited (`docs/adr/README.md` has the process).
