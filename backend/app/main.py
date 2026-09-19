@@ -6,11 +6,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.api import auth, health
+from app.api import accounts, auth, categories, fx, health, reports, transactions
 from app.logging import configure_logging, get_logger
+from app.services.auth import AuthError
+from app.services.ledger import LedgerError
 from app.settings import get_settings
 
 log = get_logger("app")
@@ -56,8 +59,21 @@ def create_app() -> FastAPI:
 
     app.add_middleware(NoStoreForDataMiddleware)
 
+    @app.exception_handler(LedgerError)
+    async def _ledger_error(_request: Request, exc: LedgerError):
+        return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
+    @app.exception_handler(AuthError)
+    async def _auth_error(_request: Request, exc: AuthError):
+        return JSONResponse(status_code=exc.status, content={"detail": exc.message})
+
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(accounts.router)
+    app.include_router(categories.router)
+    app.include_router(transactions.router)
+    app.include_router(fx.router)
+    app.include_router(reports.router)
     return app
 
 

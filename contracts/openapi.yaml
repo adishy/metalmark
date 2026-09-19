@@ -1,0 +1,2122 @@
+openapi: 3.1.0
+info:
+  title: Kestrel API
+  description: Self-hosted personal finance (Monarch-style). LAN/VPN only.
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      tags:
+      - health
+      summary: Healthz
+      description: Liveness + DB reachability.
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Healthz Healthz Get
+  /auth/signup:
+    post:
+      tags:
+      - auth
+      summary: Signup
+      operationId: signup_auth_signup_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      operationId: login_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Logout
+      operationId: logout_auth_logout_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/me:
+    get:
+      tags:
+      - auth
+      summary: Me
+      operationId: me_auth_me_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/invites:
+    post:
+      tags:
+      - auth
+      summary: Create Invite
+      operationId: create_invite_auth_invites_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteCreateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InviteResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts:
+    post:
+      tags:
+      - accounts
+      summary: Create Account
+      operationId: create_account_accounts_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - accounts
+      summary: List Accounts
+      operationId: list_accounts_accounts_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountOut'
+                title: Response List Accounts Accounts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/net-worth:
+    get:
+      tags:
+      - accounts
+      summary: Net Worth
+      operationId: net_worth_accounts_net_worth_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetWorthOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}:
+    get:
+      tags:
+      - accounts
+      summary: Get Account
+      operationId: get_account_accounts__account_id__get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - accounts
+      summary: Update Account
+      operationId: update_account_accounts__account_id__patch
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - accounts
+      summary: Delete Account
+      operationId: delete_account_accounts__account_id__delete
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /category-groups:
+    get:
+      tags:
+      - categories
+      summary: List Groups
+      operationId: list_groups_category_groups_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryGroupOut'
+                title: Response List Groups Category Groups Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - categories
+      summary: Create Group
+      operationId: create_group_category_groups_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryGroupCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryGroupOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /categories:
+    get:
+      tags:
+      - categories
+      summary: List Categories
+      operationId: list_categories_categories_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CategoryOut'
+                title: Response List Categories Categories Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - categories
+      summary: Create Category
+      operationId: create_category_categories_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tags:
+    get:
+      tags:
+      - categories
+      summary: List Tags
+      operationId: list_tags_tags_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TagOut'
+                title: Response List Tags Tags Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - categories
+      summary: Create Tag
+      operationId: create_tag_tags_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /transactions:
+    post:
+      tags:
+      - transactions
+      summary: Create Transaction
+      operationId: create_transaction_transactions_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - transactions
+      summary: List Transactions
+      operationId: list_transactions_transactions_get
+      parameters:
+      - name: account_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+              format: uuid
+          - type: 'null'
+          title: Account Id
+      - name: category_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+              format: uuid
+          - type: 'null'
+          title: Category Id
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start
+      - name: end
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End
+      - name: review_status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Review Status
+      - name: search
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search
+      - name: include_hidden
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Hidden
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          default: 50
+          title: Limit
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cursor
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /transactions/{txn_id}:
+    get:
+      tags:
+      - transactions
+      summary: Get Transaction
+      operationId: get_transaction_transactions__txn_id__get
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - transactions
+      summary: Update Transaction
+      operationId: update_transaction_transactions__txn_id__patch
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - transactions
+      summary: Delete Transaction
+      operationId: delete_transaction_transactions__txn_id__delete
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /transactions/{txn_id}/splits:
+    put:
+      tags:
+      - transactions
+      summary: Replace Splits
+      operationId: replace_splits_transactions__txn_id__splits_put
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SplitIn'
+              title: Splits
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /transactions/transfers:
+    post:
+      tags:
+      - transactions
+      summary: Link Transfer
+      operationId: link_transfer_transactions_transfers_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferLink'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /fx-rates:
+    get:
+      tags:
+      - fx
+      summary: List Rates
+      operationId: list_rates_fx_rates_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FxRateOut'
+                title: Response List Rates Fx Rates Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - fx
+      summary: Upsert Rate
+      operationId: upsert_rate_fx_rates_post
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FxRateUpsert'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxRateOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/net-worth:
+    get:
+      tags:
+      - reports
+      summary: Net Worth Series
+      operationId: net_worth_series_reports_net_worth_get
+      parameters:
+      - name: start
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: Start
+      - name: end
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: End
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetWorthSeries'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/cash-flow:
+    get:
+      tags:
+      - reports
+      summary: Cash Flow
+      operationId: cash_flow_reports_cash_flow_get
+      parameters:
+      - name: start
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: Start
+      - name: end
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: End
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CashFlowPoint'
+                title: Response Cash Flow Reports Cash Flow Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /reports/spending:
+    get:
+      tags:
+      - reports
+      summary: Spending
+      operationId: spending_reports_spending_get
+      parameters:
+      - name: start
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: Start
+      - name: end
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+          title: End
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpendingReport'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AccountCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        type:
+          type: string
+          pattern: ^(depository|credit|investment|loan|other)$
+          title: Type
+        currency:
+          type: string
+          maxLength: 3
+          minLength: 3
+          title: Currency
+        subtype:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subtype
+        institution:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Institution
+        current_balance:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Current Balance
+          default: '0'
+        balance_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Balance Date
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
+      type: object
+      required:
+      - name
+      - type
+      - currency
+      title: AccountCreate
+    AccountOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        type:
+          type: string
+          title: Type
+        currency:
+          type: string
+          title: Currency
+        subtype:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subtype
+        institution:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Institution
+        current_balance:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Current Balance
+        balance_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Balance Date
+        is_asset:
+          type: boolean
+          title: Is Asset
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
+        is_manual:
+          type: boolean
+          title: Is Manual
+        is_hidden:
+          type: boolean
+          title: Is Hidden
+      type: object
+      required:
+      - id
+      - name
+      - type
+      - currency
+      - subtype
+      - institution
+      - current_balance
+      - balance_date
+      - is_asset
+      - owner_user_id
+      - is_manual
+      - is_hidden
+      title: AccountOut
+    AccountUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        subtype:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Subtype
+        institution:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Institution
+        current_balance:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Current Balance
+        balance_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Balance Date
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
+        is_hidden:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Hidden
+      type: object
+      title: AccountUpdate
+    CashFlowPoint:
+      properties:
+        month:
+          type: string
+          title: Month
+        income:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Income
+        expense:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Expense
+        net:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net
+      type: object
+      required:
+      - month
+      - income
+      - expense
+      - net
+      title: CashFlowPoint
+    CategoryCreate:
+      properties:
+        group_id:
+          type: string
+          format: uuid
+          title: Group Id
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        icon:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Icon
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+        sort:
+          type: integer
+          title: Sort
+          default: 0
+      type: object
+      required:
+      - group_id
+      - name
+      title: CategoryCreate
+    CategoryGroupCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        type:
+          type: string
+          pattern: ^(income|expense|transfer)$
+          title: Type
+        sort:
+          type: integer
+          title: Sort
+          default: 0
+      type: object
+      required:
+      - name
+      - type
+      title: CategoryGroupCreate
+    CategoryGroupOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        type:
+          type: string
+          title: Type
+        sort:
+          type: integer
+          title: Sort
+      type: object
+      required:
+      - id
+      - name
+      - type
+      - sort
+      title: CategoryGroupOut
+    CategoryOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        group_id:
+          type: string
+          format: uuid
+          title: Group Id
+        name:
+          type: string
+          title: Name
+        icon:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Icon
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+        sort:
+          type: integer
+          title: Sort
+      type: object
+      required:
+      - id
+      - group_id
+      - name
+      - icon
+      - color
+      - sort
+      title: CategoryOut
+    CategorySpendRow:
+      properties:
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        category_name:
+          type: string
+          title: Category Name
+        total:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total
+      type: object
+      required:
+      - category_id
+      - category_name
+      - total
+      title: CategorySpendRow
+    FxRateOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        base_currency:
+          type: string
+          title: Base Currency
+        quote_currency:
+          type: string
+          title: Quote Currency
+        rate_date:
+          type: string
+          format: date
+          title: Rate Date
+        rate:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Rate
+        source:
+          type: string
+          title: Source
+      type: object
+      required:
+      - id
+      - base_currency
+      - quote_currency
+      - rate_date
+      - rate
+      - source
+      title: FxRateOut
+    FxRateUpsert:
+      properties:
+        base_currency:
+          type: string
+          maxLength: 3
+          minLength: 3
+          title: Base Currency
+        quote_currency:
+          type: string
+          maxLength: 3
+          minLength: 3
+          title: Quote Currency
+        rate_date:
+          type: string
+          format: date
+          title: Rate Date
+        rate:
+          anyOf:
+          - type: number
+            exclusiveMinimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Rate
+      type: object
+      required:
+      - base_currency
+      - quote_currency
+      - rate_date
+      - rate
+      title: FxRateUpsert
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InviteCreateRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        role:
+          type: string
+          pattern: ^(owner|member)$
+          title: Role
+          default: member
+      type: object
+      required:
+      - email
+      title: InviteCreateRequest
+    InviteResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          format: email
+          title: Email
+        role:
+          type: string
+          title: Role
+        token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Token
+      type: object
+      required:
+      - id
+      - email
+      - role
+      title: InviteResponse
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        password:
+          type: string
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: LoginRequest
+    MeResponse:
+      properties:
+        user:
+          $ref: '#/components/schemas/UserResponse'
+        household_id:
+          type: string
+          format: uuid
+          title: Household Id
+        household_name:
+          type: string
+          title: Household Name
+        base_currency:
+          type: string
+          title: Base Currency
+        role:
+          type: string
+          title: Role
+        csrf_token:
+          type: string
+          title: Csrf Token
+      type: object
+      required:
+      - user
+      - household_id
+      - household_name
+      - base_currency
+      - role
+      - csrf_token
+      title: MeResponse
+    NetWorthOut:
+      properties:
+        base_currency:
+          type: string
+          title: Base Currency
+        assets:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Assets
+        liabilities:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Liabilities
+        net_worth:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net Worth
+        unconverted_currencies:
+          items:
+            type: string
+          type: array
+          title: Unconverted Currencies
+          default: []
+      type: object
+      required:
+      - base_currency
+      - assets
+      - liabilities
+      - net_worth
+      title: NetWorthOut
+    NetWorthPoint:
+      properties:
+        date:
+          type: string
+          format: date
+          title: Date
+        net_worth:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net Worth
+      type: object
+      required:
+      - date
+      - net_worth
+      title: NetWorthPoint
+    NetWorthSeries:
+      properties:
+        base_currency:
+          type: string
+          title: Base Currency
+        points:
+          items:
+            $ref: '#/components/schemas/NetWorthPoint'
+          type: array
+          title: Points
+        delta_net_worth:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Delta Net Worth
+        net_cash_flow:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net Cash Flow
+        currency_revaluation:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Currency Revaluation
+      type: object
+      required:
+      - base_currency
+      - points
+      - delta_net_worth
+      - net_cash_flow
+      - currency_revaluation
+      title: NetWorthSeries
+    SignupRequest:
+      properties:
+        invite_token:
+          type: string
+          title: Invite Token
+        email:
+          type: string
+          format: email
+          title: Email
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        password:
+          type: string
+          maxLength: 256
+          minLength: 8
+          title: Password
+      type: object
+      required:
+      - invite_token
+      - email
+      - display_name
+      - password
+      title: SignupRequest
+    SpendingReport:
+      properties:
+        base_currency:
+          type: string
+          title: Base Currency
+        rows:
+          items:
+            $ref: '#/components/schemas/CategorySpendRow'
+          type: array
+          title: Rows
+        total:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total
+      type: object
+      required:
+      - base_currency
+      - rows
+      - total
+      title: SpendingReport
+    SplitIn:
+      properties:
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        pct:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Pct
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+      type: object
+      title: SplitIn
+    SplitOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        base_amount:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Base Amount
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+      type: object
+      required:
+      - id
+      - amount
+      - base_amount
+      - category_id
+      - owner_user_id
+      - notes
+      title: SplitOut
+    TagCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Name
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+      type: object
+      required:
+      - name
+      title: TagCreate
+    TagOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+      type: object
+      required:
+      - id
+      - name
+      - color
+      title: TagOut
+    TransactionCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        transacted_at:
+          type: string
+          format: date-time
+          title: Transacted At
+        posted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Posted At
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        merchant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Merchant
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        is_pending:
+          type: boolean
+          title: Is Pending
+          default: false
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        tag_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Tag Ids
+          default: []
+      type: object
+      required:
+      - account_id
+      - amount
+      - transacted_at
+      title: TransactionCreate
+    TransactionOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+        base_amount:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Base Amount
+        fx_rate_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Fx Rate Date
+        transacted_at:
+          type: string
+          format: date-time
+          title: Transacted At
+        posted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Posted At
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        merchant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Merchant
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        is_pending:
+          type: boolean
+          title: Is Pending
+        review_status:
+          type: string
+          title: Review Status
+        is_hidden:
+          type: boolean
+          title: Is Hidden
+        is_split_parent:
+          type: boolean
+          title: Is Split Parent
+        transfer_group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transfer Group Id
+        field_sources:
+          additionalProperties: true
+          type: object
+          title: Field Sources
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        source:
+          type: string
+          title: Source
+        tag_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Tag Ids
+          default: []
+        splits:
+          items:
+            $ref: '#/components/schemas/SplitOut'
+          type: array
+          title: Splits
+          default: []
+      type: object
+      required:
+      - id
+      - account_id
+      - amount
+      - currency
+      - base_amount
+      - fx_rate_date
+      - transacted_at
+      - posted_at
+      - description
+      - merchant
+      - category_id
+      - is_pending
+      - review_status
+      - is_hidden
+      - is_split_parent
+      - transfer_group_id
+      - field_sources
+      - notes
+      - source
+      title: TransactionOut
+    TransactionPage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TransactionOut'
+          type: array
+          title: Items
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+      type: object
+      required:
+      - items
+      title: TransactionPage
+    TransactionUpdate:
+      properties:
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        transacted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Transacted At
+        posted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Posted At
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        merchant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Merchant
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        is_pending:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Pending
+        is_hidden:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Hidden
+        review_status:
+          anyOf:
+          - type: string
+            pattern: ^(needs_review|reviewed|ignored)$
+          - type: 'null'
+          title: Review Status
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        tag_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Tag Ids
+      type: object
+      title: TransactionUpdate
+    TransferLink:
+      properties:
+        from_txn_id:
+          type: string
+          format: uuid
+          title: From Txn Id
+        to_txn_id:
+          type: string
+          format: uuid
+          title: To Txn Id
+      type: object
+      required:
+      - from_txn_id
+      - to_txn_id
+      title: TransferLink
+      description: Manually link two existing transactions as a transfer (ADR-0008/0018).
+    TransferOut:
+      properties:
+        transfer_group_id:
+          type: string
+          format: uuid
+          title: Transfer Group Id
+        matched_by:
+          type: string
+          title: Matched By
+        fx_cost_base:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Fx Cost Base
+        txn_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Txn Ids
+      type: object
+      required:
+      - transfer_group_id
+      - matched_by
+      - fx_cost_base
+      - txn_ids
+      title: TransferOut
+    UserResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email:
+          type: string
+          format: email
+          title: Email
+        display_name:
+          type: string
+          title: Display Name
+        is_admin:
+          type: boolean
+          title: Is Admin
+      type: object
+      required:
+      - id
+      - email
+      - display_name
+      - is_admin
+      title: UserResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
