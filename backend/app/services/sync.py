@@ -1252,7 +1252,15 @@ async def _close_run(
     if account_set is not None and account_set.stats is not None:
         run.http_ms = account_set.stats.http_ms
         run.bytes_fetched = account_set.stats.bytes_fetched
+        # The whole of ``FetchStats``, not two thirds of it. Leaving the status out
+        # is invisible in a passing suite — the panel renders the chip only when the
+        # column is set (`Admin.tsx`), so a missing 200 reads as "nothing to say"
+        # rather than as a gap — and it is the one number that distinguishes a
+        # healthy fetch from a fetch that never happened.
+        run.http_status = account_set.stats.http_status
     if http_status is not None:
+        # The explicit argument wins: it is the *failure* status, passed by a caller
+        # that has no ``AccountSet`` to read one from.
         run.http_status = http_status
 
 

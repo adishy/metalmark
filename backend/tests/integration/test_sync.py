@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -39,7 +40,7 @@ from app.schemas.transactions import TransactionCreate, TransactionUpdate
 from app.security.crypto import SecretBox
 from app.services import rules, sync
 from app.services import transactions as txns
-from app.services.aggregator import ProviderError, ProviderTransaction
+from app.services.aggregator import FetchStats, ProviderError, ProviderTransaction
 from app.services.fake_simplefin import FAKE_ACCESS_URL, FakeProvider
 from app.settings import get_settings
 from tests.fakes import simplefin as scenarios
@@ -814,6 +815,30 @@ async def test_a_transient_failure_leaves_the_connection_health_alone(hh) -> Non
             "window.computed",
             "run.failed",
         ]
+
+
+async def test_a_successful_run_records_the_fetch_telemetry(hh) -> None:
+    """All three numbers the provider reported, not the two that are easy to see.
+
+    ``http_status`` is the one that goes missing without anything failing: the
+    panel renders its chip only when the column is set, so a NULL reads as "this
+    run has nothing to say" — which is exactly how a healthy run's 200 was
+    silently dropped while ``http_ms`` and ``bytes_fetched`` arrived. The fake
+    reports no stats (it makes no request), so this scripts them onto the set it
+    serves; the real provider fills them from the response it read.
+    """
+    connection_id = await _make_connection(hh)
+    captured = scenarios.scenario(scenarios.demo())
+    provider = FakeProvider(script=[
+        replace(captured[0], stats=FetchStats(http_ms=182, http_status=200, bytes_fetched=4096))
+    ])
+
+    outcome = await _sync(hh, connection_id, provider)
+
+    assert outcome.status == "ok"
+    async with scoped_session(hh) as session:
+        run = await _run_row(session, outcome.run_id)
+        assert (run.http_ms, run.http_status, run.bytes_fetched) == (182, 200, 4096)
 
 
 async def test_a_recovered_connection_clears_its_previous_error(hh) -> None:
