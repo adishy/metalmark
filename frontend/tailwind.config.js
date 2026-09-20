@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Kestrel palette (slate base, teal accent)
+        // MetalMark palette (slate base, teal accent)
         brand: {
           DEFAULT: "#14b8a6",
           fg: "#0f766e",

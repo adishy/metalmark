@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   # --------------------------------------------------------------------------
-  # Backend: lint + pytest against a real Postgres (tests recreate kestrel_test)
+  # Backend: lint + pytest against a real Postgres (tests recreate metalmark_test)
   # --------------------------------------------------------------------------
   backend:
     runs-on: ubuntu-latest
@@ -20,23 +20,23 @@ jobs:
         image: postgres:16
         env:
           # Owner role must be a superuser so tests/conftest.py can CREATE DATABASE.
-          POSTGRES_USER: kestrel
-          POSTGRES_PASSWORD: kestrel_ci_password
-          POSTGRES_DB: kestrel
+          POSTGRES_USER: metalmark
+          POSTGRES_PASSWORD: metalmark_ci_password
+          POSTGRES_DB: metalmark
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U kestrel -d kestrel"
+          --health-cmd "pg_isready -U metalmark -d metalmark"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      KESTREL_TEST_PG_HOST: localhost
-      KESTREL_TEST_PG_PORT: "5432"
-      POSTGRES_USER: kestrel
-      POSTGRES_PASSWORD: kestrel_ci_password
-      POSTGRES_DB: kestrel
-      KESTREL_SECRET_KEY: ci-secret
+      METALMARK_TEST_PG_HOST: localhost
+      METALMARK_TEST_PG_PORT: "5432"
+      POSTGRES_USER: metalmark
+      POSTGRES_PASSWORD: metalmark_ci_password
+      POSTGRES_DB: metalmark
+      METALMARK_SECRET_KEY: ci-secret
     steps:
       - uses: actions/checkout@v4
 
@@ -93,14 +93,14 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     env:
-      COMPOSE_PROJECT_NAME: kestrel
+      COMPOSE_PROJECT_NAME: metalmark
     steps:
       - uses: actions/checkout@v4
 
       - name: Create runtime secret (Fernet key)
         run: |
           mkdir -p secrets
-          openssl rand -base64 32 | tr '+/' '-_' > secrets/kestrel_secret_key
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/metalmark_secret_key
 
       - name: Start API + DB
         run: docker compose up -d --build db api
@@ -146,14 +146,14 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     env:
-      COMPOSE_PROJECT_NAME: kestrel
+      COMPOSE_PROJECT_NAME: metalmark
     steps:
       - uses: actions/checkout@v4
 
       - name: Create runtime secret (Fernet key)
         run: |
           mkdir -p secrets
-          openssl rand -base64 32 | tr '+/' '-_' > secrets/kestrel_secret_key
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/metalmark_secret_key
 
       - name: Start full stack
         run: docker compose up -d --build
@@ -174,9 +174,9 @@ jobs:
       - name: Seed demo data (idempotent)
         run: >-
           docker compose run --rm
-          -e KESTREL_SEED_EMAIL=owner@example.com
-          -e KESTREL_SEED_PASSWORD=devpassword123
-          -e KESTREL_SEED_HOUSEHOLD=Home
+          -e METALMARK_SEED_EMAIL=owner@example.com
+          -e METALMARK_SEED_PASSWORD=devpassword123
+          -e METALMARK_SEED_HOUSEHOLD=Home
           api python -m app.seed --demo
 
       - name: Run Playwright (against the compose stack)

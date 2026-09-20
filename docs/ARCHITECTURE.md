@@ -1,4 +1,4 @@
-# Kestrel — Architecture
+# MetalMark — Architecture
 
 This is the contract every workstream builds against. The two hard seams that let agents work in
 parallel are **(1) the database schema** and **(2) the OpenAPI spec**. Change them only via a PR
@@ -318,7 +318,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 ## 5. Security & ops
 
 - **Secrets at rest**: `access_url_encrypted` uses authenticated symmetric encryption (libsodium secretbox /
-  Fernet) with `KESTREL_SECRET_KEY` loaded from a **docker secret file, not an env var** (env leaks via
+  Fernet) with `METALMARK_SECRET_KEY` loaded from a **docker secret file, not an env var** (env leaks via
   `docker inspect`, crash dumps, child processes). Document rotation + re-claim path if the key is lost.
 - **Authorization / tenant isolation (biggest ongoing risk)**: hand-written `household_id` filters on every
   endpoint are the classic source of cross-tenant (IDOR) leaks — one missed `.filter()` exposes another
@@ -338,7 +338,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 - **PWA**: cache the app *shell* only; data endpoints are `no-store` — the service worker must never persist
   financial API responses on a (possibly shared) device.
 - **Backups**: nightly `pg_dump` — which is cleartext PII — is **encrypted at the destination**, with a
-  defined retention. Store the backup encryption key / `KESTREL_SECRET_KEY` **physically separate** from the
+  defined retention. Store the backup encryption key / `METALMARK_SECRET_KEY` **physically separate** from the
   dumps (a dump + co-located key = full compromise). Documented restore drill.
 - **Failure alerting**: with no webhooks and 6h polling, an `auth_error` or a failed backup can silently rot
   data for days. Fire a notification (email/ntfy/Slack webhook) on `auth_error`, repeated sync failure, or

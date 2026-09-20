@@ -1,4 +1,4 @@
-# Kestrel — Multi-Agent Execution Plan
+# MetalMark — Multi-Agent Execution Plan
 
 How to build this with several agents working in parallel without stepping on each other.
 
@@ -47,7 +47,7 @@ single-threaded critical path, so it holds only what parallel work genuinely nee
 - **Auth + tenancy**: users, households, members, invites, **server-side sessions**; argon2id; httpOnly cookie
   + CSRF; invite-only signup; the **mandatory scoping layer / RLS** (tenant isolation lives here, not in each
   handler); `require_household` dependency.
-- Encryption helper (`KESTREL_SECRET_KEY` from docker secret) for connection URLs.
+- Encryption helper (`METALMARK_SECRET_KEY` from docker secret) for connection URLs.
 - **`contracts/openapi.yaml` v0** covering auth + resource stubs **and the shared transaction filter/query +
   `/reports` query contract** (consumed by UT/UR/UH — pin it here so they don't thrash when L evolves).
   Generated TS client + MSW handlers + schemathesis contract check in CI.

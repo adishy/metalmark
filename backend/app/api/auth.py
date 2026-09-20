@@ -87,12 +87,12 @@ async def login(req: LoginRequest, response: Response) -> MeResponse:
 
 @router.post("/logout", status_code=204)
 async def logout(
-    kestrel_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    metalmark_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> Response:
     # Revoke the server-side session (logout is real, not just cookie clearing).
-    if kestrel_session:
+    if metalmark_session:
         async with unscoped_session() as session:
-            await svc.logout(session, kestrel_session)
+            await svc.logout(session, metalmark_session)
     response = Response(status_code=204)
     response.delete_cookie(SESSION_COOKIE, path="/")
     return response

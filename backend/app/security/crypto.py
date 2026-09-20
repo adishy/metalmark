@@ -1,7 +1,7 @@
 """Authenticated symmetric encryption for secrets at rest (ARCHITECTURE §5).
 
 Used for SimpleFIN ``access_url`` (a Basic-auth URL that must never be logged
-or returned). Key is derived from ``KESTREL_SECRET_KEY`` (a docker secret).
+or returned). Key is derived from ``METALMARK_SECRET_KEY`` (a docker secret).
 
 We use Fernet (AES-128-CBC + HMAC-SHA256) from ``cryptography``. The secret
 file holds a urlsafe-base64 32-byte key; if it isn't already a valid Fernet

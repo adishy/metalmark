@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 We record every architecturally significant decision as an ADR (Michael Nygard format). This is the
-authoritative log of *why* Kestrel is built the way it is — agents and humans read it before changing a
+authoritative log of *why* MetalMark is built the way it is — agents and humans read it before changing a
 load-bearing choice.
 
 ## Rules
@@ -19,6 +19,13 @@ load-bearing choice.
   the relevant `ARCHITECTURE.md` section. Copy `0000-template.md` to start.
 - **Process:** a new ADR lands in the same PR as the change it justifies (or ahead of it as `Proposed`).
   Changing an `Accepted` decision without a superseding ADR is a review-blocking error.
+
+## A note on the old codename
+
+ADRs ≤0025 (and everything under `agent_record/`) describe the app by its original working codename,
+**Kestrel**. It was renamed to **MetalMark** — code, infra, env vars, cookie, database and docs — in one
+behavior-neutral commit; these accepted records were deliberately left as written, per the immutability
+rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_KEY`, and so on.
 
 ## Index
 

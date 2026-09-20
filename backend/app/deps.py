@@ -18,7 +18,7 @@ from app.db import get_sessionmaker
 from app.models import User
 from app.services import auth as auth_service
 
-SESSION_COOKIE = "kestrel_session"
+SESSION_COOKIE = "metalmark_session"
 CSRF_HEADER = "X-CSRF-Token"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -34,18 +34,18 @@ class RequestContext:
 
 async def get_context(
     request: Request,
-    kestrel_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    metalmark_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ):
     """Yield an authenticated, tenant-scoped context for a request.
 
     Raises 401 if unauthenticated, 403 if the user has no household yet.
     """
-    if not kestrel_session:
+    if not metalmark_session:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     sm = get_sessionmaker()
     async with sm() as session, session.begin():
-        resolved = await auth_service.resolve_session(session, kestrel_session)
+        resolved = await auth_service.resolve_session(session, metalmark_session)
         if resolved is None:
             raise HTTPException(status_code=401, detail="Invalid or expired session")
         sess, user = resolved

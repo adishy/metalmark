@@ -1,6 +1,6 @@
-# Kestrel — Self-Hosted Monarch Money
+# MetalMark — Self-Hosted Monarch Money
 
-> Working codename: **Kestrel** (Monarch is a butterfly; a kestrel is a small, fast, self-reliant bird). Rename freely.
+> Named for the butterfly family, like the app it replaces — **MetalMark**, self-hosted.
 
 A self-hostable personal-finance app for a small household (a few users, some with joined
 finances). Feature target: **Monarch Money's core** — auto-syncing accounts, a bulletproof
@@ -28,24 +28,24 @@ Requires Docker + Docker Compose. Everything runs in containers; nothing is expo
 
 ```bash
 cp .env.example .env                     # dev defaults are fine
-# a dev secret key already lives at secrets/kestrel_secret_key (gitignored)
+# a dev secret key already lives at secrets/metalmark_secret_key (gitignored)
 
 docker compose up -d --build             # db + api + worker + web
 docker compose run --rm api alembic upgrade head          # create schema + app role + RLS
 docker compose run --rm \
-  -e KESTREL_SEED_EMAIL=owner@example.com \
-  -e KESTREL_SEED_PASSWORD=devpassword123 \
-  -e KESTREL_SEED_HOUSEHOLD=Home \
+  -e METALMARK_SEED_EMAIL=owner@example.com \
+  -e METALMARK_SEED_PASSWORD=devpassword123 \
+  -e METALMARK_SEED_HOUSEHOLD=Home \
   api python -m app.seed --demo          # first household + owner + default categories
 ```
 
 Then open **http://localhost:5173** and sign in with `owner@example.com` / `devpassword123`.
 The API is at http://localhost:8000 (`/healthz`, `/docs`). The Vite dev server proxies `/api` → the API.
 
-Run the backend test suite (real Postgres via the `db` service, isolated `kestrel_test` DB):
+Run the backend test suite (real Postgres via the `db` service, isolated `metalmark_test` DB):
 
 ```bash
-docker compose run --rm -e KESTREL_TEST_PG_HOST=db -e KESTREL_SECRET_KEY=test-secret api pytest -q
+docker compose run --rm -e METALMARK_TEST_PG_HOST=db -e METALMARK_SECRET_KEY=test-secret api pytest -q
 ```
 
 Python dependencies are managed with **uv** (`backend/uv.lock`); the image installs from the lock.
@@ -70,7 +70,7 @@ Python dependencies are managed with **uv** (`backend/uv.lock`); the image insta
 ## Repository layout (target)
 
 ```
-kestrel/
+metalmark/
   docker-compose.yml
   Caddyfile
   backend/            # FastAPI app, SQLAlchemy models, Alembic migrations, worker

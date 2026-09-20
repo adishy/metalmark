@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Kestrel API
+  title: MetalMark API
   description: Self-hosted personal finance (Monarch-style). LAN/VPN only.
   version: 0.1.0
 paths:
@@ -77,14 +77,14 @@ paths:
       summary: Logout
       operationId: logout_auth_logout_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -101,14 +101,14 @@ paths:
       summary: Me
       operationId: me_auth_me_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -129,14 +129,14 @@ paths:
       summary: Create Invite
       operationId: create_invite_auth_invites_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -163,14 +163,14 @@ paths:
       summary: Create Account
       operationId: create_account_accounts_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -196,14 +196,14 @@ paths:
       summary: List Accounts
       operationId: list_accounts_accounts_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -227,14 +227,14 @@ paths:
       summary: Net Worth
       operationId: net_worth_accounts_net_worth_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -262,14 +262,14 @@ paths:
           type: string
           format: uuid
           title: Account Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -296,14 +296,14 @@ paths:
           type: string
           format: uuid
           title: Account Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -336,14 +336,14 @@ paths:
           type: string
           format: uuid
           title: Account Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -360,14 +360,14 @@ paths:
       summary: List Groups
       operationId: list_groups_category_groups_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -390,14 +390,14 @@ paths:
       summary: Create Group
       operationId: create_group_category_groups_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -424,14 +424,14 @@ paths:
       summary: List Categories
       operationId: list_categories_categories_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -454,14 +454,14 @@ paths:
       summary: Create Category
       operationId: create_category_categories_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -488,14 +488,14 @@ paths:
       summary: List Tags
       operationId: list_tags_tags_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -518,14 +518,14 @@ paths:
       summary: Create Tag
       operationId: create_tag_tags_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -559,14 +559,14 @@ paths:
           type: string
           format: uuid
           title: Category Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -590,14 +590,14 @@ paths:
           type: string
           format: uuid
           title: Group Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -621,14 +621,14 @@ paths:
           type: string
           format: uuid
           title: Tag Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -645,14 +645,14 @@ paths:
       summary: Create Transaction
       operationId: create_transaction_transactions_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -757,14 +757,14 @@ paths:
           - type: string
           - type: 'null'
           title: Cursor
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -792,14 +792,14 @@ paths:
           type: string
           format: uuid
           title: Txn Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -826,14 +826,14 @@ paths:
           type: string
           format: uuid
           title: Txn Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -866,14 +866,14 @@ paths:
           type: string
           format: uuid
           title: Txn Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '204':
           description: Successful Response
@@ -897,14 +897,14 @@ paths:
           type: string
           format: uuid
           title: Txn Id
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -934,14 +934,14 @@ paths:
       summary: Link Transfer
       operationId: link_transfer_transactions_transfers_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -968,14 +968,14 @@ paths:
       summary: List Rates
       operationId: list_rates_fx_rates_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -998,14 +998,14 @@ paths:
       summary: Upsert Rate
       operationId: upsert_rate_fx_rates_post
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       requestBody:
         required: true
         content:
@@ -1046,14 +1046,14 @@ paths:
           type: string
           format: date
           title: End
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -1088,14 +1088,14 @@ paths:
           type: string
           format: date
           title: End
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -1133,14 +1133,14 @@ paths:
           type: string
           format: date
           title: End
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -1161,14 +1161,14 @@ paths:
       summary: Get Household
       operationId: get_household_household_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response
@@ -1189,14 +1189,14 @@ paths:
       summary: List Members
       operationId: list_members_household_members_get
       parameters:
-      - name: kestrel_session
+      - name: metalmark_session
         in: cookie
         required: false
         schema:
           anyOf:
           - type: string
           - type: 'null'
-          title: Kestrel Session
+          title: MetalMark Session
       responses:
         '200':
           description: Successful Response

@@ -1,18 +1,23 @@
-# Kestrel — local dev stack. Container-first (ADR/goal): everything runs here.
+# MetalMark — local dev stack. Container-first (ADR/goal): everything runs here.
 # Reachable only on the local host in dev; production sits behind Caddy + Tailscale.
+#
+# The project name is pinned so the compose network (metalmark_default) and the
+# playbook that joins it do not depend on the checkout's directory name.
+name: metalmark
+
 services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-kestrel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kestrel_dev_only_change_me}
-      POSTGRES_DB: ${POSTGRES_DB:-kestrel}
+      POSTGRES_USER: ${POSTGRES_USER:-metalmark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metalmark_dev_only_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-metalmark}
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5432:5432"   # localhost only
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kestrel} -d ${POSTGRES_DB:-kestrel}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-metalmark} -d ${POSTGRES_DB:-metalmark}"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -22,19 +27,19 @@ services:
       context: ./backend
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     environment:
-      KESTREL_ENV: ${KESTREL_ENV:-dev}
-      KESTREL_LOG_LEVEL: ${KESTREL_LOG_LEVEL:-INFO}
+      METALMARK_ENV: ${METALMARK_ENV:-dev}
+      METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-kestrel}
-      POSTGRES_USER: ${POSTGRES_USER:-kestrel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kestrel_dev_only_change_me}
-      APP_DB_USER: ${APP_DB_USER:-kestrel_app}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-kestrel_app_dev_only_change_me}
-      KESTREL_DEFAULT_BASE_CURRENCY: ${KESTREL_DEFAULT_BASE_CURRENCY:-USD}
-      KESTREL_SECRET_KEY_FILE: /run/secrets/kestrel_secret_key
+      POSTGRES_DB: ${POSTGRES_DB:-metalmark}
+      POSTGRES_USER: ${POSTGRES_USER:-metalmark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metalmark_dev_only_change_me}
+      APP_DB_USER: ${APP_DB_USER:-metalmark_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-metalmark_app_dev_only_change_me}
+      METALMARK_DEFAULT_BASE_CURRENCY: ${METALMARK_DEFAULT_BASE_CURRENCY:-USD}
+      METALMARK_SECRET_KEY_FILE: /run/secrets/metalmark_secret_key
     secrets:
-      - kestrel_secret_key
+      - metalmark_secret_key
     volumes:
       - ./backend:/app        # live reload in dev
     depends_on:
@@ -52,18 +57,18 @@ services:
     healthcheck:
       disable: true
     environment:
-      KESTREL_ENV: ${KESTREL_ENV:-dev}
-      KESTREL_LOG_LEVEL: ${KESTREL_LOG_LEVEL:-INFO}
+      METALMARK_ENV: ${METALMARK_ENV:-dev}
+      METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-kestrel}
-      POSTGRES_USER: ${POSTGRES_USER:-kestrel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kestrel_dev_only_change_me}
-      APP_DB_USER: ${APP_DB_USER:-kestrel_app}
-      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-kestrel_app_dev_only_change_me}
-      KESTREL_SECRET_KEY_FILE: /run/secrets/kestrel_secret_key
+      POSTGRES_DB: ${POSTGRES_DB:-metalmark}
+      POSTGRES_USER: ${POSTGRES_USER:-metalmark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-metalmark_dev_only_change_me}
+      APP_DB_USER: ${APP_DB_USER:-metalmark_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-metalmark_app_dev_only_change_me}
+      METALMARK_SECRET_KEY_FILE: /run/secrets/metalmark_secret_key
     secrets:
-      - kestrel_secret_key
+      - metalmark_secret_key
     volumes:
       - ./backend:/app
     depends_on:
@@ -82,8 +87,8 @@ services:
       - /app/node_modules   # keep container's installed deps
 
 secrets:
-  kestrel_secret_key:
-    file: ./secrets/kestrel_secret_key
+  metalmark_secret_key:
+    file: ./secrets/metalmark_secret_key
 
 volumes:
   db_data:

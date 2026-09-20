@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="Kestrel API",
+        title="MetalMark API",
         version="0.1.0",
         description="Self-hosted personal finance (Monarch-style). LAN/VPN only.",
         lifespan=lifespan,

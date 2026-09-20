@@ -1,11 +1,11 @@
-# Kestrel frontend — end-to-end & visual tests
+# MetalMark frontend — end-to-end & visual tests
 
 Playwright drives a Chromium browser against the **already-running** compose
 stack (`docker compose up -d`). The config does **not** start a `webServer`.
 
 - Base URL: `http://localhost:5173` by default; override with `E2E_BASE_URL`
   (e.g. `http://web:5173` when running from another container on the compose
-  network `monarch_clone_default`).
+  network `metalmark_default`).
 - Login: `owner@example.com` / `devpassword123` (override with `E2E_EMAIL` /
   `E2E_PASSWORD`). Re-seed if the DB was reset — see the repo root instructions.
 
@@ -27,7 +27,7 @@ long-lived compose database never causes flake. Run serially (`workers: 1`).
 over the compose network instead:
 
 ```bash
-docker run --rm --network monarch_clone_default \
+docker run --rm --network metalmark_default \
   -e E2E_BASE_URL=http://web:5173 \
   -v "$PWD/frontend":/work -w /work \
   mcr.microsoft.com/playwright:v1.63.0-noble \
@@ -43,7 +43,7 @@ official Playwright container so they match the CI runner (Linux). Regenerate
 after an intentional UI change:
 
 ```bash
-docker run --rm --network monarch_clone_default \
+docker run --rm --network metalmark_default \
   -e E2E_BASE_URL=http://web:5173 \
   -v "$PWD/frontend":/work -w /work \
   mcr.microsoft.com/playwright:v1.63.0-noble \

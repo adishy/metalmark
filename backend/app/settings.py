@@ -1,7 +1,7 @@
 """Application settings.
 
 Secrets are loaded from files (docker secrets), never plain env vars, per
-ARCHITECTURE §5. ``KESTREL_SECRET_KEY_FILE`` points at the Fernet key.
+ARCHITECTURE §5. ``METALMARK_SECRET_KEY_FILE`` points at the Fernet key.
 """
 
 from __future__ import annotations
@@ -16,28 +16,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
 
-    env: str = Field(default="dev", alias="KESTREL_ENV")
-    log_level: str = Field(default="INFO", alias="KESTREL_LOG_LEVEL")
+    env: str = Field(default="dev", alias="METALMARK_ENV")
+    log_level: str = Field(default="INFO", alias="METALMARK_LOG_LEVEL")
 
     # Postgres — the app connects as the NON-superuser APP_DB_USER so RLS applies.
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
-    postgres_db: str = Field(default="kestrel", alias="POSTGRES_DB")
+    postgres_db: str = Field(default="metalmark", alias="POSTGRES_DB")
     # Superuser (owner) creds — used only by migrations/bootstrap.
-    postgres_user: str = Field(default="kestrel", alias="POSTGRES_USER")
-    postgres_password: str = Field(default="kestrel", alias="POSTGRES_PASSWORD")
+    postgres_user: str = Field(default="metalmark", alias="POSTGRES_USER")
+    postgres_password: str = Field(default="metalmark", alias="POSTGRES_PASSWORD")
     # Application role — used by API + worker at runtime (RLS enforced).
-    app_db_user: str = Field(default="kestrel_app", alias="APP_DB_USER")
-    app_db_password: str = Field(default="kestrel_app", alias="APP_DB_PASSWORD")
+    app_db_user: str = Field(default="metalmark_app", alias="APP_DB_USER")
+    app_db_password: str = Field(default="metalmark_app", alias="APP_DB_PASSWORD")
 
-    default_base_currency: str = Field(default="USD", alias="KESTREL_DEFAULT_BASE_CURRENCY")
+    default_base_currency: str = Field(default="USD", alias="METALMARK_DEFAULT_BASE_CURRENCY")
 
-    session_idle_minutes: int = Field(default=1440, alias="KESTREL_SESSION_IDLE_MINUTES")
-    session_absolute_hours: int = Field(default=720, alias="KESTREL_SESSION_ABSOLUTE_HOURS")
+    session_idle_minutes: int = Field(default=1440, alias="METALMARK_SESSION_IDLE_MINUTES")
+    session_absolute_hours: int = Field(default=720, alias="METALMARK_SESSION_ABSOLUTE_HOURS")
 
-    secret_key_file: str | None = Field(default=None, alias="KESTREL_SECRET_KEY_FILE")
+    secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
-    secret_key_inline: str | None = Field(default=None, alias="KESTREL_SECRET_KEY")
+    secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")
 
     _secret_key: str = ""
 
@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     def secret_key(self) -> str:
         if not self._secret_key:
             raise RuntimeError(
-                "KESTREL_SECRET_KEY not available: set KESTREL_SECRET_KEY_FILE "
-                "(docker secret) or KESTREL_SECRET_KEY for tests."
+                "METALMARK_SECRET_KEY not available: set METALMARK_SECRET_KEY_FILE "
+                "(docker secret) or METALMARK_SECRET_KEY for tests."
             )
         return self._secret_key
 

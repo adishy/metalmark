@@ -1,7 +1,7 @@
 [project]
-name = "kestrel"
+name = "metalmark"
 version = "0.1.0"
-description = "Kestrel — self-hosted personal finance (Monarch-style). Backend."
+description = "MetalMark — self-hosted personal finance (Monarch-style). Backend."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115,<1.0",

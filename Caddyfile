@@ -1,12 +1,12 @@
-# Kestrel reverse proxy (production: bind to the Tailscale interface only).
+# MetalMark reverse proxy (production: bind to the Tailscale interface only).
 # In dev the stack is reached directly on localhost; this file documents the
 # production topology from ARCHITECTURE §1 (Caddy TLS in front of web + api).
 #
 # Replace <tailscale-name> with the machine's Tailscale MagicDNS name.
 # Caddy will provision a cert via the Tailscale/local CA.
 
-# {$KESTREL_SITE_ADDRESS} e.g. kestrel.<tailnet>.ts.net
-{$KESTREL_SITE_ADDRESS:localhost} {
+# {$METALMARK_SITE_ADDRESS} e.g. metalmark.<tailnet>.ts.net
+{$METALMARK_SITE_ADDRESS:localhost} {
 	# API
 	handle_path /api/* {
 		reverse_proxy api:8000

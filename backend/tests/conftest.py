@@ -6,8 +6,8 @@ connects as the non-superuser RLS-bound role, scoped per household. Tests thus
 exercise the SAME isolation path as the running app.
 
 Two backends, chosen automatically:
-  * **external** (default in Docker/CI): when ``KESTREL_TEST_PG_HOST`` is set,
-    connect to that server as owner, (re)create a fresh ``kestrel_test`` DB, and
+  * **external** (default in Docker/CI): when ``METALMARK_TEST_PG_HOST`` is set,
+    connect to that server as owner, (re)create a fresh ``metalmark_test`` DB, and
     migrate it. Used by ``docker compose`` on the same network as ``db``.
   * **testcontainers**: otherwise spin an ephemeral ``postgres:16`` container
     (host runs where the Docker socket + simple networking are available).
@@ -23,11 +23,11 @@ import pytest
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-OWNER_USER = os.getenv("POSTGRES_USER", "kestrel")
-OWNER_PW = os.getenv("POSTGRES_PASSWORD", "kestrel_dev_only_change_me")
-APP_USER = "kestrel_app_test"
-APP_PW = "kestrel_app_test_pw"
-TEST_DB = "kestrel_test"
+OWNER_USER = os.getenv("POSTGRES_USER", "metalmark")
+OWNER_PW = os.getenv("POSTGRES_PASSWORD", "metalmark_dev_only_change_me")
+APP_USER = "metalmark_app_test"
+APP_PW = "metalmark_app_test_pw"
+TEST_DB = "metalmark_test"
 
 
 def _recreate_external_db(host: str, port: str) -> None:
@@ -49,11 +49,11 @@ def _recreate_external_db(host: str, port: str) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def _configure():
-    external_host = os.getenv("KESTREL_TEST_PG_HOST")
+    external_host = os.getenv("METALMARK_TEST_PG_HOST")
     container = None
 
     if external_host:
-        port = os.getenv("KESTREL_TEST_PG_PORT", "5432")
+        port = os.getenv("METALMARK_TEST_PG_PORT", "5432")
         _recreate_external_db(external_host, port)
         host = external_host
     else:
@@ -67,8 +67,8 @@ def _configure():
         port = str(container.get_exposed_port(5432))
 
     os.environ.update(
-        KESTREL_ENV="test",
-        KESTREL_LOG_LEVEL="WARNING",
+        METALMARK_ENV="test",
+        METALMARK_LOG_LEVEL="WARNING",
         POSTGRES_HOST=host,
         POSTGRES_PORT=str(port),
         POSTGRES_DB=TEST_DB,
@@ -76,8 +76,8 @@ def _configure():
         POSTGRES_PASSWORD=OWNER_PW,
         APP_DB_USER=APP_USER,
         APP_DB_PASSWORD=APP_PW,
-        KESTREL_DEFAULT_BASE_CURRENCY="USD",
-        KESTREL_SECRET_KEY="test-secret-key-not-for-production-use",
+        METALMARK_DEFAULT_BASE_CURRENCY="USD",
+        METALMARK_SECRET_KEY="test-secret-key-not-for-production-use",
     )
 
     # Reset cached settings + engine so they pick up the new env.

@@ -3,7 +3,7 @@
     python -m app.seed            # create the first household + owner (idempotent)
     python -m app.seed --demo     # also add default categories
 
-Owner/household come from env (KESTREL_SEED_*). Safe to re-run: does nothing if
+Owner/household come from env (METALMARK_SEED_*). Safe to re-run: does nothing if
 a user already exists.
 """
 
@@ -42,12 +42,12 @@ async def run(demo: bool) -> None:
             return
         household, owner = await svc.bootstrap_household(
             session,
-            name=os.getenv("KESTREL_SEED_HOUSEHOLD", "Home"),
+            name=os.getenv("METALMARK_SEED_HOUSEHOLD", "Home"),
             base_currency=settings.default_base_currency,
-            owner_email=os.getenv("KESTREL_SEED_EMAIL", "owner@example.com"),
-            owner_name=os.getenv("KESTREL_SEED_NAME", "Owner"),
-            owner_password=os.getenv("KESTREL_SEED_PASSWORD", "changeme-please-8+"),
-            timezone=os.getenv("KESTREL_SEED_TZ", "UTC"),
+            owner_email=os.getenv("METALMARK_SEED_EMAIL", "owner@example.com"),
+            owner_name=os.getenv("METALMARK_SEED_NAME", "Owner"),
+            owner_password=os.getenv("METALMARK_SEED_PASSWORD", "changeme-please-8+"),
+            timezone=os.getenv("METALMARK_SEED_TZ", "UTC"),
         )
         household_id = household.id
         log.info("seed.bootstrap", household=str(household_id), owner=owner.email)
