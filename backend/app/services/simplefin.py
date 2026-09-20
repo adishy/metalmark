@@ -46,8 +46,10 @@ from app.services.aggregator import (
     ProviderTransaction,
 )
 
-#: The bridge caps a pull at 90 days and warns above 45. Sync asks for 45 so a
-#: first-run warning is not guaranteed on every install (ADR-0028).
+#: The bridge caps a pull at 90 days and warns above 45 (fixture README — a
+#: capture's own ``errlist`` is where both numbers come from). Sync asks for 45,
+#: the bottom of the recommended range, so the warning is not a fixture of every
+#: install.
 MAX_WINDOW_DAYS = 90
 RECOMMENDED_WINDOW_DAYS = 45
 

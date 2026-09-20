@@ -499,8 +499,11 @@ async def apply_to_transaction(
     row back, or running the rules over it a second time, must see what the first
     pass did, and this app's sessions do not autoflush (``db.scoped_session`` uses
     ``session.begin()``, whose transaction disables it). A flush is not a commit.
-    It is not wired into ``services/transactions.py`` yet — the orchestrator adds
-    the call site after this wave.
+
+    Two callers, both of which rely on that: ``services/transactions.py``'s
+    create/update path (a human's row is rule-matched as it is written) and
+    ``services/sync.py``'s ingest (a provider's). They pass their own
+    ``loaded=`` so the rule set is compiled once per run rather than once per row.
     """
     if txn.household_id != household_id:
         # Belt and braces, and it makes the argument load-bearing rather than

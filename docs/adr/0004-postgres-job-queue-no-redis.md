@@ -1,6 +1,6 @@
 # ADR 0004: Postgres-backed job queue; no Redis
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0029 (claim mechanism half); the rest stands.
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
 - **Related:** ADR-0002, ADR-0003, ARCHITECTURE.md §1, §3

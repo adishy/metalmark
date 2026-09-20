@@ -191,8 +191,13 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
   (remainder to the largest child), then convert each child, allocating so **Σ(child `base_amount`) ==
   parent `base_amount`** exactly (no convert-then-round drift).
 - **tags** — `id, household_id, name, color`. **transaction_tags** — `transaction_id, tag_id`.
-- **pending_reconcile** — tracks pending rows so a pending txn that posts under a *new* id (or vanishes)
-  is reconciled by `(account_id, amount, ~date, description)` rather than only by SimpleFIN `id`. See §3.
+- **No `pending_reconcile` table.** Tracking lives on `transactions` itself as `is_pending` +
+  `pending_since`, with `ix_transactions_household_pending_since` (partial, `WHERE is_pending`) as the
+  index that makes "the account's tracked pendings" cheap. A separate table would have to duplicate
+  `account_id`, `amount`, `transacted_at` and the `field_sources` map to be matchable at all, and every
+  one of those copies is a second place for a user's edit to be lost. A pending transaction *is*
+  transaction; the flag says it has not posted. Reconciling one that posts under a *new* id — or expires —
+  is then a match against rows already in the table. See §3.
 
 ### Categories & budget
 - **category_groups** — `id, household_id, name, type (income|expense|transfer), sort`. **The group's `type`
@@ -220,14 +225,38 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
 ### History & audit
 - **balance_snapshots** — `account_id, balance_date, balance, currency`. Unique `(account_id, balance_date)`.
   Powers net-worth-over-time; converted to base at each date's FX rate.
-- **sync_jobs** — the on-demand queue. `id, connection_id, requested_by, status (queued|running|done|error),
-   started_at, finished_at, error`. Claimed with `FOR UPDATE SKIP LOCKED`.
+- **sync_jobs** — the queue, and the *only* way a sync starts: the cron enqueues into it exactly as the
+  on-demand path does, so "Sync now" and "the schedule" are the same code with a different `trigger`.
+  `id, household_id, connection_id, requested_by, trigger (cron|manual|reconnect), status, attempts,
+   created_at, not_before, claimed_at, heartbeat_at, claim_token, cancel_requested_at, started_at,
+   finished_at, error`. Claimed with `FOR UPDATE SKIP LOCKED`.
+  - `status (queued|running|done|error|cancelled|expired)`. `cancelled` and `expired` are both terminal and
+    deliberately distinct: cancelled means a human stopped it, expired means it died `MAX_ATTEMPTS` times
+    and the worker gave up. A dashboard that renders them as one badge tells the operator nothing about
+    which happened.
+  - `not_before` is the backoff gate and the claim's ordering key, so a retry is a *scheduled* claim rather
+    than a retry loop. `attempts` counts claims, which is what `MAX_ATTEMPTS` bounds.
+  - **`heartbeat_at` and `claim_token` are the two defences against a worker that stops without saying so**
+    (ADR-0029). The reaper's predicate is `heartbeat_at < now() - reap_after` — a *heartbeat*, not a
+    timeout — so a slow-but-alive job is never reaped; `claim_token` is the fencing token, and every
+    write-back from the worker is `WHERE claim_token = :token`, so a worker that was reaped mid-run
+    finalizes nothing and the job is run again rather than run and half-recorded.
 - **sync_runs** — per-run record for the **admin observability dashboard**, not just a freshness badge.
-  `id, connection_id, trigger (cron|manual|reconnect), started_at, finished_at, duration_ms, http_ms,
-   accounts_seen, txns_inserted, txns_updated, txns_reconciled, pendings_expired, transfers_matched,
-   rules_applied, bytes_fetched, http_status, status, error`.
+  `id, household_id, connection_id, job_id, connection_label, trigger (cron|manual|reconnect), started_at,
+   finished_at, duration_ms, http_ms, http_status, bytes_fetched, accounts_seen, accounts_created,
+   accounts_remapped, txns_rekeyed, txns_inserted, txns_updated, txns_reconciled, pendings_expired,
+   transfers_matched, rules_applied, status (running|ok|partial|error|cancelled), error`.
+  - `connection_id` is `ON DELETE SET NULL` and `connection_label` carries the institution's name forward.
+    A reconnect *is* a remove + re-add (ADR-0009), so without the label the history would erase the name of
+    the bank it came from at exactly the moment the user reconnects.
+  - `txns_rekeyed` is separate from `txns_reconciled` because those are different events: reconciled means
+    the row's content changed (a pending posted), rekeyed means nothing changed but the id the bank calls it
+    by did. Only the second is specific to a reconnect with new provider ids.
 - **sync_run_events** — ordered structured log lines for a run (sanitized — never the access URL or PII):
-  `sync_run_id, ts, level, event, detail (jsonb)`. This is the "show me exactly what the sync did" feed.
+  `id, sync_run_id, seq, ts, level, event, detail (jsonb)`. This is the "show me exactly what the sync did"
+  feed. **`seq` is what orders it, not `ts`**: Postgres `now()` is the *transaction* timestamp, so every
+  event written inside one ingest transaction shares it exactly, and the feed would shuffle. Same trap
+  `services/rules.py` documents for `Rule.created_at`; `UNIQUE (sync_run_id, seq)`.
 - **audit_log** — `id, household_id, user_id, action, entity, entity_id, at, meta (jsonb)`. Every manual edit
   and every sync-applied change records who/what set a field (feeds `field_sources`).
 
@@ -245,12 +274,28 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
 ### Provider interface (the seam that keeps us un-Plaid-locked)
 ```python
 class AggregatorProvider(Protocol):
-    def claim(self, setup_token: str) -> str: ...           # -> access_url (to encrypt & store)
-    def fetch(self, access_url: str, *, start: datetime,
-              end: datetime | None, balances_only: bool) -> AccountSet: ...
+    async def claim(self, setup_token: str) -> ClaimResult: ...          # -> access_url, to encrypt & store
+    async def fetch_accounts(self, access_url: str, *, start: datetime) -> AccountSet: ...
 ```
 `AccountSet` normalizes SimpleFIN's `{connections, accounts[{transactions[]}], errlist}` into internal DTOs.
-Only `SimpleFinProvider` is implemented in v1.
+
+**Both methods are `async def`**, and the sketch's `end`/`balances_only` parameters are dropped rather than
+implemented. `async` because the worker is a single asyncio task and `httpx` is the process's only HTTP
+client — a sync provider is I/O from end to end, and a sync interface would have to be wrapped in a thread
+to be callable at all. The two parameters are dropped because neither has a caller: SimpleFIN's window is
+expressed entirely by `start` (the bridge returns everything since, and there is no `end`), and the
+balances case is served by the same fetch — a balances-only mode would be a second request shape to keep
+correct for no request saved.
+
+`external_key_for(account)` lives in this module, not in `sync.py`, so ADR-0009's reconnect key has exactly
+one definition and is unit-testable on its own. It keys on institution + normalized account name,
+deliberately excluding account id, `conn_id` and balance — those are precisely what a re-claim changes.
+
+Providers are selected **per connection**, not globally: `AccountConnection.provider` is the axis, and the
+worker dispatches on the row, so a demo connection seeded as `fake` keeps working under any environment.
+`METALMARK_SIMPLEFIN_PROVIDER` decides only which provider the *claim* endpoint uses. Sync entry points
+additionally take `provider=` as a parameter, so integration tests inject a fake with no global state and no
+environment fiddling. Only `SimpleFinProvider` and `FakeProvider` are implemented in v1.
 
 ### Claim flow (and reconnect remap)
 1. User clicks **Connect** → gets sent to SimpleFIN Bridge `/create`, pastes back the Base64 **setup token**.
@@ -263,11 +308,23 @@ Only `SimpleFinProvider` is implemented in v1.
    This keeps transactions/snapshots attached to the stable internal `account_id`.
 
 ### Sync algorithm (worker)
-- **Scheduled**: APScheduler cron (default every 6h; configurable) enqueues a `sync_job` per active connection.
+- **Scheduled**: APScheduler cron (default every 6h; floor 2h, ceiling 7d, all three configurable per
+  connection) enqueues a `sync_job` per enabled connection. The cadence constants live in `models/ledger.py`
+  and are enforced by a CHECK constraint, not just by the API — the panel reads the bounds from
+  `GET /connections/defaults` rather than hard-coding copy of them. See ADR-0028 for why 6h and not
+  ADR-0002's figure or the plan's 24h.
 - **On demand**: API inserts a `sync_job` row; worker consumer claims it with
-  `SELECT … FOR UPDATE SKIP LOCKED`. **One running job per connection** is enforced (partial unique index on
-  `sync_jobs(connection_id) where status='running'`, or a Postgres advisory lock) so a cron run and a manual
-  "Sync now" can't collide. A **reaper** re-queues jobs stuck in `running` past a timeout (worker crash).
+  `SELECT … FOR UPDATE SKIP LOCKED` — **the same path the cron takes**, so there is one implementation of
+  "start a sync" and the `trigger` column is the only difference. **One running job per connection** is
+  enforced by a partial unique index on `sync_jobs(connection_id) where status='running'`, *and* by a
+  claim that both excludes connections with a live run and wraps its update in a savepoint, so losing that
+  race is a `23505` the claim absorbs rather than a worker crash loop.
+- **The reaper** re-queues a job whose **heartbeat** has stopped advancing — `heartbeat_at < now() -
+  900s`, stamped at claim and again after the HTTP fetch — not one that has merely taken longer than a
+  timeout. "Past a timeout" underspecifies *since when*: a job legitimately waiting 60s on a slow bank is
+  indistinguishable from a dead worker's by elapsed time alone, and reaping it would run the sync twice.
+  The reaper takes `FOR UPDATE SKIP LOCKED` so it cannot flip a job the worker is concurrently finalizing,
+  and requeues at most `MAX_ATTEMPTS` (5) times before marking the job `expired`.
 - Per job: fetch from a **per-account low-water mark** (earliest unsettled point), not a fixed
   `now − 3d` window, so a pending charge that posts a week later is still reconciled:
   `GET /accounts?start-date=<min(account low-water marks)>&pending=1`.
@@ -416,6 +473,16 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   household today. **The worker has no user session** yet moves the most cross-household data: it must **not**
   run `BYPASSRLS` (that removes the backstop) — each sync job sets `SET LOCAL app.household_id` for its
   connection's household inside the job transaction, so RLS applies to the worker exactly as to the API.
+  - **Which households?** With RLS fail-closed, an unscoped `SELECT` on a household-scoped table returns
+    nothing, so the worker cannot *discover* the work by querying `sync_jobs` — the very isolation that
+    protects the data hides the queue. The resolution (ADR-0004): the worker enumerates `SELECT id FROM
+    households` — `households` carries no policy and the app role can already read it, so this adds **zero**
+    new exposure, and it is the same query `deps.get_context` runs on every authenticated request — then
+    claims, enqueues and reaps per household under `scoped_session`. 100% of `sync_jobs` / `sync_runs` /
+    `sync_run_events` access stays under RLS, so the sentence above stays literally true.
+  - The bypass refusal is enforced, not just documented: the worker reads `rolsuper` / `rolbypassrls` for
+    `current_user` at startup and `SystemExit(1)`s if either is set or if it connected as any role but the
+    app role. A worker that would silently lose RLS refuses to start.
 - **Tables outside RLS, and what that costs**: `users`, `households`, `household_members`, `sessions`
   (identity — a session has to be read before its household is known; ADR-0025), `fx_rates` (global
   reference data: the same fact for everyone) and `alembic_version` carry **no policy**. For these six, RLS

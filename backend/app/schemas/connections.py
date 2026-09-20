@@ -180,8 +180,12 @@ class SyncRunDetail(BaseModel):
 
 class ConnectionDefaults(BaseModel):
     """The cadence floor, ceiling and default, so the UI's slider needs no
-    hard-coded copy of them. Sent with the connection list rather than exposed as
-    its own route: it is configuration for the control that edits that list."""
+    hard-coded copy of them.
+
+    Its own route rather than a field on the connection list: it is a property of
+    the *schema*, not of the household — the same three integers for every request
+    — and folding it into a list response would repeat them per connection and
+    invite a client to read the bounds off whichever row it happened to get."""
 
     sync_interval_minutes: int = SYNC_INTERVAL_DEFAULT_MINUTES
     sync_interval_min_minutes: int = SYNC_INTERVAL_MIN_MINUTES

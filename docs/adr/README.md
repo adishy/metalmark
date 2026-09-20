@@ -35,7 +35,7 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0001](0001-simplefin-sole-aggregator.md) | SimpleFIN as the sole aggregation provider, behind a pluggable interface | Accepted |
 | [0002](0002-poll-based-lan-only.md) | Poll-based sync over LAN/VPN; no webhooks, no public ingress | Accepted |
 | [0003](0003-boring-stack.md) | Boring stack: FastAPI + Postgres + React/TS + ECharts | Accepted |
-| [0004](0004-postgres-job-queue-no-redis.md) | Postgres-backed job queue; no Redis | Accepted |
+| [0004](0004-postgres-job-queue-no-redis.md) | Postgres-backed job queue; no Redis | Superseded by 0029 (claim mechanism half) |
 | [0005](0005-money-decimal-never-float.md) | Money as NUMERIC/Decimal; never float | Accepted |
 | [0006](0006-multi-currency-dated-fx.md) | Multi-currency is first-class, converted at dated FX rates | Superseded by 0017 |
 | [0007](0007-field-provenance.md) | Field-level provenance governs sync-vs-human writes | Accepted |
@@ -59,3 +59,5 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0025](0025-rls-implementation-mechanism.md) | RLS mechanism: per-transaction GUC, fail-closed, child policies | Accepted |
 | [0026](0026-owners-are-household-data.md) | Owners are household data, not users (ownership half of 0012) | Accepted |
 | [0027](0027-open-signup-replaces-invite-only.md) | Open signup replaces invite-only (invite half of 0013) | Accepted |
+| [0028](0028-provider-seam-and-cadence.md) | The aggregator seam, per-connection provider selection, cadence bounds, error taxonomy | Accepted |
+| [0029](0029-job-claim-heartbeat-fence.md) | Job claim: heartbeat, fence, per-household enumeration (claim half of 0004) | Accepted |
