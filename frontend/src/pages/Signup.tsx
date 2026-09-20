@@ -40,7 +40,7 @@ export default function Signup() {
     <div className="flex h-full items-center justify-center p-4">
       <form
         onSubmit={submit}
-        className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8 shadow-xl"
+        className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8"
         data-testid="signup-form"
       >
         <div className="text-center">

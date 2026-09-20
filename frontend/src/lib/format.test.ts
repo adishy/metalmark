@@ -21,12 +21,30 @@ describe("formatMoney", () => {
     expect(out.replace(/[^0-9]/g, "")).toBe("1235");
   });
 
-  it("renders negatives with a leading minus sign", () => {
-    expect(norm(formatMoney("-42.5", "USD"))).toBe("-$42.50");
+  // U+2212 MINUS SIGN, not the hyphen-minus, and not whatever `Intl` would emit
+  // (DESIGN.md §6.2). Asserted with the codepoint named rather than the literal,
+  // because the two glyphs are visually near-identical in most editors — which
+  // is exactly how a regression here would slip through review.
+  it("renders negatives with U+2212 MINUS SIGN", () => {
+    const out = norm(formatMoney("-42.5", "USD"));
+    expect(out).toBe("−$42.50");
+    expect(out.charCodeAt(0)).toBe(0x2212);
+    expect(out).not.toContain("-");
   });
 
   it("accepts a numeric amount as well as a string", () => {
-    expect(norm(formatMoney(-1000, "USD"))).toBe("-$1,000.00");
+    expect(norm(formatMoney(-1000, "USD"))).toBe("−$1,000.00");
+  });
+
+  it("does not put a sign on positive amounts", () => {
+    // A bare `$12.00` is a balance or a total; `+` is only added where the
+    // call site knows the value is income (§6.2).
+    expect(norm(formatMoney("12", "USD"))).toBe("$12.00");
+  });
+
+  it("keeps two decimals on a whole number so a column stays aligned", () => {
+    expect(norm(formatMoney("12", "USD"))).toBe("$12.00");
+    expect(norm(formatMoney(0, "USD"))).toBe("$0.00");
   });
 
   it("falls back gracefully for an unknown currency code", () => {

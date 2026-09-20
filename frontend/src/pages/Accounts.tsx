@@ -10,7 +10,7 @@ import {
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
-import { Button, Field, Input, Select, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -59,7 +59,9 @@ export default function Accounts() {
           </div>
         )}
         {netWorth.data && netWorth.data.unconverted_currencies.length > 0 && (
-          <p className="mt-2 text-sm text-warning" data-testid="no-rate-warning">
+          // The words carry the warning; role="status" is what makes it heard
+          // when the query lands and a rate turns out to be missing (§6.4).
+          <p className="mt-2 text-sm text-warning" role="status" data-testid="no-rate-warning">
             No FX rate for: {netWorth.data.unconverted_currencies.join(", ")}
           </p>
         )}
@@ -67,7 +69,7 @@ export default function Accounts() {
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium">Accounts</h2>
+          <h1 className="text-lg font-medium">Accounts</h1>
           <Button onClick={() => setOpen((v) => !v)} data-testid="add-account">
             Add account
           </Button>
@@ -219,7 +221,8 @@ function AddAccountForm({
       <Field label="Institution" htmlFor={ids.institution}>
         <Input id={ids.institution} value={institution} onChange={(e) => setInstitution(e.target.value)} data-testid="account-institution" />
       </Field>
-      {error && <p className="text-sm text-negative sm:col-span-2" data-testid="account-form-error">{error}</p>}
+      {/* role="alert": a failed save is announced without moving focus (WCAG 4.1.3). */}
+      {error && <p className="text-sm text-negative sm:col-span-2" role="alert" data-testid="account-form-error">{error}</p>}
       <Button type="submit" disabled={pending} className="sm:col-span-2" data-testid="account-save">
         Save
       </Button>
@@ -303,11 +306,18 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
           <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="edit-account-balance-date" />
         </Field>
         <OwnerSelect value={owner} onChange={setOwner} testid="edit-account-owner" />
-        <label className="flex items-center gap-2 text-sm text-fg">
-          <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} data-testid="edit-account-hidden" />
-          Hidden (exclude from net worth views)
-        </label>
-        {update.isError && <p className="text-sm text-negative">{(update.error as Error).message}</p>}
+        <Checkbox
+          label="Hidden"
+          hint="Exclude from net worth views."
+          checked={hidden}
+          onChange={(e) => setHidden(e.target.checked)}
+          data-testid="edit-account-hidden"
+        />
+        {update.isError && (
+          <p className="text-sm text-negative" role="alert">
+            {(update.error as Error).message}
+          </p>
+        )}
 
         {confirmDel && (
           <div className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm" data-testid="account-delete-confirm">

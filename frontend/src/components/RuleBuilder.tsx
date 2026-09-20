@@ -17,7 +17,7 @@ import { useState, type ReactNode } from "react";
 import { useAccounts, useCategories, useOwners, useTags } from "@/api/hooks";
 import { useCreateRule, useUpdateRule, type Rule, type RuleActions, type RuleConditions } from "@/api/rules";
 import Dialog from "@/components/Dialog";
-import { Button, Field, Input, Select, requiredText, useFieldId, validAmount } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, requiredText, useFieldId, validAmount } from "@/components/form";
 
 type Tri = "" | "true" | "false";
 
@@ -177,16 +177,16 @@ export default function RuleBuilder({
               data-testid="rule-priority"
             />
           </Field>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm text-fg">
-              <input
-                type="checkbox"
-                checked={d.enabled}
-                onChange={(e) => set({ enabled: e.target.checked })}
-                data-testid="rule-enabled"
-              />
-              Enabled
-            </label>
+          {/* Centred, not bottom-aligned: the row is as tall as the Priority
+              field's hint line, and a 44 px target reads against the inputs
+              beside it rather than against the hint below them. */}
+          <div className="flex items-center">
+            <Checkbox
+              label="Enabled"
+              checked={d.enabled}
+              onChange={(e) => set({ enabled: e.target.checked })}
+              data-testid="rule-enabled"
+            />
           </div>
         </div>
 
@@ -352,8 +352,16 @@ export default function RuleBuilder({
           </div>
           {/* A rule that writes with nothing to match on is a catch-all, which is
               occasionally what someone wants and usually a forgotten condition. */}
+          {/* role="status" for the same reason the missing-FX-rate warning
+              carries it (§6.4): the sentence appears in response to what the
+              user just typed, and nothing moves focus to it. */}
           {!hasAnyCondition(d) && (
-            <p className="text-xs text-warning/90" data-testid="rule-no-conditions">
+            <p
+              role="status"
+              aria-atomic="true"
+              className="text-xs text-warning/90"
+              data-testid="rule-no-conditions"
+            >
               No conditions — this rule matches every transaction.
             </p>
           )}
@@ -363,7 +371,11 @@ export default function RuleBuilder({
         </Section>
 
         {failure && (
-          <p className="rounded-control bg-negative/10 px-3 py-2 text-sm text-negative" data-testid="rule-error">
+          <p
+            role="alert"
+            className="rounded-control bg-negative/10 px-3 py-2 text-sm text-negative"
+            data-testid="rule-error"
+          >
             {(failure as Error).message}
           </p>
         )}
@@ -406,15 +418,13 @@ function Checks({
       ) : (
         <div className="flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-control bg-surface-raised/60 p-2">
           {items.map((it) => (
-            <label key={it.id} className="flex items-center gap-2 text-sm text-fg">
-              <input
-                type="checkbox"
-                checked={selected.includes(it.id)}
-                onChange={() => onToggle(it.id)}
-                data-testid={`${testid}-${it.id}`}
-              />
-              {it.label}
-            </label>
+            <Checkbox
+              key={it.id}
+              label={it.label}
+              checked={selected.includes(it.id)}
+              onChange={() => onToggle(it.id)}
+              data-testid={`${testid}-${it.id}`}
+            />
           ))}
         </div>
       )}

@@ -18,7 +18,7 @@ import {
   type MappableField,
 } from "@/api/import";
 import Dialog from "@/components/Dialog";
-import { Button, Field, Select, useFieldId } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, useFieldId } from "@/components/form";
 
 interface ImportDialogProps {
   onClose: () => void;
@@ -129,6 +129,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
     <Dialog open onClose={onClose} title="Import CSV" testid="import-dialog" footer={footer}>
       {error && (
         <p
+          role="alert"
           className="mb-3 rounded-control bg-negative/10 px-3 py-2 text-sm text-negative"
           data-testid="import-error"
         >
@@ -143,16 +144,24 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
             htmlFor={ids.file}
             hint="Read here, and again when you import it. Nothing is stored in between."
           >
-            <input
+            <Input
               id={ids.file}
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 text-sm text-fg file:mr-3 file:rounded file:border-0 file:bg-surface-inset file:px-2 file:py-1 file:text-fg"
+              // The shared control class supplies the 44 px box and 16 px text;
+              // only the browser's own file button is left to style here.
+              className="file:mr-3 file:rounded file:border-0 file:bg-surface-inset file:px-2 file:py-1 file:text-fg"
               data-testid="import-file"
             />
           </Field>
-          {previewMut.isPending && <p className="text-sm text-fg-muted">Reading the file…</p>}
+          {/* A loading label is a status message too (§4.1): it appears while the
+              read is in flight and nothing moves focus to it. */}
+          {previewMut.isPending && (
+            <p role="status" aria-atomic="true" className="text-sm text-fg-muted">
+              Reading the file…
+            </p>
+          )}
           {accounts.length === 0 && (
             <p className="text-sm text-warning" data-testid="import-no-accounts">
               Add an account first — an import has to land somewhere.
@@ -267,32 +276,25 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
                 ))}
               </Select>
             </Field>
-            <label
-              htmlFor={ids.dayfirst}
-              className="mt-1 flex items-start gap-2 text-xs text-fg"
-            >
-              <input
-                id={ids.dayfirst}
-                type="checkbox"
-                checked={dayfirst}
-                onChange={(e) => setDayfirst(e.target.checked)}
-                className="mt-0.5"
-                data-testid="import-dayfirst"
-              />
-              <span>
-                Read ambiguous dates as day-first (dd/mm/yyyy)
-                <span className="block text-fg-muted">
-                  Only decides values like 05/03/2026, which are dates both ways.
-                </span>
-              </span>
-            </label>
+            <Checkbox
+              id={ids.dayfirst}
+              className="mt-1"
+              label="Read ambiguous dates as day-first (dd/mm/yyyy)"
+              hint="Only decides values like 05/03/2026, which are dates both ways."
+              checked={dayfirst}
+              onChange={(e) => setDayfirst(e.target.checked)}
+              data-testid="import-dayfirst"
+            />
           </div>
         </div>
       )}
 
       {step === "done" && result && (
         <div className="space-y-3" data-testid="import-result">
-          <p className="text-sm text-fg">
+          {/* One region around the whole sentence, not around the numerals: the
+              announcement is "Imported 12 · skipped 3", and a bare "12" is not a
+              status message (§7.6). */}
+          <p role="status" aria-atomic="true" className="text-sm text-fg">
             Imported <strong data-testid="import-inserted">{result.inserted}</strong>
             {result.skipped > 0 && (
               <>
@@ -313,7 +315,9 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
 
           {result.errors.length > 0 && (
             <div data-testid="import-errors">
-              <p className="text-xs font-medium text-fg-muted">
+              {/* The message about the list is the status message; the list below
+                  it is a results list and stays plain (§7.6). */}
+              <p role="status" aria-atomic="true" className="text-xs font-medium text-fg-muted">
                 {result.errors.length} row{result.errors.length === 1 ? "" : "s"} could not be read
                 and {result.errors.length === 1 ? "was" : "were"} left out:
               </p>

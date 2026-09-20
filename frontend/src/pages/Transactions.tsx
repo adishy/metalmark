@@ -65,8 +65,10 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Transactions</h2>
+      {/* flex-wrap: the title plus two actions do not fit at 360px, and an
+          unwrapped header is what pushes the page into horizontal scroll (§5). */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-medium">Transactions</h1>
         <div className="flex items-center gap-2">
           {/* A whole statement at once, next to adding one row by hand. */}
           <Button
@@ -111,14 +113,18 @@ export default function Transactions() {
               data-testid={`txn-row-${t.id}`}
             >
               <div className="min-w-0">
-                <p className="truncate font-medium">
-                  {t.merchant || t.description || "(no description)"}
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate font-medium">
+                    {t.merchant || t.description || "(no description)"}
+                  </p>
                   {t.is_split_parent && (
-                    <span className="ml-2 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
+                    // A sibling of the truncating text, not part of it: a badge
+                    // clipped to "spl…" is not a label.
+                    <span className="shrink-0 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
                       split
                     </span>
                   )}
-                </p>
+                </div>
                 <p className="truncate text-xs text-fg-muted">
                   {formatDate(t.transacted_at)}
                   {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
@@ -135,6 +141,17 @@ export default function Transactions() {
                     data-testid={`txn-owner-${t.id}`}
                   >
                     {` · ${ownerName.get(t.effective_owner_id) ?? "Shared"}`}
+                    {!t.owner_id && (
+                      <>
+                        {/* Inherited needs a marker that survives touch and
+                            greyscale: the glyph is decorative, the sentence
+                            behind it is the accessible name (§7.8). */}
+                        <span aria-hidden="true"> ↳</span>
+                        <span className="sr-only">
+                          {` (inherited from ${acctName.get(t.account_id) ?? "the account"})`}
+                        </span>
+                      </>
+                    )}
                   </span>
                   {t.review_status === "needs_review" && " · needs review"}
                 </p>
@@ -148,14 +165,26 @@ export default function Transactions() {
                   </div>
                 )}
               </div>
-              <span className={Number(t.amount) < 0 ? "text-fg" : "text-positive"}>
+              {/* shrink-0 and text-right: the merchant gives way, the number
+                  never does (§6.5). */}
+              <span
+                className={`shrink-0 text-right text-base font-semibold tabular-nums ${
+                  Number(t.amount) < 0 ? "text-fg" : "text-positive"
+                }`}
+              >
                 {formatMoney(t.amount, t.currency)}
               </span>
             </button>
           </li>
         ))}
         {items.length === 0 && !txns.isLoading && (
-          <li className="px-4 py-6 text-center text-sm text-fg-muted">No transactions match.</li>
+          <li className="px-4">
+            {/* The message *about* the results, not the list itself: a filter
+                change that empties the ledger is otherwise silent (§7.6). */}
+            <p role="status" aria-atomic="true" className="py-6 text-center text-sm text-fg-muted">
+              No transactions match.
+            </p>
+          </li>
         )}
       </ul>
 
@@ -233,15 +262,17 @@ function FilterBar({
         <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
           {accounts.map((a) => {
             const on = selectedAccounts.has(a.id);
+            // Same geometry as OwnerFilterChips: `px-3 py-1 text-xs` computes to
+            // 24px, and a chip is a thumb target (§4.5).
             return (
               <button
                 key={a.id}
                 type="button"
                 onClick={() => toggleAccount(a.id)}
                 aria-pressed={on}
-                className={`rounded-full border px-3 py-1 text-xs ${
+                className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
                   on
-                    ? "border-accent bg-accent/20 text-accent"
+                    ? "border-accent bg-accent/20 font-medium text-accent"
                     : "border-border-strong text-fg-muted hover:text-fg"
                 }`}
                 data-testid={`filter-account-${a.id}`}
@@ -316,14 +347,13 @@ function FilterBar({
         filter.start ||
         filter.end ||
         filter.search) && (
-        <button
-          type="button"
-          className="text-xs text-fg-muted underline hover:text-fg"
+        <Button
+          variant="ghost"
           onClick={() => onChange({})}
           data-testid="filter-clear"
         >
           Clear filters
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -418,7 +448,8 @@ function AddTxnForm({
         inheritFrom={inheritFrom}
         testid="txn-owner"
       />
-      {error && <p className="text-sm text-negative sm:col-span-2">{error}</p>}
+      {/* role="alert": a failed save is announced without moving focus (WCAG 4.1.3). */}
+      {error && <p className="text-sm text-negative sm:col-span-2" role="alert">{error}</p>}
       <Button type="submit" disabled={pending} className="sm:col-span-2" data-testid="txn-save">
         Save
       </Button>

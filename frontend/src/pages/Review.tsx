@@ -2,10 +2,11 @@
 // with optimistic advance; desktop keyboard (← / →). The split/edit sheet is a
 // follow-up; this covers the core "swipe to sort" interaction from the spec.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion, useMotionValue, useTransform } from "framer-motion";
+import { AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 import { useCategories, useTransactions, useUpdateTransaction } from "@/api/hooks";
 import type { Transaction } from "@/api/types";
 import { formatDate, formatMoney } from "@/lib/format";
+import { Button } from "@/components/form";
 
 export default function Review() {
   const queue = useTransactions({ review_status: "needs_review" });
@@ -58,13 +59,54 @@ export default function Review() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Review</h2>
-        <span className="text-sm text-fg-muted" data-testid="review-remaining">
-          {remaining > 0 ? `${remaining} to review` : "All done"}
+        <h1 className="text-lg font-medium">Review</h1>
+        {/* The queue count changes on every decision, and nothing moves focus to
+            it — the whole string is the status, not the numeral in it (§7.6). */}
+        <span
+          role="status"
+          aria-atomic="true"
+          className="text-sm text-fg-muted"
+          data-testid="review-remaining"
+        >
+          {/* Deliberately empty while loading or errored. "All done" is a claim
+              about the household's data and we do not yet know it is true —
+              announcing it, then correcting it, is worse than saying nothing.
+              The alert below carries the error. */}
+          {queue.isPending || queue.isError
+            ? ""
+            : remaining > 0
+              ? `${remaining} to review`
+              : "All done"}
         </span>
       </div>
 
-      {!current ? (
+      {/* Three distinct states, never conflated (§4.10/§4.11). Before this, a
+          failed fetch and a slow one both rendered "Nothing to review. 🎉" —
+          which tells the user their queue is clear when in fact it never
+          loaded. */}
+      {queue.isError ? (
+        <div
+          className="rounded-card bg-surface-raised px-4 py-10 text-center"
+          data-testid="review-error"
+        >
+          <p role="alert" className="text-sm text-negative">
+            <span aria-hidden="true">⚠ </span>Couldn&rsquo;t load your review queue.
+          </p>
+          <p className="mt-1 text-sm text-fg-muted">
+            {queue.error instanceof Error ? queue.error.message : "The request failed."}
+          </p>
+          <Button variant="secondary" className="mt-3" onClick={() => queue.refetch()}>
+            Try again
+          </Button>
+        </div>
+      ) : queue.isPending ? (
+        <p
+          className="rounded-card bg-surface-raised px-4 py-10 text-center text-sm text-fg-muted"
+          data-testid="review-loading"
+        >
+          Loading your review queue…
+        </p>
+      ) : !current ? (
         <p
           className="rounded-card bg-surface-raised px-4 py-10 text-center text-sm text-fg-muted"
           data-testid="review-empty"
@@ -82,17 +124,19 @@ export default function Review() {
             />
           </AnimatePresence>
 
+          {/* min-h-11 on both: these are the primary phone interaction, and
+              `py-2 text-sm` alone computed to 36 px (§4.1, §5). */}
           <div className="absolute inset-x-0 -bottom-14 flex justify-center gap-4">
             <button
               onClick={() => decide(current, false)}
-              className="rounded-full bg-surface-inset px-6 py-2 text-sm text-negative"
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-surface-inset px-6 text-sm text-negative"
               data-testid="review-reject"
             >
               ← Ignore
             </button>
             <button
               onClick={() => decide(current, true)}
-              className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-accent-fg"
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-6 text-sm font-medium text-accent-fg"
               data-testid="review-approve"
             >
               Reviewed →
@@ -113,6 +157,12 @@ function SwipeCard({
   categoryName?: string;
   onDecide: (keep: boolean) => void;
 }) {
+  // The CSS rule in index.css does not reach framer-motion's JS-driven
+  // transforms (§2.8). Drag itself stays either way: the card following the
+  // finger is the user's own motion, and it is a route to dismissing a card.
+  // What goes is the flourish — the rotation, and the IGNORE/REVIEWED labels
+  // fading in with distance. The two buttons below carry the same two words.
+  const reduce = useReducedMotion();
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-12, 12]);
   const approveOpacity = useTransform(x, [40, 160], [0, 1]);
@@ -120,8 +170,8 @@ function SwipeCard({
 
   return (
     <motion.div
-      className="absolute inset-0 flex cursor-grab flex-col justify-between rounded-card bg-surface-raised p-6 shadow-xl active:cursor-grabbing"
-      style={{ x, rotate }}
+      className="absolute inset-0 flex cursor-grab flex-col justify-between rounded-card bg-surface-raised p-6 shadow-lg active:cursor-grabbing"
+      style={{ x, rotate: reduce ? 0 : rotate }}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
       dragElastic={0.6}
@@ -133,13 +183,13 @@ function SwipeCard({
     >
       <div className="flex justify-between">
         <motion.span
-          style={{ opacity: ignoreOpacity }}
+          style={{ opacity: reduce ? 0 : ignoreOpacity }}
           className="rounded-control border border-negative px-2 py-1 text-xs text-negative"
         >
           IGNORE
         </motion.span>
         <motion.span
-          style={{ opacity: approveOpacity }}
+          style={{ opacity: reduce ? 0 : approveOpacity }}
           className="rounded-control border border-accent px-2 py-1 text-xs text-accent"
         >
           REVIEWED

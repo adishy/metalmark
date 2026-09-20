@@ -3,9 +3,15 @@ import { expect, type Page } from "@playwright/test";
 export const OWNER_EMAIL = process.env.E2E_EMAIL ?? "owner@example.com";
 export const OWNER_PASSWORD = process.env.E2E_PASSWORD ?? "devpassword123";
 
-/** Parse a formatted-money string (e.g. "-$1,234.50") into a number. */
+/**
+ * Parse a formatted-money string (e.g. "−$1,234.50") into a number.
+ *
+ * The minus is U+2212, not the hyphen-minus (§6.2), so `/[-−]/` — matching only
+ * the ASCII hyphen silently reads every negative as positive, which turns a
+ * wrong net worth into a passing test.
+ */
 export function parseMoney(text: string): number {
-  const neg = /-/.test(text);
+  const neg = /[-−]/.test(text);
   const digits = text.replace(/[^0-9.]/g, "");
   const value = Number(digits || "0");
   return neg ? -value : value;
