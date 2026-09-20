@@ -52,6 +52,7 @@ import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
 import type { Owner, OwnerReassignment } from "@/api/types";
 import { todayIso } from "@/lib/dates";
+import { useIsDesktop } from "@/lib/media";
 import {
   Button,
   Checkbox,
@@ -91,6 +92,11 @@ export default function Settings() {
   // property read would not typecheck — the `in` check narrows to it, and its
   // only value there is `true`. A member's list is the eight that follow.
   const tabs = TABS.filter((t) => !("adminOnly" in t) || isAdmin);
+  // §9.3's rail. This is the one thing on the page a media query cannot decide:
+  // the strip below `lg:` is horizontal and the rail above it is vertical, and
+  // `aria-orientation` has to say which one is on screen. An ARIA attribute is
+  // not a style, so there is no class that can carry it — hence the hook.
+  const rail = useIsDesktop();
   // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
   // it. Declaring role="tablist" without that model announces a tab widget that
   // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
@@ -103,8 +109,14 @@ export default function Settings() {
     const i = tabs.findIndex((t) => t.id === tab);
     const last = tabs.length - 1;
     let next: number;
-    if (e.key === "ArrowRight") next = i === last ? 0 : i + 1;
-    else if (e.key === "ArrowLeft") next = i === 0 ? last : i - 1;
+    // Both pairs move the same way — Right/Down forward, Left/Up back — in both
+    // presentations. ARIA's own guidance names the pair that matches the axis and
+    // is silent on the other; accepting it costs one `||` and saves a reader who
+    // guessed wrong from concluding the tablist is broken. `aria-orientation`
+    // below is what tells assistive tech which pair is the canonical one, and that
+    // is the only part of this that has to know the axis.
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = i === last ? 0 : i + 1;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = i === 0 ? last : i - 1;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = last;
     else return;
@@ -123,12 +135,24 @@ export default function Settings() {
     // (`gap-6`) = 648 px of panel, which is that number arrived at from the
     // other side. Below `lg:` there is no rail and the cap is simply 896, which
     // is where this page already was — the one page §9 did not need to widen.
-    <div className="mx-auto max-w-4xl space-y-4">
-      <h1 className="text-lg font-medium">Settings</h1>
+    //
+    // The rail column is `auto` rather than a literal `14rem` so the width has
+    // one home (`lg:w-56` on the tablist, as §9.3 writes it) instead of two that
+    // can disagree. The heading spans both columns because it labels the page,
+    // not the panel.
+    <div className="mx-auto max-w-4xl space-y-4 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+      <h1 className="text-lg font-medium lg:col-span-2">Settings</h1>
       <div
-        className="flex flex-wrap gap-1 border-b border-border"
+        // Below `lg:` this is the underline strip it has always been. At `lg:` it
+        // is a vertical rail, and a rail is not the strip rotated: the underline
+        // becomes the AppShell nav's inset fill and the radius goes back to
+        // `rounded-control`, because a tab that sits *beside* its panel has no
+        // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
+        // that may still wrap turns its overflow into extra columns.
+        className="flex flex-wrap gap-1 border-b border-border lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
         role="tablist"
         aria-label="Settings sections"
+        aria-orientation={rail ? "vertical" : "horizontal"}
       >
         {tabs.map((t, i) => (
           <button
@@ -143,8 +167,14 @@ export default function Settings() {
             tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
             onKeyDown={onTabKey}
-            className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm ${
-              tab === t.id ? "border-b-2 border-accent text-fg" : "text-fg-muted hover:text-fg"
+            // The `lg:` overrides ride on Tailwind's own order — every variant
+            // block is emitted after the unvariant utilities — so `lg:border-b-0`
+            // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
+            // without a `!` or a duplicated branch.
+            className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm lg:justify-start lg:rounded-control lg:border-b-0 ${
+              tab === t.id
+                ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
+                : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"
             }`}
             data-testid={`settings-tab-${t.id}`}
           >

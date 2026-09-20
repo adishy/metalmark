@@ -144,7 +144,10 @@ export default function Admin() {
     // they answer the one question this page exists for — is sync healthy — in
     // a single glance instead of three scroll positions. The header and the
     // error line span all three because neither is a card.
-    <div className="space-y-4 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 lg:space-y-0">
+    <div
+      className="space-y-4 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 lg:space-y-0"
+      data-testid="admin-page"
+    >
       <header className="lg:col-span-3">
         {/* "Admin" is the eyebrow rather than the heading on purpose: the page
             is one screen of sync operations, and calling *it* "Admin" would

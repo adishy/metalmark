@@ -128,7 +128,10 @@ export default function Transactions() {
     // `gap-6` is §2.5's between-cards step, and `items-start` matters: without
     // it the list column stretches to the grid's height and its last card is
     // painted at the bottom of a column it does not fill.
-    <div className="lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start lg:gap-6">
+    <div
+      className="lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start lg:gap-6"
+      data-testid="transactions-page"
+    >
       <div className="space-y-4">
         {/* flex-wrap: the title plus two actions do not fit at 360px, and an
             unwrapped header is what pushes the page into horizontal scroll (§5). */}
