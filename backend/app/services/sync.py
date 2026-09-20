@@ -1242,6 +1242,7 @@ async def run_connection_sync(
     connection_id: uuid.UUID,
     *,
     trigger: str = "cron",
+    job_id: uuid.UUID | None = None,
     provider: AggregatorProvider | None = None,
     fence: Fence | None = None,
     now: datetime | None = None,
@@ -1261,6 +1262,14 @@ async def run_connection_sync(
     ``fence`` is the worker's hook (see ``Fence``); a test or a direct caller
     passes none, and the run is then unfenced, which is correct — there is no job
     to be fenced against.
+
+    ``job_id`` links the run to the queue row that asked for it, and it is written
+    in **TX1** for the same reason the run row itself is: the reaper needs to find
+    this run if the worker dies holding it. A run whose row only acquired its
+    ``job_id`` at the end would be invisible to ``jobs.reap_stale_jobs`` for
+    exactly as long as it was stuck, which is the whole of the case it exists for.
+    A direct caller (a test, a script) passes none and gets an unlinked run, which
+    is what the API's manual trigger already produces.
     """
     moment = now or datetime.now(UTC)
     window_start: datetime | None = None
@@ -1278,6 +1287,7 @@ async def run_connection_sync(
         run = SyncRun(
             household_id=household_id,
             connection_id=connection.id,
+            job_id=job_id,
             connection_label=connection.org_name,
             trigger=trigger,
             status="running",
