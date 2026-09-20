@@ -925,6 +925,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /transactions/transfer-candidates:
+    get:
+      tags:
+      - transactions
+      summary: List Transfer Candidates
+      description: 'Counterpart legs for ``txn_id``, each priced, for the manual match picker.
+
+
+        ``days`` is bounded on both sides: it widens a scan over the household''s whole
+
+        transaction history, so a caller passing a large number is asking for a query
+
+        whose cost it cannot see. 30 days is already generous for "the other leg
+
+        posted around then".'
+      operationId: list_transfer_candidates_transactions_transfer_candidates_get
+      parameters:
+      - name: txn_id
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 30
+          minimum: 1
+          default: 5
+          title: Days
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferCandidatesOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /transactions/{txn_id}:
     get:
       tags:
@@ -1102,6 +1156,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TransferOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /transactions/transfers/{group_id}:
+    get:
+      tags:
+      - transactions
+      summary: Get Transfer
+      description: 'Read a link back whole: a leg carries only its group id, so this is how a
+
+        detail view finds the other leg (and the residual the pair cost).'
+      operationId: get_transfer_transactions_transfers__group_id__get
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Group Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferDetailOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - transactions
+      summary: Unlink Transfer
+      description: 'Unlink a transfer, returning both legs to cash-flow and spending.
+
+
+        No body and no 200: the resource the caller named is gone, and the legs''
+
+        restored state is visible by re-reading them (or the reports) like any other
+
+        change.'
+      operationId: unlink_transfer_transactions_transfers__group_id__delete
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Group Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -1322,6 +1452,258 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SpendingReport'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /rules:
+    get:
+      tags:
+      - rules
+      summary: List Rules
+      operationId: list_rules_rules_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RuleOut'
+                title: Response List Rules Rules Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - rules
+      summary: Create Rule
+      operationId: create_rule_rules_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /rules/{rule_id}:
+    patch:
+      tags:
+      - rules
+      summary: Update Rule
+      operationId: update_rule_rules__rule_id__patch
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Rule Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - rules
+      summary: Delete Rule
+      operationId: delete_rule_rules__rule_id__delete
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Rule Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /rules/apply:
+    post:
+      tags:
+      - rules
+      summary: Apply Rules
+      description: 'Run the enabled rules over every existing transaction.
+
+
+        Idempotent: running it twice reports the same ``matched`` and ``updated == 0``
+
+        the second time (PLAN.md''s R acceptance bar). ``matched`` and ``updated``
+
+        count transactions, not (transaction, rule) pairs, so they are comparable —
+
+        the gap between them is the fields a human had already set, which the engine
+
+        will not overwrite.'
+      operationId: apply_rules_rules_apply_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleApplyResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /import/csv/preview:
+    post:
+      tags:
+      - import
+      summary: Preview Csv
+      description: 'Headers, a sample of rows, and a suggested mapping. Writes nothing.
+
+
+        A file that cannot be imported at all — too big, too many rows, or with no
+
+        column that could carry a date and an amount — is rejected here, naming what
+
+        is missing, instead of leading the user into a mapping UI that goes nowhere.'
+      operationId: preview_csv_import_csv_preview_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_preview_csv_import_csv_preview_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvPreviewOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /import/csv/commit:
+    post:
+      tags:
+      - import
+      summary: Commit Csv
+      description: 'Import the file into one account. One transaction: the file lands whole.'
+      operationId: commit_csv_import_csv_commit_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_commit_csv_import_csv_commit_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvCommitOut'
         '422':
           description: Validation Error
           content:
@@ -1582,6 +1964,46 @@ components:
           title: Is Hidden
       type: object
       title: AccountUpdate
+    Body_commit_csv_import_csv_commit_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        mapping:
+          type: string
+          title: Mapping
+          description: 'JSON object: column name → field, or null'
+        default_category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Default Category Id
+        dayfirst:
+          type: boolean
+          title: Dayfirst
+          default: false
+      type: object
+      required:
+      - file
+      - account_id
+      - mapping
+      title: Body_commit_csv_import_csv_commit_post
+    Body_preview_csv_import_csv_preview_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_preview_csv_import_csv_preview_post
     CashFlowPoint:
       properties:
         month:
@@ -1734,6 +2156,95 @@ components:
       - category_name
       - total
       title: CategorySpendRow
+    CsvCommitOut:
+      properties:
+        inserted:
+          type: integer
+          title: Inserted
+        skipped:
+          type: integer
+          title: Skipped
+        suspects:
+          type: integer
+          title: Suspects
+        errors:
+          items:
+            $ref: '#/components/schemas/CsvRowError'
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - inserted
+      - skipped
+      - suspects
+      title: CsvCommitOut
+      description: 'The three counts are the contract; ``errors`` is the row-level extension.
+
+
+        ``suspects`` is a subset of ``inserted`` — those rows landed, flagged
+
+        ``needs_review`` as possible duplicates. ``inserted + skipped + len(errors)``
+
+        equals the number of non-blank data rows in the file.'
+    CsvPreviewOut:
+      properties:
+        headers:
+          items:
+            type: string
+          type: array
+          title: Headers
+        sample:
+          items:
+            items:
+              type: string
+            type: array
+          type: array
+          title: Sample
+        suggested:
+          additionalProperties:
+            anyOf:
+            - type: string
+              enum:
+              - date
+              - amount
+              - debit
+              - credit
+              - description
+              - category
+              - owner
+              - notes
+            - type: 'null'
+          type: object
+          title: Suggested
+      type: object
+      required:
+      - headers
+      - sample
+      - suggested
+      title: CsvPreviewOut
+      description: What the mapping UI is built from — and nothing else (preview writes nothing).
+    CsvRowError:
+      properties:
+        line:
+          type: integer
+          title: Line
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - line
+      - message
+      title: CsvRowError
+      description: 'One row the importer refused to guess at.
+
+
+        ``line`` is the line number in the file as a text editor would show it: the
+
+        header is line 1, so a data row''s line is its file position, not its index in
+
+        the parsed rows. That is the number a human needs to go and fix the cell.'
     FxRateOut:
       properties:
         id:
@@ -2081,6 +2592,316 @@ components:
           title: Sort
       type: object
       title: OwnerUpdate
+    RuleActions:
+      properties:
+        set_category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Set Category Id
+        add_tag_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Add Tag Ids
+        set_owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Set Owner Id
+        rename_merchant:
+          anyOf:
+          - type: string
+            maxLength: 300
+            minLength: 1
+          - type: 'null'
+          title: Rename Merchant
+        set_hidden:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Set Hidden
+        mark_reviewed:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Mark Reviewed
+      additionalProperties: false
+      type: object
+      title: RuleActions
+      description: 'What a matching rule writes. Provenance still has the final say (ADR-0007):
+
+        the engine skips any field a human has already set on the row.'
+    RuleApplyResult:
+      properties:
+        matched:
+          type: integer
+          title: Matched
+        updated:
+          type: integer
+          title: Updated
+      type: object
+      required:
+      - matched
+      - updated
+      title: RuleApplyResult
+      description: 'The two counts "apply to existing" reports, and they are not the same
+
+        number (PLAN.md''s R acceptance bar).
+
+
+        Both count **transactions**, not (transaction, rule) pairs, so they are
+
+        directly comparable: ``matched`` is how many rows at least one enabled rule''s
+
+        conditions matched, ``updated`` is how many of those the engine actually
+
+        changed. A second run over the same rule set reports the same ``matched`` and
+
+        ``updated == 0`` — every field is already at the value the rule would write,
+
+        and re-writing it is not a change.'
+    RuleConditions-Input:
+      properties:
+        merchant_contains:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Merchant Contains
+        description_regex:
+          anyOf:
+          - type: string
+            maxLength: 500
+            minLength: 1
+          - type: 'null'
+          title: Description Regex
+        amount_min:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount Min
+        amount_max:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount Max
+        direction:
+          anyOf:
+          - type: string
+            enum:
+            - in
+            - out
+          - type: 'null'
+          title: Direction
+        account_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Account Ids
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        is_pending:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Pending
+      additionalProperties: false
+      type: object
+      title: RuleConditions
+      description: All optional, all AND-ed. An unset key constrains nothing.
+    RuleConditions-Output:
+      properties:
+        merchant_contains:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Merchant Contains
+        description_regex:
+          anyOf:
+          - type: string
+            maxLength: 500
+            minLength: 1
+          - type: 'null'
+          title: Description Regex
+        amount_min:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount Min
+        amount_max:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount Max
+        direction:
+          anyOf:
+          - type: string
+            enum:
+            - in
+            - out
+          - type: 'null'
+          title: Direction
+        account_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Account Ids
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        is_pending:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Pending
+      additionalProperties: false
+      type: object
+      title: RuleConditions
+      description: All optional, all AND-ed. An unset key constrains nothing.
+    RuleCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        priority:
+          type: integer
+          title: Priority
+          default: 100
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+        conditions:
+          $ref: '#/components/schemas/RuleConditions-Input'
+        actions:
+          $ref: '#/components/schemas/RuleActions'
+      type: object
+      required:
+      - name
+      title: RuleCreate
+    RuleOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        priority:
+          type: integer
+          title: Priority
+        enabled:
+          type: boolean
+          title: Enabled
+        conditions:
+          $ref: '#/components/schemas/RuleConditions-Output'
+        actions:
+          $ref: '#/components/schemas/RuleActions'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - name
+      - priority
+      - enabled
+      - conditions
+      - actions
+      - created_at
+      title: RuleOut
+      description: 'No ``updated_at``, deliberately. The column exists (``TimestampMixin``) but
+
+        is *expired* after an UPDATE flush — it is produced by Postgres, so the ORM
+
+        has to re-read it — and serializing an expired attribute inside an async
+
+        response is a ``MissingGreenlet`` rather than a value. Returning it would mean
+
+        a refresh on every patch for a timestamp nothing renders; no other response in
+
+        the ledger exposes one. The generation of an unset key (``condition``
+
+        instead of ``conditions``) is refused by ``RuleBlob``, so the shape a client
+
+        sees is the closed set with nulls, which is what a form is built from.'
+    RuleUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Name
+        priority:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Priority
+        enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+        conditions:
+          anyOf:
+          - $ref: '#/components/schemas/RuleConditions-Input'
+          - type: 'null'
+        actions:
+          anyOf:
+          - $ref: '#/components/schemas/RuleActions'
+          - type: 'null'
+      type: object
+      title: RuleUpdate
+      description: 'Absent means "no change"; explicit null means "clear" for conditions and
+
+        actions (an empty rule that matches everything and writes nothing is a
+
+        legitimate way to park a rule without deleting it).
+
+
+        ``name``/``priority``/``enabled`` cannot be cleared — a rule with no name or
+
+        no position is a client bug, and saying so beats a NOT NULL violation later.
+
+        ``conditions``/``actions`` replace wholesale rather than merging key by key:
+
+        the builder dialog edits a rule as one object, and a key-wise merge would make
+
+        "I removed that condition" inexpressible.'
     SignupRequest:
       properties:
         email:
@@ -2542,6 +3363,104 @@ components:
         For the rest null is a client bug, and saying so beats ignoring it — silently
 
         dropping a null is how a PATCH appears to succeed while changing nothing.'
+    TransferCandidateOut:
+      properties:
+        transaction:
+          $ref: '#/components/schemas/TransactionOut'
+        days_apart:
+          type: integer
+          title: Days Apart
+        fx_cost_base:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Fx Cost Base
+        within_tolerance:
+          type: boolean
+          title: Within Tolerance
+      type: object
+      required:
+      - transaction
+      - days_apart
+      - fx_cost_base
+      - within_tolerance
+      title: TransferCandidateOut
+      description: 'One possible counterpart leg, with the price of pairing it.
+
+
+        ``fx_cost_base`` is what the transfer group''s ``fx_cost_base`` would become if
+
+        the user committed — Σ base_amount of the two legs. So it is ``None`` for a
+
+        clean same-currency pair (the legs cancel exactly) and the real spread for a
+
+        cross-currency one (ADR-0018). It is computed by the same helper that
+
+        ``link_transfer`` stores, so the number shown before linking is the number
+
+        that lands on the group after it.
+
+
+        ``within_tolerance`` says the pair''s base amounts cancel inside the matching
+
+        tolerance. False is not a refusal: ADR-0018 keeps explicit user linking as the
+
+        override, so the row is still offered — this flag plus the residual are how
+
+        the UI tells "the bank''s rate differed slightly" apart from "that is probably
+
+        not the other leg at all".'
+    TransferCandidatesOut:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TransferCandidateOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: TransferCandidatesOut
+    TransferDetailOut:
+      properties:
+        transfer_group_id:
+          type: string
+          format: uuid
+          title: Transfer Group Id
+        matched_by:
+          type: string
+          title: Matched By
+        fx_cost_base:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Fx Cost Base
+        legs:
+          items:
+            $ref: '#/components/schemas/TransactionOut'
+          type: array
+          title: Legs
+      type: object
+      required:
+      - transfer_group_id
+      - matched_by
+      - fx_cost_base
+      - legs
+      title: TransferDetailOut
+      description: 'A linked transfer read back whole — the group, and both legs with it.
+
+
+        A transaction knows only its ``transfer_group_id``, so this is the only way a
+
+        detail view can show the *other* leg. ``fx_cost_base`` is part of that read
+
+        rather than something the client derives, because ADR-0018 requires the cost
+
+        of a cross-currency transfer to be shown: leaving it out would make hiding it
+
+        the path of least resistance.'
     TransferLink:
       properties:
         from_txn_id:

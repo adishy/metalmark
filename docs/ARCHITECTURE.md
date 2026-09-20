@@ -53,6 +53,14 @@ always in one currency.
   the conversion service (one place, controlled rounding).
 - **`fx_rates` is the single source of truth; `transactions.base_amount` is a cache.** Reporting reads the
   cache for speed but it is recomputed whenever a rate it depends on changes.
+- **`fx_rates` is global, not household-scoped** — the only business table without a `household_id`, so it is
+  outside RLS. Market rates are the same fact for everyone, and this install serves one household (ADR-0027),
+  so it is right for the deployment it was built for; the `household_id` its writer takes is used to scope the
+  `base_amount` recomputation, not the row. The consequence to know: in a database holding two households, a
+  rate one of them writes is immediately visible to the other, while only the writer's `base_amount` caches
+  are recomputed — the other household's cached values would disagree with it until they are recomputed.
+  Making rates household-scoped (column, RLS policy, and a `(household, base, quote, date)` key) is the change
+  if a multi-household install ever needs it.
 - **Which rate:** convert at the rate for the **latest `rate_date` ≤ the target date** (the transaction's
   household-local date, same date basis as month bucketing). "Current" views use the latest available rate.
   If **no rate exists** for a currency/date, the value is flagged **"no rate"** in the UI — never silently 0
@@ -201,6 +209,13 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
      account_ids?, category_id?, is_pending? }` (all AND-ed).
   - `actions`: `{ set_category_id?, add_tag_ids?, set_owner_id?, rename_merchant?, set_hidden?,
      mark_reviewed?, split?: [{amount|pct, category_id, owner_id}] }`.
+  - **Shipped in M1a:** everything above except `split?`, which is deferred to the sync milestone (M2) with
+    the rest of auto-split. The key sets are **closed** (`extra="forbid"`): a rule is stored as JSONB, so
+    nothing in the database would reject a misspelled key, and `{"merchant_contain": "AMZN"}` would store
+    cleanly and then match everything forever with no error anywhere. An unknown key is a 422 at write time.
+  - A rule may write only fields a human has not already set — `field_sources[field] == "user"` is a hard
+    stop (ADR-0007), and each field a rule does write is marked `"rule"`, so a later rule can improve it and
+    a human still outranks both. Running the same rule set twice writes nothing the second time.
 
 ### History & audit
 - **balance_snapshots** — `account_id, balance_date, balance, currency`. Unique `(account_id, balance_date)`.
@@ -288,7 +303,25 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 `field_sources`). Consequences:
 - The manual ledger is built and proven correct **first**; sync is layered on top and can never write
   anything the model doesn't already support (see PLAN.md build order).
-- **CSV import**: upload → column-mapping UI → `import_hash` dedupe preview → commit. `source='csv'`.
+- **CSV import**: preview → column-mapping UI → commit. `source='csv'`.
+  - `POST /import/csv/preview` reads headers, a sample and a *suggested* mapping, and writes nothing. A file
+    that could not be imported at all — too large, too many rows, no column that could carry a date and an
+    amount — is rejected there, naming what is missing, rather than leading into a mapping UI that goes
+    nowhere. Size (2 MB), row (5 000) and column (100) limits are enforced at the parse, so no path holds an
+    unbounded file in memory.
+  - `POST /import/csv/commit` takes the file *again* rather than an upload id: the parse is cheap and
+    stateless, so there is nothing to store between the two calls and a stale id would be one more thing that
+    can disagree with the bytes in front of the user. The mapping rides as a JSON string because its keys are
+    the CSV's own header names.
+  - **Dedupe is exact, and only exact.** A re-import of the same file is skipped on `import_hash`
+    (`(account_id, import_hash)` unique, the race backstop). A *near* match — same amount, close date, same
+    account — is **imported and flagged** `needs_review` as a possible duplicate, never merged and never
+    dropped: two genuine identical charges are a real thing, and silently binning one is worse than a review
+    prompt. The counts say which is which (`inserted` / `skipped` / `suspects`).
+  - An owner column resolves **by name** (case- and padding-insensitive); an unknown name is a row error
+    naming the name rather than a silent fallback to Shared. An unknown *category* name falls back to the
+    commit-time default — a bank's category vocabulary is not the household's, and the balance is right
+    either way.
 - **OFX/QFX import** (defused XML parser): for TreasuryDirect and brokerages SimpleFIN can't reach.
   `source='ofx'`.
 - Manual account: user sets type/currency/balance; balance edits snapshot into `balance_snapshots`.
@@ -303,8 +336,29 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   split, notes). Built with framer-motion + @use-gesture; keyboard shortcuts on desktop (j/k/e/…).
 - **Splits**: parent → N children by `$` or `%`; children carry category + owner. Reporting reads splits
   when present, else the parent.
-- **Rules**: applied on ingest and via "apply to existing" (batch). Ordered by `priority`. Includes
-  Monarch-style auto-split. Deterministic + unit-tested against a fixture set.
+- **Rules**: applied when a transaction is created and via "apply to existing" (batch). Ordered by
+  `priority`, ties broken on `(created_at, id)` so the order is total and stable — `now()` is the
+  *transaction* timestamp, so two rules written in one transaction share a `created_at` exactly and
+  `created_at` alone would leave their order to the query planner. Deterministic and tested against a
+  fixture set. Writes are provenance-gated (see §2); Monarch-style auto-split is deferred to M2.
+- **Transfers, linked by hand**: `GET /transactions/transfer-candidates?txn_id=&days=` offers the rows that
+  could be the other leg, `POST /transactions/transfers` links a pair, `GET /transactions/transfers/{id}`
+  reads a group back whole, `DELETE /transactions/transfers/{id}` unlinks it.
+  - **The exclusion is a property of the link, never of the rows.** Every report asks "is this in a transfer
+    group?", so unlinking is the whole of the repair: the legs return to cash-flow and spending with no other
+    trace, and the group row goes with them (a group with no legs is not a state this model has). That is what
+    makes applying the exclusion safe at all.
+  - Candidates are **not filtered** by whether they look like a match. Out-of-tolerance and no-rate rows are
+    still offered and flagged (`within_tolerance: false`, `fx_cost_base: null`), because ADR-0018 keeps
+    explicit user linking as the override and the ethos is never to hide a row. Every candidate is one the
+    link endpoint would accept — the sign predicate is the same one.
+  - `fx_cost_base` is Σ `base_amount` of the two legs, computed by the **same helper** the picker uses, so the
+    residual shown before committing is by construction the one stored after. It is `null`, not `0`, when
+    there is no residual to report (same-currency legs cancel exactly) or when a leg has no rate at all —
+    ADR-0017's "no rate" is never silently a zero.
+  - Ordering is **time-first** (nearest date, then nearest base-amount gap, then id): a transfer is matched
+    within days, and the tolerance is a flag rather than the sort key. Same-currency legs are compared with no
+    tolerance (there is no rate between them that could have moved); only cross-currency legs need one.
 - **Owners / Shared Views**: attribution lives in the household's `owners` table — a **label, not a login**
   (ADR-0026) — referenced by `accounts.owner_id` (NOT NULL), `transactions.owner_id` and
   `transaction_splits.owner_id` (nullable = inherit). Effective owner = split → transaction → account →
@@ -321,6 +375,12 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   the real fix and is deferred (ADR-0026).
 - **Reporting** (ECharts, all reading the same `/reports` query API; **everything converted to base currency**
   at the correct-date rate, transfers excluded from cash-flow):
+  - **A range is inclusive of both of its days, at timestamp precision.** `start`/`end` are calendar dates
+    while `transacted_at` is a timestamptz, so the upper bound is written `< end + 1 day` and not `<= end`:
+    Postgres reads the latter as `<= end 00:00` and silently drops everything posted later that same day —
+    most of a day's activity, from every report, with the reconciliation identity still holding (revaluation
+    is a residual and cannot notice a missing row). The lower bound needs no such care, since `>= start`
+    already means midnight at the start of the first day.
   - Net worth over time (area/line from `balance_snapshots`), with the **currency-revaluation** contribution
     shown as its own component so multi-currency deltas are explained, not mysterious (ADR-0017).
   - **Cash-flow Sankey**: income sources → category groups → categories for a period.
@@ -396,7 +456,9 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 | **Transfers double-counted → wrong Sankey/cash-flow** | `transfer_group` + auto-match on ingest; reporting excludes transfers | SYNC, L, UR |
 | **Reconnect creates duplicate accounts/history** | Remap by `external_key`; ledger decoupled from connection (transactions survive removal) | SYNC |
 | **Re-importing CSV/OFX duplicates rows** | `import_hash` unique index for manual/imported txns | IMP |
+| **A date bound silently drops a day** (date vs timestamptz comparison) | Half-open upper bounds on every date-ranged query; regression test pins the whole end day (`test_report_range_covers_the_whole_end_day`); dates on the wire are built from local components, never `toISOString` | L, UR |
 | **Cross-household (IDOR) data leak** | RLS or one mandatory scoping layer, not per-handler filters | P0, OPS |
+| **FX rates are global, so one household's rate write is another's** | Accepted for a single-household install (ADR-0027); the boundary and the fix are stated in the currency model above | FX, L |
 | **Open signup: anyone who can reach the instance joins the household** | LAN/VPN-only posture (ADR-0002) is the only gate; `METALMARK_OPEN_SIGNUP=false` before that boundary weakens (ADR-0027) | P0, OPS |
 | **Owner filter read as if it meant one thing across all reports** | Documented asymmetry (account-scoped net worth vs row-scoped cash-flow/spending) + `attribution: "account"` on the series; fractional ownership deferred (ADR-0026) | L, UR |
 | Silent stale data (no webhooks, 6h poll) | Notification on `auth_error` / sync / backup failure | SYNC, OPS |
