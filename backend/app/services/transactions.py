@@ -70,7 +70,17 @@ async def _tag_ids_for(session: AsyncSession, txn_ids: list[uuid.UUID]) -> dict:
 
 
 async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
-                             data: TransactionCreate) -> Transaction:
+                             data: TransactionCreate,
+                             *, source: str = "manual") -> Transaction:
+    """Create one transaction.
+
+    ``source`` records where the row came from (``manual`` by hand, ``csv`` from an
+    import file, ``simplefin`` from sync). It does not change provenance: everything
+    below is still a ``user`` decision, because a human supplied the values either
+    way. The distinction that matters for sync is ADR-0019's manual-origin boundary,
+    which keys off ``external_id`` — an imported row has none, so sync never
+    overwrites it.
+    """
     acct = await _account(session, data.account_id)
     await require_owners(session, [data.owner_id])
     base = await base_currency(session, household_id)
@@ -106,7 +116,7 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
         # a human entering a categorized txn has effectively reviewed it
         review_status="reviewed" if data.category_id else "needs_review",
         notes=data.notes,
-        source="manual",
+        source=source,
         field_sources=field_sources,
     )
     session.add(txn)
