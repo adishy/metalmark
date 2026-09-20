@@ -281,6 +281,53 @@ in one `git revert` without touching anything else.
 Recommendation is to drop it — two class systems is the cost this whole section exists to avoid — but that
 is a call for after step 2, when there is something real to look at.
 
+#### M.1 — the staging above does not work, and this is the measurement
+
+Step 1 was attempted. It is **not** achievable as written, and the reason invalidates the sequence rather
+than the goal. The assumption it rests on — that the precompiled `bulma.css` can sit alongside Tailwind
+while components move over one at a time — is false, because the two frameworks share class names and
+Bulma's copies are `!important`.
+
+Measured on the real stack with `bulma-no-dark-mode.css` loaded and a `theme.scss` bridging every token:
+
+| Probe | Expected | Actual |
+|---|---|---|
+| `p-4 lg:p-6`, at 1440 px | `24px` | **`16px`** |
+| `grid gap-3` | `display: grid`, auto columns | **`grid-template-columns: 0px ×9`** |
+| `block` (not last child) | no margin | **`margin-bottom: 1.5rem`** |
+
+Three separate failures with one cause:
+
+1. **Bulma ships 39 of this app's class names as its own spacing utilities, with `!important`** —
+   `p-4 { padding: 1rem !important }`, `mt-2 { margin-top: 0.5rem !important }`, and so on. The *values*
+   happen to agree with Tailwind's scale, so today they are inert. They are not inert for long: `!important`
+   beats any non-important declaration regardless of media query, so **every responsive override in the app
+   silently stops working**. That is precisely what decision I is made of — `lg:p-6`, `lg:grid-cols-3`,
+   the sidebar breakpoint — so the staged migration would land exactly on top of the desktop-layout work
+   and quietly disable it.
+2. **`grid` and `block` are Bulma components.** `.grid` sets `grid-template-columns`; `.block:not(:last-child)`
+   sets `margin-bottom`. Both are Tailwind display utilities here, used in 12 and 3 files respectively, and
+   Bulma's selectors are more specific so source order cannot save them.
+3. **The truly neutral state is reachable** — the 16 bare-element rules are enumerable and every one can be
+   answered by the bridge, which is what `theme.scss` did — but neutrality reached by luck is not a
+   foundation. The 39 `!important` collisions are not fixable by bridging; they need Bulma's utility layer
+   to not ship.
+
+**What this changes.** Not the goal — the finding is about the *route*. Two routes are left:
+
+- **Atomic.** Bridge + every component + Tailwind removed in **one** commit, so no mixed state ever exists
+  in a running build. Highest risk, but correct, and it is the only route that keeps `!important` out of the
+  app's way while the work is in progress.
+- **Bulma from Sass**, pulling only the component modules actually used (`@use "bulma/sass/components/card"`)
+  instead of the precompiled bundle. This drops the utility layer entirely, which removes all 39 collisions
+  *and* most of the 630 KiB — and it is the path Bulma itself documents for configuration. It costs a `sass`
+  dependency and a Vite-side compile.
+
+Either way, **decision I must not be built while both class systems are loaded**, and the reverse of §M's
+original ordering is now correct: the shell should be *the first thing written in the new substrate*, not
+the thing it is migrated under. The original argument for Bulma-first — do not build the unbuilt UI twice —
+still holds; what has changed is that "Bulma-first" now means resolving M.1 first, not loading a stylesheet.
+
 ## Order of work
 
 Admin defect first (it is broken shipped behaviour and it is small), then the four requested items in the
