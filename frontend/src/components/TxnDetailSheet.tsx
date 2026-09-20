@@ -169,8 +169,14 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
                   type="button"
                   onClick={() => toggleTag(t.id)}
                   aria-pressed={on}
-                  className={`rounded-full border px-3 py-1 text-xs ${
-                    on ? "border-accent bg-accent/20 text-accent" : "border-border-strong text-fg-muted hover:text-fg"
+                  // The canonical chip geometry (§4.5), because a chip is a
+                  // thumb target: the `px-3 py-1 text-xs` this used to be
+                  // computes to 26px, which §4.5 names as forbidden. It went
+                  // unnoticed until the demo ledger grew tags — with none
+                  // seeded, none of these buttons ever rendered for the
+                  // target-size sweep to measure.
+                  className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
+                    on ? "border-accent bg-accent/20 font-medium text-accent" : "border-border-strong text-fg-muted hover:text-fg"
                   }`}
                   data-testid={`detail-tag-${t.id}`}
                 >

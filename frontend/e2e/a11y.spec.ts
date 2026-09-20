@@ -20,6 +20,15 @@ import { login } from "./helpers";
 // sweep walks the Settings tabs and opens the overlays rather than assuming a
 // route reaches them. A view that is never measured passes silently, which
 // looks identical to a view that is clean.
+//
+// Data is the other half of that, and it bites the same way. A control that
+// renders *per row of data* cannot be measured on a database where that data
+// does not exist — the sweep sees the empty state, reports zero failures, and
+// the layout is only ever exercised by a human who happens to have rows. The
+// detail sheet's tag chips went out at 26px tall for exactly this reason: the
+// demo ledger had no tags, so those buttons never appeared to be measured.
+// This is an argument for the demo seed being *broad* (a little of everything
+// the UI can render), not just for it being present.
 
 const MIN = 44;
 
