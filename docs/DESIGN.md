@@ -833,7 +833,14 @@ scrolled flush to the viewport edge ends up underneath a bar. `index.css` sets
 `scroll-padding-top` and `scroll-padding-bottom` of `4rem` on `html` to clear either
 bar. Anything that changes the header or tab-bar height must change those too.
 
-- **Bottom tab bar, 5 items maximum** (`AppShell.tsx` has exactly 5).
+- **The bottom tab bar carries 5 items maximum.** The cap is the *bar's*, and the
+  reason is thumb reach on a phone: a sixth target is no longer comfortably
+  reachable with one hand. It is not a cap on the product's navigation — the
+  desktop nav is a row of text in a header with room to spare, so it renders
+  every item and the bar takes the first five (`AppShell.tsx`'s `TAB_BAR_MAX`).
+  This is how `/admin` is a nav destination without becoming a sixth tab.
+  Prefer a fifth item over a sixth tab: if a new destination has no room in the
+  bar, its phone path is a section inside Settings, not a squeezed tab.
 - Each item: `min-h-11` plus `pb-[env(safe-area-inset-bottom)]`. The current
   `py-3 text-xs` computes to 40 px and sits under the home indicator without the
   inset.

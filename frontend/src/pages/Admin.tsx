@@ -120,6 +120,12 @@ export default function Admin() {
   return (
     <div className="space-y-4">
       <header>
+        {/* "Admin" is the eyebrow rather than the heading on purpose: the page
+            is one screen of sync operations, and calling *it* "Admin" would
+            promise a broader console. The word is here because it is the one a
+            reader scans for — this page shipped with no occurrence of it
+            anywhere, which is a large part of why it could not be found. */}
+        <p className="text-xs font-semibold tracking-wide text-fg-muted uppercase">Admin</p>
         <h1 className="text-lg font-medium text-fg">Sync activity</h1>
         <p className="mt-1 text-sm text-fg-muted">
           What is running, what ran, and what to do about it. Adding or removing a bank's

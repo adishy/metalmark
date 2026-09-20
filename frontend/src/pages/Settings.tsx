@@ -58,6 +58,10 @@ import {
 } from "@/components/form";
 
 const TABS = [
+  // First, and admin-only. The position is deliberate: the sync control panel
+  // shipped complete and could not be found, so the settings entry point is the
+  // first thing an administrator sees here rather than the fifth of eight.
+  { id: "admin", label: "Admin", adminOnly: true },
   { id: "categories", label: "Categories" },
   { id: "tags", label: "Tags" },
   { id: "currencies", label: "Currencies" },
@@ -72,14 +76,23 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Settings() {
   const [tab, setTab] = useState<TabId>("categories");
+  const { me } = useAuth();
+  const isAdmin = me?.user.is_admin === true;
+  // `adminOnly` is declared on exactly one member of the union, so a bare
+  // property read would not typecheck — the `in` check narrows to it, and its
+  // only value there is `true`. A member's list is the eight that follow.
+  const tabs = TABS.filter((t) => !("adminOnly" in t) || isAdmin);
   // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
   // it. Declaring role="tablist" without that model announces a tab widget that
   // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   function onTabKey(e: React.KeyboardEvent<HTMLButtonElement>) {
-    const i = TABS.findIndex((t) => t.id === tab);
-    const last = TABS.length - 1;
+    // `tabs`, not `TABS`: the roving index has to walk the list that is actually
+    // rendered, or an administrator's arrow keys land one short of the end and a
+    // member's skip the tab their index no longer matches.
+    const i = tabs.findIndex((t) => t.id === tab);
+    const last = tabs.length - 1;
     let next: number;
     if (e.key === "ArrowRight") next = i === last ? 0 : i + 1;
     else if (e.key === "ArrowLeft") next = i === 0 ? last : i - 1;
@@ -89,7 +102,7 @@ export default function Settings() {
     e.preventDefault();
     // Automatic activation: the panel is a local swap, so selecting on focus
     // saves the Enter that manual activation would cost.
-    setTab(TABS[next].id);
+    setTab(tabs[next].id);
     tabRefs.current[next]?.focus();
   }
 
@@ -101,7 +114,7 @@ export default function Settings() {
         role="tablist"
         aria-label="Settings sections"
       >
-        {TABS.map((t, i) => (
+        {tabs.map((t, i) => (
           <button
             key={t.id}
             ref={(el) => {
@@ -130,6 +143,7 @@ export default function Settings() {
         aria-labelledby={`tab-${tab}`}
         data-testid={`settings-panel-${tab}`}
       >
+        {tab === "admin" && <AdminSection onOpenConnections={() => setTab("connections")} />}
         {tab === "categories" && <CategoriesSection />}
         {tab === "tags" && <TagsSection />}
         {tab === "currencies" && <CurrenciesSection />}
@@ -149,6 +163,67 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <h2 className="text-sm font-semibold text-fg">{title}</h2>
       {children}
     </section>
+  );
+}
+
+// ------------------------------------------------------------------- admin
+
+/**
+ * The way in to the sync control panel.
+ *
+ * This tab exists because the panel did not need a feature, it needed a door.
+ * It shipped complete — queue, runs, per-run logs, pause, cancel, retune, all
+ * tested and green in CI — and the only link to it in the entire app was a
+ * muted aside in the fifth of eight Settings tabs, with the word "Admin"
+ * appearing nowhere in the interface. Anything that cannot be found is not
+ * shipped, so there are now two doors and both of them say "Admin": this tab,
+ * first in the list, and a nav item for administrators.
+ *
+ * The tab is *filtered* rather than shown-and-refused, matching the nav item and
+ * the route. The server is the check that matters — every route the panel calls
+ * enforces `require_owner` — so a member never sees a door that would only open
+ * onto 403s.
+ */
+function AdminSection({ onOpenConnections }: { onOpenConnections: () => void }) {
+  return (
+    <div className="space-y-4">
+      <Card title="MetalMark internals">
+        <p className="text-sm text-fg-muted">
+          <span className="font-semibold text-fg">Sync activity</span> is the control panel for
+          everything MetalMark does on its own — what is queued, what is running, what ran, and the
+          log of each run.
+        </p>
+        <ul className="ml-4 list-disc space-y-1 text-sm text-fg-muted">
+          <li>Trigger a sync now, and watch the job it queues.</li>
+          <li>Pause a connection, or change how often it runs.</li>
+          <li>Inspect and cancel a job while it is running.</li>
+          <li>Read a run's counts and its ordered event log.</li>
+        </ul>
+        <Link
+          to="/admin"
+          className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-semibold text-accent-fg"
+          data-testid="admin-open-panel"
+        >
+          Open the control panel
+        </Link>
+      </Card>
+
+      <Card title="Bank connections">
+        <p className="text-sm text-fg-muted">
+          Adding, reconnecting or removing a bank's credentials is in the{" "}
+          <button
+            type="button"
+            className="text-accent underline"
+            onClick={onOpenConnections}
+            data-testid="admin-goto-connections"
+          >
+            Connections
+          </button>{" "}
+          tab. Operating a connection once it exists — pausing it, retuning it, reading its runs —
+          is the control panel.
+        </p>
+      </Card>
+    </div>
   );
 }
 

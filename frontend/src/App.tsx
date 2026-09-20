@@ -41,12 +41,13 @@ export default function App() {
         <Route path="/review" element={<Review />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
-        {/* The sync control panel. Absent from the nav for the same reason the
-            design system below is — DESIGN.md §4.13 caps the tab bar at five —
-            but it is a real destination, reached from Settings → Connections.
-            The client-side admin check is a courtesy that keeps a member from
-            landing on a page of 403s; every route it calls enforces owner
-            server-side, and that is the check that matters. */}
+        {/* The sync control panel. Now a nav destination for administrators —
+            the desktop nav has room for a sixth item even though the phone tab
+            bar does not (§4.13), and it was reachable only from a muted aside in
+            Settings before, which is to say not reachable. The client-side admin
+            check is a courtesy that keeps a member from landing on a page of
+            403s; every route it calls enforces owner server-side, and that is
+            the check that matters. */}
         <Route
           path="/admin"
           element={me.user.is_admin ? <Admin /> : <Navigate to="/accounts" replace />}

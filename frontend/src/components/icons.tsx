@@ -88,3 +88,16 @@ export function CheckIcon(props: SVGProps<SVGSVGElement>) {
     </Svg>
   );
 }
+
+/** Controls, not a shield. The admin panel is where you *operate* sync —
+ *  trigger, pause, retune, cancel, read the logs — and a shield would promise
+ *  an access-control screen this is not. */
+export function AdminIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M4 7h7M17 7h3M4 17h3M13 17h7" />
+      <circle cx="14" cy="7" r="2.5" />
+      <circle cx="10" cy="17" r="2.5" />
+    </Svg>
+  );
+}

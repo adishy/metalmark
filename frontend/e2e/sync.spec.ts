@@ -124,8 +124,10 @@ test.describe("bank sync", () => {
     await expect(page.getByTestId(`conn-paused-${connectionId}`)).toHaveCount(0);
     await expect(page.getByTestId(`conn-last-error-${connectionId}`)).toHaveCount(0);
 
-    // The link into the panel, which is the only way to reach `/admin` — it is
-    // deliberately not a nav destination (DESIGN.md §4.13 caps the tab bar at five).
+    // The link into the panel from the tab that owns the credential. It used to
+    // be the *only* way to reach `/admin`; the panel is now a nav destination
+    // for administrators and has its own Settings tab, and this link is the
+    // third door — the one someone standing in Connections would look for.
     await page.getByTestId("open-admin").click();
     await expect(page.getByRole("heading", { name: "Sync activity" })).toBeVisible();
     await expect(page.getByTestId(`conn-row-${connectionId}`)).toBeVisible();
@@ -199,7 +201,15 @@ test.describe("bank sync", () => {
   test("the panel pauses, retunes, and resumes the connection", async ({ page }) => {
     expect(connectionId, "test 1 must have created the connection this one acts on").toBeTruthy();
     await login(page);
-    await page.goto("/admin");
+
+    // Arrive through the nav item rather than by URL, so the door an
+    // administrator actually uses is the one this test walks through. The panel
+    // shipped with no nav entry and no occurrence of the word "Admin" anywhere
+    // in the interface; both halves of that are asserted here.
+    const adminNav = page.getByTestId("nav-admin");
+    await expect(adminNav).toBeVisible();
+    await adminNav.click();
+    await expect(page.getByRole("heading", { name: "Sync activity" })).toBeVisible();
 
     const row = page.getByTestId(`conn-row-${connectionId}`);
     const syncNow = page.getByTestId(`sync-now-${connectionId}`);

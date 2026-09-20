@@ -2,33 +2,46 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { ThemeButton } from "@/components/ThemeToggle";
-import { ChartIcon, ListIcon, ReviewIcon, SettingsIcon, WalletIcon } from "@/components/icons";
+import { AdminIcon, ChartIcon, ListIcon, ReviewIcon, SettingsIcon, WalletIcon } from "@/components/icons";
 
 type NavItem = {
   to: string;
   label: string;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** Rendered only for an administrator. See the note on `NAV` below. */
+  adminOnly?: boolean;
 };
 
-// Five items, the maximum for a bottom tab bar (§4.13). One list drives the
-// desktop nav, the phone tab bar, and the document title, so a new route cannot
-// end up in one and missing from another.
+// One list drives the desktop nav, the phone tab bar, and the document title, so
+// a new route cannot end up in one and missing from another.
+//
+// The five-item cap is the **bottom tab bar's** (§4.13) — it is a phone control,
+// and the cap exists because a sixth target stops being thumb-reachable. The
+// desktop nav is a row of text in a header with room to spare, so it renders
+// everything and the tab bar takes the first five.
+//
+// That distinction is what makes the sixth item possible, and it needs to be
+// possible: this panel shipped complete — queue, runs, logs, pause, cancel, all
+// tested and green in CI — and the person who asked for it could not find it.
+// The only link to it in the whole app was a muted aside in the fifth of eight
+// Settings tabs, and the word "Admin" appeared nowhere in the UI. A destination
+// nothing points at is not a shipped feature.
 const NAV: NavItem[] = [
   { to: "/accounts", label: "Accounts", Icon: WalletIcon },
   { to: "/transactions", label: "Transactions", Icon: ListIcon },
   { to: "/review", label: "Review", Icon: ReviewIcon },
   { to: "/reports", label: "Reports", Icon: ChartIcon },
   { to: "/settings", label: "Settings", Icon: SettingsIcon },
+  { to: "/admin", label: "Admin", Icon: AdminIcon, adminOnly: true },
 ];
 
-// Routes that render in the shell but are not destinations in the nav.
-//
-// The nav is capped at five items (§4.13), so a page that would be a sixth has
-// to be reachable from one of the five instead. Both of these are: the sync
-// panel from Settings → Connections, the design system from nothing at all
-// (it is a development tool, typed by hand).
+//: How many items the phone tab bar can carry (§4.13). The desktop nav has no
+//: such limit; see `NAV`.
+const TAB_BAR_MAX = 5;
+
+// Routes that render in the shell but are not destinations in the nav. The
+// design system is the only one left: it is a development tool, typed by hand.
 const EXTRA_TITLES: Record<string, string> = {
-  "/admin": "Sync activity",
   "/debug/design-system": "Design system",
 };
 
@@ -36,12 +49,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { pathname } = useLocation();
 
+  const isAdmin = me?.user.is_admin === true;
+  const items = NAV.filter((n) => !n.adminOnly || isAdmin);
+
   // The primary orientation cue for a screen reader and for a phone's tab
   // switcher, and it was the same string on every route (§7.11).
   useEffect(() => {
-    const here = NAV.find((n) => n.to === pathname)?.label ?? EXTRA_TITLES[pathname];
+    const here = items.find((n) => n.to === pathname)?.label ?? EXTRA_TITLES[pathname];
     document.title = here ? `${here} · MetalMark` : "MetalMark";
-  }, [pathname]);
+    // `items` is a new array each render; `isAdmin` is what actually varies.
+  }, [pathname, isAdmin]);
 
   return (
     <div className="flex min-h-full flex-col">
@@ -54,7 +71,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         <div className="flex min-w-0 items-center gap-6">
           <span className="text-lg font-semibold text-accent">MetalMark</span>
           <nav className="hidden gap-1 sm:flex" aria-label="Main">
-            {NAV.map((n) => (
+            {items.map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
@@ -94,12 +111,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
       {/* Phone navigation. `aria-current` gives the screen reader what
           `font-semibold` gives the eye — the accent hue alone is a colour-only
-          signal, which SC 1.4.1 forbids (§4.13). */}
+          signal, which SC 1.4.1 forbids (§4.13). The first five only: this bar
+          is where the cap lives, and an admin reaches the panel from
+          Settings → Admin on a phone. */}
       <nav
         className="sticky bottom-0 z-40 flex border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] sm:hidden"
         aria-label="Main"
       >
-        {NAV.map((n) => (
+        {items.slice(0, TAB_BAR_MAX).map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
