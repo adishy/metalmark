@@ -67,3 +67,4 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0033](0033-investment-events-and-the-cash-ledger.md) | Investment events and the cash ledger: a buy is not a transaction | Accepted |
 | [0034](0034-position-from-history-when-history-exists.md) | A position's quantity comes from history too, when history exists | Accepted |
 | [0035](0035-reports-read-once.md) | A report reads each thing once, and rounds where it says it rounds | Accepted |
+| [0036](0036-portable-export.md) | A portable export is a document, a backup is the instance, and no id crosses between | Accepted |

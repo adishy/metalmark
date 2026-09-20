@@ -31,7 +31,7 @@ PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-metalmark}"
 NETWORK="${COMPOSE_PROJECT}_default"
 
-GATES=(lint pytest frontend contract e2e walkthrough reset)
+GATES=(lint pytest frontend contract drill e2e walkthrough reset)
 RESULTS=()
 FAILED=0
 MUTATED=0
@@ -60,6 +60,7 @@ gates (default: all, in this order):
   pytest       backend suite against a real Postgres
   frontend     tsc --noEmit, vitest, production build
   contract     protected routes 401 unauthenticated; openapi.yaml vs the live spec
+  drill        back up the live database and restore it into a scratch one
   e2e          Playwright against the compose stack (in the pinned image)
   walkthrough  M1a paths the Playwright suite does not reach, over real HTTP
   reset        drop the volume, migrate, seed demo data
@@ -166,6 +167,15 @@ gate_contract() {
   docker compose exec -T api python /tmp/openapi_drift_check.py /tmp/checked-openapi.yaml || fail=1
 
   return $fail
+}
+
+gate_drill() {
+  require_stack
+  # A backup nobody has restored from is a belief, not a capability, so the drill
+  # is a gate rather than a script beside the backup one. It reads the live
+  # database and writes only to its own scratch database, which it drops on the
+  # way out — so it needs no `reset` afterwards and is not in MUTATING.
+  "$ROOT/scripts/restore_drill.sh"
 }
 
 gate_e2e() {

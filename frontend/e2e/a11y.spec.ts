@@ -43,6 +43,7 @@ const SETTINGS_TABS = [
   "tags",
   "currencies",
   "household",
+  "data",
   "connections",
   "owners",
   "rules",

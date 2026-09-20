@@ -10,13 +10,11 @@
 // an import refreshes the ledger and the reports exactly like any other write.
 // That matters more here than elsewhere: one commit can add hundreds of rows.
 //
-// These calls are multipart, which api/client.ts cannot express (its one
-// `request` helper JSON-encodes every body), so they speak fetch directly. The
-// CSRF token comes from the auth context rather than the client's module-private
-// copy — the same token, read from a place this module is allowed to look.
+// These calls are multipart, so they go through `upload` in api/client.ts — the
+// one helper that knows the CSRF header, shared with the document importer.
 
 import { useMutation } from "@tanstack/react-query";
-import { ApiError } from "@/api/client";
+import { upload } from "@/api/client";
 import { useInvalidateLedger } from "@/api/hooks";
 import { useAuth } from "@/auth/AuthContext";
 import type { UUID } from "@/api/types";
@@ -136,30 +134,6 @@ const OFX_EXTENSIONS = [".ofx", ".qfx"];
 export function isOfxFile(file: File): boolean {
   const name = file.name.toLowerCase();
   return OFX_EXTENSIONS.some((ext) => name.endsWith(ext));
-}
-
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
-
-async function upload<T>(path: string, body: FormData, csrf: string | null): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (csrf) headers["X-CSRF-Token"] = csrf;
-  // No Content-Type of our own: the browser sets it, boundary and all.
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers,
-    credentials: "include",
-    body,
-  });
-
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) {
-    const detail =
-      (data && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))) ||
-      res.statusText;
-    throw new ApiError(res.status, detail);
-  }
-  return data as T;
 }
 
 /** Headers, a sample of rows, and a suggested mapping. Writes nothing, so it is

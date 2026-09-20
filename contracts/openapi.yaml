@@ -3058,6 +3058,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /export:
+    get:
+      tags:
+      - portability
+      summary: Export Household
+      description: 'The household as one ``metalmark.export`` document.
+
+
+        Served as a download rather than as a JSON body so a browser saves it instead
+
+        of rendering several megabytes of ledger into a tab.'
+      operationId: export_household_export_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /export/transactions.csv:
+    get:
+      tags:
+      - portability
+      summary: Export Transactions Csv
+      description: 'One account''s transactions as a CSV the importer can read back.
+
+
+        ``account_id`` is required, not a filter. The CSV importer lands every row of
+
+        a file into **one** account, so a file holding several accounts'' rows would
+
+        re-import them all into whichever account the user picked — a file that says
+
+        one thing and does another. Exporting one account at a time is the only shape
+
+        in which the round trip means what it looks like.
+
+
+        The whole household is in ``GET /export``. This one is the spreadsheet.'
+      operationId: export_transactions_csv_export_transactions_csv_get
+      parameters:
+      - name: account_id
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /import:
+    post:
+      tags:
+      - portability
+      summary: Import Household
+      description: 'Load an exported document into this household.
+
+
+        Idempotent against natural keys: importing the same document twice creates
+
+        nothing the second time. See ``services.portability`` for what "the same" means
+
+        per entity — and for why a credential cannot be in the document at all, so an
+
+        imported connection lands ``auth_error`` and needs reconnecting.'
+      operationId: import_household_import_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_import_household_import_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AccountCreate:
@@ -3419,6 +3545,16 @@ components:
       - file
       - account_id
       title: Body_commit_ofx_import_ofx_commit_post
+    Body_import_household_import_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_import_household_import_post
     Body_preview_csv_import_csv_preview_post:
       properties:
         file:
@@ -4355,6 +4491,47 @@ components:
         ``base_currency`` would be accepted and silently ignored, and the caller would
 
         believe the currency had changed.'
+    ImportOut:
+      properties:
+        created:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Created
+          default: {}
+        matched:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Matched
+          default: {}
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          default: []
+      type: object
+      title: ImportOut
+      description: 'Per-entity counts, so the UI can say what actually happened.
+
+
+        ``created`` and ``matched`` are keyed by entity name rather than being fixed
+
+        fields, for the same reason the export''s sections are a list of named blocks:
+
+        a new entity is then one entry the UI can already render, not a schema change
+
+        and a client release. The UI lists what is non-zero and ignores the rest.
+
+
+        ``warnings`` is where a reference that could not be resolved is recorded. It
+
+        is deliberately not an error: a rule pointing at a category the user deleted
+
+        last month is a real, importable document, and refusing the whole file over it
+
+        would make an export from a live household un-importable.'
     InvestmentTransactionCreate:
       properties:
         account_id:

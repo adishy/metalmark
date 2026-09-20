@@ -47,6 +47,12 @@ services:
       - metalmark_secret_key
     volumes:
       - ./backend:/app        # live reload in dev
+      # The repo's scripts, at the path CI mounts them. backup.sh/restore.sh run
+      # the crypto as `exec -T api python /scripts/backup.py` rather than
+      # starting a second container, and backend/tests/unit/test_backup_crypto.py
+      # imports the file from here — without this mount a plain `pytest` in this
+      # container cannot see scripts/ at all, since only backend/ is mounted.
+      - ./scripts:/scripts:ro
     depends_on:
       db:
         condition: service_healthy

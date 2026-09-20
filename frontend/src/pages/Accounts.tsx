@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import {
   useAccounts,
   useCreateAccount,
@@ -7,10 +8,11 @@ import {
   useOwners,
   useUpdateAccount,
 } from "@/api/hooks";
+import { downloadAccountCsv } from "@/api/portability";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
-import { Button, Checkbox, Field, Input, Select, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -290,6 +292,7 @@ function AddAccountForm({
 function EditAccountDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const update = useUpdateAccount();
   const del = useDeleteAccount();
+  const exportCsv = useMutation({ mutationFn: downloadAccountCsv });
   const [name, setName] = useState(account.name);
   const [institution, setInstitution] = useState(account.institution ?? "");
   const [balance, setBalance] = useState(account.current_balance);
@@ -373,6 +376,31 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         {update.isError && (
           <p className="text-sm text-negative" role="alert">
             {(update.error as Error).message}
+          </p>
+        )}
+
+        {/* Here rather than in Settings → Data, because this is where someone
+            asks the question. The Settings tab can export one account too, but
+            nobody looks for this account's file in a list of everybody's
+            settings. The two call the same route. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            disabled={exportCsv.isPending}
+            aria-busy={exportCsv.isPending}
+            onClick={() => exportCsv.mutate(account.id)}
+            data-testid="account-export-csv"
+          >
+            {exportCsv.isPending && <Spinner />}
+            Export CSV
+          </Button>
+          <span className="text-xs text-fg-muted">
+            This account's transactions, in a file the CSV importer can read back.
+          </span>
+        </div>
+        {exportCsv.isError && (
+          <p className="text-sm text-negative" role="alert" data-testid="account-export-error">
+            {(exportCsv.error as Error).message}
           </p>
         )}
 

@@ -163,11 +163,14 @@ jobs:
       # FastAPI's dependency ordering rather than a security property. The
       # multipart routes are covered in-process instead, where a body is easy to
       # supply (tests/integration/test_imports.py) — /import is not listed because
-      # its routes are all POSTs and a GET there is a 404, not a 401.
+      # its routes are all POSTs and a GET there is a 404, not a 401. /export is
+      # listed and /export/transactions.csv is not: the CSV route takes a required
+      # query parameter, so an unauthenticated GET without one is a 422 before it
+      # is a 401.
       - name: Protected endpoints require auth (401)
         run: |
           fail=0
-          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules /fx-rates /connections /connections/runs /connections/jobs; do
+          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules /fx-rates /connections /connections/runs /connections/jobs /export; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}")
             echo "GET ${path} -> ${code}"
             if [ "$code" != "401" ]; then
@@ -189,6 +192,56 @@ jobs:
           docker compose cp contracts/openapi.yaml api:/tmp/checked-openapi.yaml
           docker compose cp scripts/openapi_drift_check.py api:/tmp/openapi_drift_check.py
           docker compose exec -T api python /tmp/openapi_drift_check.py /tmp/checked-openapi.yaml
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # --------------------------------------------------------------------------
+  # Restore drill: back the database up, restore it into a scratch database, and
+  # compare. A backup script nobody has restored from is a belief, not a
+  # capability — so the drill is a gate, and this is the only place it runs
+  # against a database that has migrations and demo data in it rather than
+  # whatever a developer's volume happens to hold.
+  # --------------------------------------------------------------------------
+  drill:
+    runs-on: ubuntu-24.04
+    env:
+      COMPOSE_PROJECT_NAME: metalmark
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create runtime secret (Fernet key)
+        run: |
+          mkdir -p secrets
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/metalmark_secret_key
+
+      - name: Start API + DB
+        run: docker compose up -d --build db api
+
+      # The drill compares the two databases row for row, and a database with no
+      # rows in it compares equal to anything. Migrating and seeding first is what
+      # makes the comparison mean something — so this seeds the *demo* ledger, not
+      # the bare bootstrap: the demo path writes through the real services, and a
+      # drill run over the four tables a fresh household fills would not notice a
+      # restore that quietly dropped `transactions`.
+      - name: Migrate database
+        run: docker compose run --rm api alembic upgrade head
+
+      - name: Seed demo data (so there are rows to compare)
+        run: >-
+          docker compose run --rm
+          -e METALMARK_SEED_EMAIL=owner@example.com
+          -e METALMARK_SEED_PASSWORD=devpassword123
+          -e METALMARK_SEED_HOUSEHOLD=Home
+          api python -m app.seed --demo
+
+      # The drill generates a throwaway key when METALMARK_BACKUP_KEY is unset and
+      # uses the real one when it is, so this job needs no secret: the archive it
+      # writes is decrypted by the key that wrote it and is deleted with the
+      # scratch database on the way out.
+      - name: Restore drill (dump, encrypt, restore into a scratch database)
+        run: ./scripts/restore_drill.sh
 
       - name: Tear down
         if: always()

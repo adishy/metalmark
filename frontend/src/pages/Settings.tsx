@@ -1,6 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/auth/AuthContext";
+import {
+  downloadAccountCsv,
+  downloadExport,
+  useImportDocument,
+  type ImportResult,
+} from "@/api/portability";
 import {
   useAccounts,
   useCategories,
@@ -67,6 +74,7 @@ const TABS = [
   { id: "tags", label: "Tags" },
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
+  { id: "data", label: "Data" },
   { id: "connections", label: "Connections" },
   { id: "owners", label: "Owners" },
   { id: "rules", label: "Rules" },
@@ -149,6 +157,7 @@ export default function Settings() {
         {tab === "tags" && <TagsSection />}
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
+        {tab === "data" && <DataSection />}
         {tab === "connections" && <ConnectionsTab />}
         {tab === "owners" && <OwnersSection />}
         {tab === "rules" && <RulesSection />}
@@ -855,6 +864,261 @@ function HouseholdSection() {
     </div>
   );
 }
+
+// --------------------------------------------------------------------- data
+
+/**
+ * Getting the ledger out, and getting one back in (ADR-0036).
+ *
+ * Three cards, in the order a person needs them: everything out, one account
+ * out, a document back in. Export is for any member — reading the household's
+ * ledger is what being a member already is — and import is owner-only, because
+ * it can merge a second household's history into this one and change its base
+ * currency. That is the same split the API enforces; the section states it
+ * rather than rendering controls that would 403.
+ *
+ * The card that will be misread is the first one, so it says the quiet part out
+ * loud: this is a *portable* document, not a backup. It has no credentials, no
+ * user accounts and no sessions, and restoring an instance from one is not a
+ * thing that works. The backup is `scripts/backup.sh`, and the drill that proves
+ * it is a CI gate.
+ */
+function DataSection() {
+  const household = useHousehold();
+  const accounts = useAccounts();
+  const isOwner = household.data?.role === "owner";
+
+  // Downloads as mutations, so the button can say it is working and a failure
+  // can land somewhere visible. They are reads on the wire; what they are here
+  // is one interaction with a beginning, an end and an error.
+  const exportAll = useMutation({ mutationFn: downloadExport });
+  const exportCsv = useMutation({ mutationFn: downloadAccountCsv });
+  const importDoc = useImportDocument();
+
+  const [accountId, setAccountId] = useState("");
+  const [picked, setPicked] = useState<File | null>(null);
+  const accountField = useFieldId("data-account");
+  const fileField = useFieldId("data-file");
+
+  const chosen = accountId || accounts.data?.[0]?.id || "";
+
+  return (
+    <div className="space-y-4">
+      <Card title="Export everything">
+        <p className="text-sm text-fg-muted">
+          Your whole ledger in one JSON document: accounts, transactions and their splits,
+          categories, rules, tags, owners, securities, holdings and the exchange rates behind the
+          conversions.
+        </p>
+        <p className="text-sm text-fg-muted">
+          It is a <strong className="text-fg">portable copy, not a backup</strong>. It holds what
+          you entered and nothing about the instance — no user accounts, no sessions, and
+          deliberately no bank credentials, so an imported connection comes back needing to be
+          reconnected. Backing up an instance is <code>scripts/backup.sh</code>.
+        </p>
+        <Button
+          onClick={() => exportAll.mutate()}
+          disabled={exportAll.isPending}
+          aria-busy={exportAll.isPending}
+          data-testid="export-download"
+        >
+          {exportAll.isPending && <Spinner />}
+          Download export
+        </Button>
+        {exportAll.isError && (
+          <p className="text-sm text-negative" role="alert" data-testid="export-error">
+            {(exportAll.error as Error).message}
+          </p>
+        )}
+      </Card>
+
+      <Card title="Export one account as CSV">
+        <p className="text-sm text-fg-muted">
+          A spreadsheet of one account's transactions, with the columns the CSV importer already
+          knows — so it can be read straight back in, here or anywhere else.
+        </p>
+        <p className="text-xs text-fg-muted">
+          One account per file on purpose: an import lands every row of a file in the account you
+          pick at the other end, so a file holding several accounts would put them all in one.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="Account" htmlFor={accountField} className="w-56">
+            <Select
+              id={accountField}
+              value={chosen}
+              onChange={(e) => setAccountId(e.target.value)}
+              data-testid="export-csv-account"
+            >
+              {accounts.data?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Button
+            variant="secondary"
+            disabled={!chosen || exportCsv.isPending}
+            aria-busy={exportCsv.isPending}
+            onClick={() => exportCsv.mutate(chosen)}
+            data-testid="export-csv-download"
+          >
+            {exportCsv.isPending && <Spinner />}
+            Download CSV
+          </Button>
+        </div>
+        {exportCsv.isError && (
+          <p className="text-sm text-negative" role="alert" data-testid="export-csv-error">
+            {(exportCsv.error as Error).message}
+          </p>
+        )}
+      </Card>
+
+      <Card title="Import a document">
+        {!isOwner ? (
+          <p className="text-sm text-fg-muted" data-testid="import-owner-only">
+            Only a household owner can import. An import merges a second history into this
+            household's own, so it is not a member's call to make.
+          </p>
+        ) : (
+          <form
+            className="space-y-3"
+            data-testid="import-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (picked) importDoc.mutate(picked);
+            }}
+          >
+            <p className="text-sm text-fg-muted">
+              A document exported from MetalMark — this household or another one. It merges:
+              nothing here is deleted, and anything the document and this household already agree
+              on is left alone rather than duplicated.
+            </p>
+            <Field
+              label="Export file"
+              htmlFor={fileField}
+              hint="The .json file a “Download export” saved."
+            >
+              <Input
+                id={fileField}
+                type="file"
+                accept=".json,application/json"
+                onChange={(e) => {
+                  setPicked(e.target.files?.[0] ?? null);
+                  // The previous result is about the previous file, and leaving
+                  // it on screen beside a newly picked one is a sentence about
+                  // the wrong document.
+                  importDoc.reset();
+                }}
+                data-testid="import-document-file"
+              />
+            </Field>
+            <Button
+              type="submit"
+              disabled={!picked || importDoc.isPending}
+              aria-busy={importDoc.isPending}
+              data-testid="import-document-submit"
+            >
+              {importDoc.isPending && <Spinner />}
+              Import
+            </Button>
+            {importDoc.isError && (
+              <p className="text-sm text-negative" role="alert" data-testid="import-document-error">
+                {(importDoc.error as Error).message}
+              </p>
+            )}
+            {importDoc.data && <ImportSummary result={importDoc.data} />}
+          </form>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * What an import actually did.
+ *
+ * Two lists rather than one, because "created" and "already here" are the two
+ * answers a person wants and they are never both interesting: a first import of
+ * someone else's document is all created, and importing your own export back is
+ * all matched — which is the reassuring result, and reads as one.
+ */
+function ImportSummary({ result }: { result: ImportResult }) {
+  const created = Object.entries(result.created).filter(([, n]) => n > 0);
+  const matched = Object.entries(result.matched).filter(([, n]) => n > 0);
+
+  return (
+    <div className="space-y-2 rounded-control bg-surface-inset/40 p-3" role="status" data-testid="import-result">
+      {created.length === 0 ? (
+        <p className="text-sm text-fg" data-testid="import-nothing-new">
+          Nothing new — this household already had everything in that document.
+        </p>
+      ) : (
+        <div>
+          <p className="text-sm font-medium text-fg">Imported</p>
+          <Counts counts={created} testid="import-created" />
+        </div>
+      )}
+      {matched.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-fg">Already here, left alone</p>
+          <Counts counts={matched} testid="import-matched" />
+        </div>
+      )}
+      {result.warnings.length > 0 && (
+        <div data-testid="import-warnings">
+          <p className="text-sm font-medium text-warning">Imported with warnings</p>
+          <ul className="ml-4 list-disc text-sm text-fg-muted">
+            {result.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One line per entity, `label: count`.
+ *
+ * A count and a label rather than a sentence, because the plural is the
+ * server's: "1 security" and "2 securities" from one template is a grammar
+ * table, and the reader is checking the numbers anyway.
+ */
+function Counts({ counts, testid }: { counts: [string, number][]; testid: string }) {
+  return (
+    <ul className="ml-4 list-disc text-sm text-fg-muted" data-testid={testid}>
+      {counts.map(([entity, n]) => (
+        <li key={entity}>
+          {ENTITY_LABELS[entity] ?? entity.replace(/_/g, " ")}: {n}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The server's entity keys, as words. A key that is missing here is not
+ * dropped — it is printed with its underscores opened out, so a new entity is
+ * legible before anyone remembers to add it. */
+const ENTITY_LABELS: Record<string, string> = {
+  accounts: "accounts",
+  balance_snapshots: "balance snapshots",
+  categories: "categories",
+  category_groups: "category groups",
+  connections: "bank connections",
+  fx_rates: "exchange rates",
+  holdings: "holdings",
+  investment_transactions: "investment transactions",
+  owners: "owners",
+  rules: "rules",
+  securities: "securities",
+  security_prices: "security prices",
+  tags: "tags",
+  transaction_splits: "splits",
+  transaction_tags: "tag links",
+  transactions: "transactions",
+  transfer_groups: "transfer links",
+};
 
 // ------------------------------------------------------------------- owners
 

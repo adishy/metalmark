@@ -22,6 +22,7 @@ from app.api import (
     imports,
     investments,
     owners,
+    portability,
     reports,
     rules,
     transactions,
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
     app.include_router(household.router)
     app.include_router(connections.router)
     app.include_router(investments.router)
+    app.include_router(portability.router)
     return app
 
 
