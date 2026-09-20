@@ -2,21 +2,27 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    UV_SYSTEM_PYTHON=1 \
+    UV_COMPILE_BYTECODE=1
 
 WORKDIR /app
 
-# System deps kept minimal; asyncpg + cryptography ship wheels.
+# uv for dependency management (not pip).
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install deps first for layer caching.
-COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install -e ".[dev]"
+# Reproducible install from the lock, into the system environment (so the dev
+# bind-mount over /app does not shadow installed deps). Layer-cached.
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --extra dev --no-emit-project -o /tmp/requirements.txt \
+    && uv pip install --system -r /tmp/requirements.txt
 
-# App code (bind-mounted over this in dev compose).
 COPY . .
+# Editable install of the app package itself (deps already installed above).
+RUN uv pip install --system --no-deps -e .
 
 EXPOSE 8000
 
