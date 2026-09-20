@@ -122,8 +122,8 @@ export default function Admin() {
       <header>
         <h1 className="text-lg font-medium text-fg">Sync activity</h1>
         <p className="mt-1 text-sm text-fg-muted">
-          What is running, what ran, and what to do about it. Connections themselves — connecting,
-          pausing, disconnecting — live in Settings → Connections.
+          What is running, what ran, and what to do about it. Adding or removing a bank's
+          credentials is in Settings → Connections; operating one is here.
         </p>
       </header>
 
