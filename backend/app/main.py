@@ -17,8 +17,10 @@ from app.api import (
     fx,
     health,
     household,
+    imports,
     owners,
     reports,
+    rules,
     transactions,
 )
 from app.logging import configure_logging, get_logger
@@ -86,6 +88,8 @@ def create_app() -> FastAPI:
     app.include_router(transactions.router)
     app.include_router(fx.router)
     app.include_router(reports.router)
+    app.include_router(rules.router)
+    app.include_router(imports.router)
     app.include_router(household.router)
     return app
 
