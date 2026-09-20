@@ -9,12 +9,20 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The runner is pinned rather than `ubuntu-latest` deliberately: `latest` migrates to
+# Ubuntu 26 on 2026-10-19, and a runner image change is exactly the kind of thing that
+# turns a green suite red for reasons unrelated to the code. Playwright's baselines are
+# pinned to an image for the same reason. Move this deliberately, not by surprise.
+#
+# The actions are on majors that declare `runs.using: node24`. The node20 ones still
+# run (GitHub force-runs them on node24) but warn on every job, and the deprecation
+# ends with them removed.
 jobs:
   # --------------------------------------------------------------------------
   # Backend: lint + pytest against a real Postgres (tests recreate metalmark_test)
   # --------------------------------------------------------------------------
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       db:
         image: postgres:16
@@ -38,10 +46,10 @@ jobs:
       POSTGRES_DB: metalmark
       METALMARK_SECRET_KEY: ci-secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10
 
       - name: Install backend dependencies (from uv.lock)
         working-directory: backend
@@ -61,14 +69,14 @@ jobs:
   # Frontend: type-check, unit tests (vitest), production build
   # --------------------------------------------------------------------------
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -91,11 +99,11 @@ jobs:
   # protected endpoints are 401 when unauthenticated. Pragmatic scope.
   # --------------------------------------------------------------------------
   contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       COMPOSE_PROJECT_NAME: metalmark
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Create runtime secret (Fernet key)
         run: |
@@ -170,11 +178,11 @@ jobs:
   # E2E: bring up the full stack, seed, run Playwright against it (Chromium).
   # --------------------------------------------------------------------------
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       COMPOSE_PROJECT_NAME: metalmark
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Create runtime secret (Fernet key)
         run: |
@@ -243,7 +251,7 @@ jobs:
 
       - name: Upload Playwright report + diffs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
