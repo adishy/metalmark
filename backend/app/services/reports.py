@@ -42,6 +42,7 @@ when there is nothing more specific, and the only one available.
 from __future__ import annotations
 
 import uuid
+from bisect import bisect_right
 from collections.abc import Iterable
 from datetime import date, timedelta
 from decimal import Decimal
@@ -247,11 +248,30 @@ def _is_derived_investment(a: Account) -> bool:
     return a.type == "investment" and a.balance_source == "derived"
 
 
-async def net_worth_at(
-    session: AsyncSession, on: date, base: str, *, account_ids: set[uuid.UUID] | None = None
-) -> Decimal:
-    """Net worth at a date: latest snapshot ≤ date per account, converted at that
-    date's rate, signed by is_asset.
+async def _net_worth_parts(
+    session: AsyncSession,
+    dates: list[date],
+    base: str,
+    *,
+    account_ids: set[uuid.UUID] | None = None,
+) -> dict[uuid.UUID, list[Decimal]]:
+    """Per-account net worth at each of ``dates``, in base, **unquantized**.
+
+    One pass for all accounts and all dates. The alternative — ``net_worth_at``
+    once per account per date — is what made a 15-year monthly series over 24
+    accounts **7,108 queries and 1.4 s**, and what made the residual's
+    decomposition quadratic in the household's account count: each of those calls
+    re-read the account list and asked for its own account's snapshots, so
+    attributing one number cost O(accounts²) round trips.
+
+    Every included account gets an entry, **including one that contributes
+    nothing** — no snapshot on or before a date, or a balance with no rate. "This
+    account is zero here" and "this account is not in the answer here" are
+    different, and a caller decomposing a total has to tell them apart.
+
+    Unquantized so each caller rounds where it rounds today: ``net_worth_points``
+    over the total, ``net_worth_points_by_account`` over each account's own
+    figure. See those two for why it matters.
 
     **Derived investment accounts are exempt from the carry-forward.** Their
     history is not a series of balances at all — it is quantities and a price
@@ -261,52 +281,139 @@ async def net_worth_at(
     line that means no new data" ADR-0032 §5 refuses to render as a flat market.
     """
     accounts = list((await session.execute(select(Account))).scalars().all())
-    total = Decimal("0")
-    derived = [
+    included = [
         a
         for a in accounts
-        if not a.is_hidden
-        and _is_derived_investment(a)
-        and (account_ids is None or a.id in account_ids)
+        if not a.is_hidden and (account_ids is None or a.id in account_ids)
     ]
-    if derived:
-        quantities = await inv.quantities_at(
-            session, account_ids={a.id for a in derived}, on=on
-        )
-        total += await inv.securities_value_base(
-            session,
-            quantities=quantities,
-            on=on,
-            base_ccy=base,
-            # Net worth counts the account's cash too; it is the *appreciation*
-            # term that must leave cash out, because a dividend is income.
-            exclude_cash=False,
-        )
+    parts: dict[uuid.UUID, list[Decimal]] = {
+        a.id: [Decimal("0")] * len(dates) for a in included
+    }
+    if not dates:
+        return parts
 
-    for a in accounts:
-        if a.is_hidden or _is_derived_investment(a):
-            continue
-        if account_ids is not None and a.id not in account_ids:
-            continue
-        snap = (
+    # Balances: one query for every account's snapshots up to the last date asked
+    # about, then a cursor per account. `balance_date` is unique per account, so
+    # "latest ≤ date" is well defined without a tie-break.
+    stated = [a for a in included if not _is_derived_investment(a)]
+    if stated:
+        converter = await fx.converter(
+            session,
+            base_ccy=base,
+            currencies={a.currency for a in stated},
+            until=max(dates),
+        )
+        rows = (
             await session.execute(
-                select(BalanceSnapshot.balance, BalanceSnapshot.currency)
-                .where(
-                    BalanceSnapshot.account_id == a.id,
-                    BalanceSnapshot.balance_date <= on,
+                select(
+                    BalanceSnapshot.account_id,
+                    BalanceSnapshot.balance_date,
+                    BalanceSnapshot.balance,
+                    BalanceSnapshot.currency,
                 )
-                .order_by(BalanceSnapshot.balance_date.desc())
-                .limit(1)
+                .where(
+                    BalanceSnapshot.account_id.in_([a.id for a in stated]),
+                    BalanceSnapshot.balance_date <= max(dates),
+                )
+                .order_by(BalanceSnapshot.account_id, BalanceSnapshot.balance_date)
             )
-        ).first()
-        if snap is None:
-            continue
-        bal, ccy = snap
-        conv, _ = await fx.to_base(session, amount=bal, currency=ccy, on=on, base_ccy=base)
-        if conv is None:
-            continue
-        total += conv if a.is_asset else -conv
-    return quantize_storage(total)
+        ).all()
+        history: dict[uuid.UUID, list[tuple[date, Decimal, str]]] = {}
+        for account_id, balance_date, balance, currency in rows:
+            history.setdefault(account_id, []).append((balance_date, balance, currency))
+
+        for a in stated:
+            series = history.get(a.id)
+            if not series:
+                continue
+            # Per date, not per snapshot: a date between two snapshots is the
+            # earlier one carried forward, which is the whole meaning of "latest
+            # snapshot ≤ date" and the reason this is a bisect over the dates
+            # asked about rather than a walk over the snapshots.
+            days = [d for d, _, _ in series]
+            for i, on in enumerate(dates):
+                j = bisect_right(days, on) - 1
+                if j < 0:
+                    continue
+                _, balance, currency = series[j]
+                conv, _rate_date = await converter.to_base(
+                    amount=balance, currency=currency, on=on, base_ccy=base
+                )
+                if conv is None:
+                    continue  # no rate: the account is not countable at this date
+                parts[a.id][i] += conv if a.is_asset else -conv
+
+    derived = [a for a in included if _is_derived_investment(a)]
+    if derived:
+        ids = {a.id for a in derived}
+        for i, on in enumerate(dates):
+            # Two queries per *date*, not per date and account: the valuation
+            # already splits by account before it sums.
+            quantities = await inv.quantities_at(session, account_ids=ids, on=on)
+            values = await inv.securities_value_by_account(
+                session,
+                quantities=quantities,
+                on=on,
+                base_ccy=base,
+                # Net worth counts the account's cash too; it is the *appreciation*
+                # term that must leave cash out, because a dividend is income.
+                exclude_cash=False,
+            )
+            for a in derived:
+                value = values.get(a.id)
+                if value is not None:
+                    parts[a.id][i] += value if a.is_asset else -value
+    return parts
+
+
+async def net_worth_points(
+    session: AsyncSession,
+    dates: list[date],
+    base: str,
+    *,
+    account_ids: set[uuid.UUID] | None = None,
+) -> list[Decimal]:
+    """Net worth at each date: latest snapshot ≤ date per account, converted at
+    that date's rate, signed by ``is_asset``.
+
+    Rounded **once over the total**, which is what makes a series and the delta
+    taken from its ends agree: quantizing each account first and adding those
+    would let twenty-four roundings accumulate into a cent that shows up as
+    unexplained change at a point where nothing happened.
+    """
+    parts = await _net_worth_parts(session, dates, base, account_ids=account_ids)
+    return [
+        quantize_storage(sum((p[i] for p in parts.values()), Decimal("0")))
+        for i in range(len(dates))
+    ]
+
+
+async def net_worth_points_by_account(
+    session: AsyncSession,
+    dates: list[date],
+    base: str,
+    *,
+    account_ids: set[uuid.UUID] | None = None,
+) -> dict[uuid.UUID, list[Decimal]]:
+    """The same values, split by account and rounded **per account**.
+
+    The form the residual's decomposition needs, because the number it prints is
+    that account's own (ADR-0032 §5) — and the form it used to build by calling
+    ``net_worth_at`` twice per account, which valued the whole household to answer
+    a question about one of them.
+    """
+    parts = await _net_worth_parts(session, dates, base, account_ids=account_ids)
+    return {
+        account_id: [quantize_storage(value) for value in values]
+        for account_id, values in parts.items()
+    }
+
+
+async def net_worth_at(
+    session: AsyncSession, on: date, base: str, *, account_ids: set[uuid.UUID] | None = None
+) -> Decimal:
+    """Net worth at one date — ``net_worth_points`` with a list of one."""
+    return (await net_worth_points(session, [on], base, account_ids=account_ids))[0]
 
 
 async def _investment_base_amount(
@@ -890,10 +997,19 @@ async def _unexplained_by_account(
         stmt = stmt.where(Account.id.in_(account_ids))
     accounts = list((await session.execute(stmt)).scalars().all())
 
+    # Both dates for every account, in one pass. Asking per account — which is
+    # what this did — read the account list once and each account's balances once
+    # *per call*, so attributing one number cost O(accounts²) queries.
+    values = await net_worth_points_by_account(
+        session, [start, end], base_ccy, account_ids=account_ids
+    )
+
     parts: dict[uuid.UUID, Decimal] = {}
     for a in accounts:
-        value_start = await net_worth_at(session, start, base_ccy, account_ids={a.id})
-        value_end = await net_worth_at(session, end, base_ccy, account_ids={a.id})
+        # Missing means the valuation counted nothing for it — no snapshot on or
+        # before the date, or a balance with no rate. Zero is that answer, not a
+        # guess standing in for one.
+        value_start, value_end = values.get(a.id, (Decimal("0"), Decimal("0")))
         parts[a.id] = (
             (value_end - value_start)
             - cash_flow.get(a.id, Decimal("0"))
@@ -947,25 +1063,32 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     # `net_worth_at(2026-09-30)`. That reads snapshots dated after the window, so
     # the chart's final point was a level from ten days the reader had not
     # requested. `points[0].date == start` is the property both faults violate.
-    nw_start = await net_worth_at(session, start, base, account_ids=account_ids)
-    points = [{"date": start, "net_worth": nw_start}]
-    for bucket in periods.buckets(start, end, resolved):
-        if bucket.end == start:
-            # A one-day window: the baseline already *is* this bucket's end.
-            continue
-        points.append(
-            {
-                "date": bucket.end,
-                "net_worth": await net_worth_at(
-                    session, bucket.end, base, account_ids=account_ids
-                ),
-            }
+    dates = [start] + [
+        bucket.end
+        for bucket in periods.buckets(start, end, resolved)
+        if bucket.end != start
+        # A one-day window: the baseline already *is* this bucket's end.
+    ]
+    # One pass for every point, rather than a `net_worth_at` per point: the dates
+    # are known before the first value is computed, so nothing has to be asked
+    # twice and the whole series is one account query.
+    points = [
+        {"date": on, "net_worth": value}
+        # `strict`: a value for every date is the function's contract, and a
+        # reconciliation that silently paired a date with the wrong level would be
+        # a chart that lies rather than one that fails.
+        for on, value in zip(
+            dates,
+            await net_worth_points(session, dates, base, account_ids=account_ids),
+            strict=True,
         )
+    ]
 
     # The last point *is* the window end: the buckets partition the window, so the
     # final bucket's end is `end` — and in the one-day case the baseline is. No
-    # second query, and no chance of the chart's last point and the reported delta
-    # disagreeing about what the window ended at.
+    # second computation, and no chance of the chart's last point and the reported
+    # delta disagreeing about what the window ended at.
+    nw_start = points[0]["net_worth"]
     nw_end = points[-1]["net_worth"]
     delta = quantize_storage(nw_end - nw_start)
     _income, _expense, net_cf, cash_flow_by_account, warnings = await _cash_flow(

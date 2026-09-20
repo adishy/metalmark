@@ -65,6 +65,10 @@ always in one currency.
   household-local date, same date basis as month bucketing). "Current" views use the latest available rate.
   If **no rate exists** for a currency/date, the value is flagged **"no rate"** in the UI — never silently 0
   or left unconverted.
+- **Two forms, one rule:** `fx.to_base` converts one amount and queries per lookup; `fx.converter()` builds a
+  `Converter` holding the rates for a whole report and answers from memory (ADR-0035). Both go through the
+  same resolution order, so "which rate" is answered in exactly one place — use the `Converter` for anything
+  that converts in a loop.
 - **Corrections invalidate caches.** Editing a manual rate or a revised auto rate invalidates every
   `base_amount` **and every precomputed rollup** derived from that `(currency, rate_date)`. `base_currency` is
   immutable in v1 (changing it would invalidate every stored base amount).
@@ -439,7 +443,9 @@ provider is an adapter that produces the *same* writes a human would (tagging it
     is a residual and cannot notice a missing row). The lower bound needs no such care, since `>= start`
     already means midnight at the start of the first day.
   - Net worth over time (area/line from `balance_snapshots`), with the **currency-revaluation** contribution
-    shown as its own component so multi-currency deltas are explained, not mysterious (ADR-0017).
+    shown as its own component so multi-currency deltas are explained, not mysterious (ADR-0017). One pass
+    computes every point — a report's loop over dates is **one read of the accounts, one of the balances and
+    one of the rates**, never a query per point per account (ADR-0035).
   - **Cash-flow Sankey**: the period's income buckets and expense buckets, with the window itself as the
     node between them — `income → window → expense`, plus **one residual node on whichever side is short**:
     "Left over" when the period earned more than it spent, "From savings" when it spent more. The residual

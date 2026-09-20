@@ -669,3 +669,66 @@ async def test_a_leftover_that_no_account_explains_is_reported(household_factory
     # accounts rather than to one; the remaining 2 belong to nothing we hold.
     assert "3.0000 USD is conversion cost on cross-currency transfers" in left_over[0]
     assert "2.0000 USD is not attributable to any account or transfer" in left_over[0]
+
+
+async def test_the_batched_points_answer_what_one_point_at_a_time_answers(
+    household_factory,
+):
+    """The two entry points to a net-worth level, pinned equal.
+
+    ``net_worth_series`` computes every point in one pass now — the account list,
+    the balances and the rates are each read once for the whole series, where the
+    version before it read all three again for every point of every account (7,108
+    queries for a 15-year monthly series over 24 accounts). The risk a rewrite like
+    that carries is silent: a series that is *nearly* right reconciles to nearly
+    zero, and ADR-0032 §5 would report the difference as a gap no account explains.
+
+    So the claim is that the batched form and the one-at-a-time form agree, over a
+    household built to contain all three ways a point is computed — a stated
+    balance in the base currency, a stated balance in another one, and a derived
+    investment account whose value is recomputed from quantities and prices. The
+    values are also asserted outright, because two forms that agreed on ``None``
+    would satisfy the equality and prove nothing.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cash = await _account(s, hh, name="Checking", atype="depository", source=None)
+        await _balance(s, cash, "1000", START)
+        await _balance(s, cash, "1200", END)
+
+        # A currency no other test writes, at a rate written the far way round, so
+        # the point is converted by inverting a stored pair rather than by a direct
+        # hit. `fx_rates` is global, so the currency choice is not cosmetic.
+        pesos = await _account(s, hh, name="Pesos", atype="depository", source=None,
+                               currency="MXN")
+        await _balance(s, pesos, "1000", START)
+        await ledger.upsert_fx_rate(s, hh, base_ccy="USD", quote_ccy="MXN",
+                                    rate_date=START, rate=D("20"))
+
+        broker = await _account(s, hh)
+        sec = await _security(s, hh)
+        await inv.upsert_holding(s, household_id=hh, account_id=broker.id,
+                                 security_id=sec.id, quantity=D("10"))
+        await _price(s, hh, sec, START, "100")
+        await _price(s, hh, sec, END, "130")
+
+        dates = [START, date(2026, 1, 15), END]
+        batched = await reports.net_worth_points(s, dates, "USD")
+        one_at_a_time = [await reports.net_worth_at(s, d, "USD") for d in dates]
+
+        # The same two forms, narrowed to one account: the filter has to select the
+        # same accounts in both, or a decomposition would attribute a total to
+        # accounts that were not in it.
+        only_broker = {broker.id}
+        batched_scoped = await reports.net_worth_points(
+            s, dates, "USD", account_ids=only_broker
+        )
+        scoped_one_at_a_time = [
+            await reports.net_worth_at(s, d, "USD", account_ids=only_broker)
+            for d in dates
+        ]
+
+    assert batched == one_at_a_time
+    assert batched == [D("2050.0000"), D("2050.0000"), D("2550.0000")]
+    assert batched_scoped == scoped_one_at_a_time == [D("1000.0000"), D("1000.0000"),
+                                                     D("1300.0000")]

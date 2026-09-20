@@ -796,9 +796,38 @@ async def securities_value_base(
     ADR-0032 §3 draws: appreciation is the market move of the *securities*, and the
     account's cash is covered by the cash-flow term instead (a dividend is income;
     a contribution is a transfer). Counting cash here would double-count both.
+
+    One rounding for the whole total, over the per-account parts
+    ``securities_value_by_account`` returns — so two accounts cannot lose a
+    rounding cent to each other on the way in.
+    """
+    by_account = await securities_value_by_account(
+        session, quantities=quantities, on=on, base_ccy=base_ccy, exclude_cash=exclude_cash
+    )
+    return quantize_storage(sum(by_account.values(), ZERO))
+
+
+async def securities_value_by_account(
+    session: AsyncSession,
+    *,
+    quantities: dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+    on: date,
+    base_ccy: str,
+    exclude_cash: bool = True,
+) -> dict[uuid.UUID, Decimal]:
+    """``securities_value_base`` per account, **unquantized**.
+
+    Exposed because a decomposition needs one account's market value on its own:
+    the net-worth residual is attributed account by account (ADR-0032 §5), and
+    valuing the whole household once to answer a question about one account would
+    make that report quadratic in the account count for an answer it already has.
+
+    Unquantized so each caller rounds where it rounds today: a decomposition
+    rounds per account (the number it prints *is* that account's), and a total
+    rounds once over the sum.
     """
     if not quantities:
-        return ZERO
+        return {}
     account_ids = {key[0] for key in quantities}
     accounts = {
         a.id: a
@@ -838,7 +867,7 @@ async def securities_value_base(
             )
         )
 
-    total = ZERO
+    values_by_account: dict[uuid.UUID, Decimal] = {}
     for account_id, positions in by_account.items():
         values = await _value_holdings(
             session,
@@ -848,8 +877,10 @@ async def securities_value_base(
             base_ccy=base_ccy,
             account_currency=accounts[account_id].currency,
         )
-        total += sum((v.value_base for v in values if v.value_base is not None), ZERO)
-    return quantize_storage(total)
+        values_by_account[account_id] = sum(
+            (v.value_base for v in values if v.value_base is not None), ZERO
+        )
+    return values_by_account
 
 
 @dataclass

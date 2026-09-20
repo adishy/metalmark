@@ -66,3 +66,4 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0032](0032-reconciliation-with-investments.md) | Investments in the reconciliation identity: a third term, and one residual only | Accepted |
 | [0033](0033-investment-events-and-the-cash-ledger.md) | Investment events and the cash ledger: a buy is not a transaction | Accepted |
 | [0034](0034-position-from-history-when-history-exists.md) | A position's quantity comes from history too, when history exists | Accepted |
+| [0035](0035-reports-read-once.md) | A report reads each thing once, and rounds where it says it rounds | Accepted |
