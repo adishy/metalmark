@@ -369,10 +369,16 @@ export default function Reports() {
     // middle width because its content at `lg:` is a two-up grid, and a 1280 px
     // pair of charts is two 620 px charts — the second column is not worth the
     // stretch. `mx-auto` keeps the page centred inside the wider shell.
-    <div className="mx-auto max-w-6xl space-y-6">
-      <h1 className="text-lg font-medium">Reports</h1>
+    //
+    // §9.3's two-up, and the grid is the page rather than a wrapper around two
+    // of its children, so a section's place is decided by one class on it and
+    // nothing has to know how many rows came before. `space-y-6` is the phone
+    // stack; at `lg:` the gap does the same job on both axes, which is why the
+    // vertical step is turned off rather than left to double up with it.
+    <div className="mx-auto max-w-6xl space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
+      <h1 className="text-lg font-medium lg:col-span-2">Reports</h1>
 
-      <div className="space-y-4 rounded-card bg-surface-raised p-4">
+      <div className="space-y-4 rounded-card bg-surface-raised p-4 lg:col-span-2">
         <RangeControl state={range} />
         <OwnerFilterChips
           owners={owners.data ?? []}
@@ -386,7 +392,7 @@ export default function Reports() {
           month a reader looking at a stored link needs to know both. The
           granularity is the *echoed* one, so it also answers what `Auto` chose. */}
       {!blocked && (
-        <p className="text-xs text-fg-muted" data-testid="report-window">
+        <p className="text-xs text-fg-muted lg:col-span-2" data-testid="report-window">
           {shown.start === null ? (
             <>From the beginning through <Day value={shown.end} /></>
           ) : (
@@ -398,6 +404,10 @@ export default function Reports() {
         </p>
       )}
 
+      {/* The pair. These two carry no column classes at all, and that is the
+          point: they are the charts that survive half a page, so they take the
+          next two free cells and land side by side without anything being
+          counted. Adding a section above them re-pairs them for free. */}
       <section className="rounded-card bg-surface-raised p-6" data-testid="report-net-worth">
         <p className="text-sm text-fg-muted">Net worth change</p>
         {blocked ? (
@@ -445,7 +455,15 @@ export default function Reports() {
         )}
       </section>
 
-      <section className="rounded-card bg-surface-raised p-6" data-testid="report-sankey">
+      {/* Full width, per §9.3 and for a reason the section itself states: a
+          flow diagram read in a 560 px column stops being a flow diagram. Its
+          labels are category names on both sides of a band that has to stay
+          wide enough to see, so squeezing it does not shrink the chart, it
+          removes the thing the chart is for. */}
+      <section
+        className="rounded-card bg-surface-raised p-6 lg:col-span-2"
+        data-testid="report-sankey"
+      >
         <p className="mb-2 text-sm text-fg-muted">Where the money went</p>
         {blocked ? (
           notDrawn
@@ -520,7 +538,16 @@ export default function Reports() {
         )}
       </section>
 
-      <section className="rounded-card bg-surface-raised p-6" data-testid="report-spending">
+      {/* Also full width, though §9.3 only names the Sankey. The reason is the
+          same one, one level down: this section is not one chart but a donut
+          *and* its legend as a list of categories with totals beside it. Two
+          columns would put a 560 px donut above a list of ~20 rows each
+          separated by a single `justify-between`, which at that width reads as
+          two ragged columns of text with a lot of white between them. */}
+      <section
+        className="rounded-card bg-surface-raised p-6 lg:col-span-2"
+        data-testid="report-spending"
+      >
         <p className="mb-2 text-sm text-fg-muted">Spending by category</p>
         {blocked ? (
           notDrawn

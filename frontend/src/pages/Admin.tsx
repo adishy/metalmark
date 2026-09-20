@@ -138,8 +138,14 @@ export default function Admin() {
   return (
     // Admin is tables and counters — §9.1's widest case, so no cap of its own
     // and the shell's `max-w-7xl` is the cap.
-    <div className="space-y-4">
-      <header>
+    //
+    // §9.3's card grid, and the three cards are exactly the three columns: what
+    // is configured, what is running, what ran. Read across rather than down,
+    // they answer the one question this page exists for — is sync healthy — in
+    // a single glance instead of three scroll positions. The header and the
+    // error line span all three because neither is a card.
+    <div className="space-y-4 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 lg:space-y-0">
+      <header className="lg:col-span-3">
         {/* "Admin" is the eyebrow rather than the heading on purpose: the page
             is one screen of sync operations, and calling *it* "Admin" would
             promise a broader console. The word is here because it is the one a
@@ -157,7 +163,7 @@ export default function Admin() {
           buttons that can fail are spread across three cards and the message is
           about the action, not the card. */}
       {actionError && (
-        <p className="text-sm text-negative" role="alert" data-testid="admin-error">
+        <p className="text-sm text-negative lg:col-span-3" role="alert" data-testid="admin-error">
           {actionError}
         </p>
       )}

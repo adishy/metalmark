@@ -42,14 +42,27 @@ import PortfolioHoldings from "@/components/PortfolioHoldings";
 
 export default function InvestmentsView({ ownerName }: { ownerName?: string | null }) {
   return (
-    <div className="space-y-6" data-testid="investments-view">
+    // §9.3's card grid, and these two are the cards: the allocation a reader
+    // asks about first, and the holdings that explain it. Side by side at `lg:`
+    // the breakdown sits next to the thing it is a breakdown *of*, which is the
+    // one arrangement where a donut and a table argue with each other usefully.
+    // The owner note spans both because it is about the view, not about either
+    // card.
+    <div
+      className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
+      data-testid="investments-view"
+    >
       {/* The owner filter is a Balances control — it scopes that view's list and
           its net-worth header — and the portfolio endpoints have no owner scope
           (`api/investments.ts`). Switching views while filtered would otherwise
           swap household-wide totals in under an active filter with nothing said,
           which reads as the filter having silently stopped working. */}
       {ownerName && (
-        <p className="text-sm text-fg-muted" role="status" data-testid="investments-owner-note">
+        <p
+          className="text-sm text-fg-muted lg:col-span-2"
+          role="status"
+          data-testid="investments-owner-note"
+        >
           Every owner — the portfolio is household-wide, so {ownerName}’s filter does not apply here.
         </p>
       )}
