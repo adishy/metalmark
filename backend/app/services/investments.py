@@ -34,8 +34,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import convert, quantize_storage
-from app.models import Account, Holding, InvestmentTransaction, Security, SecurityPrice
+from app.models import (
+    Account,
+    Holding,
+    InvestmentTransaction,
+    Security,
+    SecurityPrice,
+    TransferGroup,
+)
 from app.models.investments import (
+    CASH_MOVING_EVENT_TYPES,
     CASH_SECURITY_TYPE,
     INVESTMENT_TX_TYPES,
     SECURITY_TYPES,
@@ -472,7 +480,7 @@ class Position:
     source: str
 
 
-def fold_history(txs) -> tuple[Decimal, Decimal]:
+def fold_history(txs, *, is_cash: bool = False) -> tuple[Decimal, Decimal]:
     """``(quantity, basis)`` from one position's trade history, in order.
 
     Pure and ordered, so the same fold serves the single-position lookup and the
@@ -481,17 +489,40 @@ def fold_history(txs) -> tuple[Decimal, Decimal]:
     other defensible answer, and the alternative — removing the cash originally
     paid for those exact shares — is precisely the specific-lot tracking v1 defers
     (ADR-0020).
+
+    ``is_cash`` is the one thing the rows cannot tell us on their own, and it
+    changes what three event types *mean*. ADR-0033 §4 makes uninvested cash a
+    holding like any other, and the table that follows from it is:
+
+        contribution  cash +X
+        buy           cash −Y, securities +Y
+        dividend      cash +Z
+
+    Read the first and third rows literally and a ``transfer`` of cash in, or a
+    ``dividend`` paid into the account, is a change in the *quantity* of the position
+    — there is nothing else for it to be, since a cash position's quantity is the
+    number of currency units sitting there. Folding them is what makes a
+    contribution land, a dividend arrive, and (the point of all of it) a purchase
+    funded from the account's own cash leave the balance exactly where it was, which
+    is the property ADR-0032's appreciation term is computed on top of.
+
+    Without this, money crossing the boundary is invisible to the account's value:
+    it arrives in the ledger, the cash-flow report correctly declines to call it
+    income, and the derived balance does not move — so the reconciliation reports the
+    household's own contribution as a gap it cannot explain.
+
+    None of these touch ``basis``: income is not a cost, a fee is a cost of holding
+    rather than of acquiring, and a transfer is the boundary itself (ADR-0033 §3).
     """
     basis = ZERO
     quantity = ZERO
     for t in txs:
         qty = t.quantity or ZERO
         if t.type == "buy":
-            # `amount` is negative for a buy (cash out, ADR-0033's sign
-            # convention), so the cost added is its negation. A buy whose `amount`
-            # disagrees with quantity × price (a foreign-currency trade, or a fee
-            # baked into the trade) uses the cash actually paid, which is the
-            # better basis.
+            # `amount` is negative for a buy (ADR-0033's sign convention), so the
+            # cost added is its negation. A buy whose `amount` disagrees with
+            # quantity × price (a foreign-currency trade, or a fee baked into the
+            # trade) uses the cash actually paid, which is the better basis.
             basis += -t.amount
             quantity += qty
         elif t.type == "sell":
@@ -503,9 +534,12 @@ def fold_history(txs) -> tuple[Decimal, Decimal]:
         elif t.type == "split":
             # A share split changes the share count and not the money invested.
             quantity += qty
-        # dividend/interest/fee/transfer do not touch basis: the first two are
-        # income, the third is a cost of holding rather than of acquiring, and a
-        # transfer is the boundary itself (ADR-0033 §3).
+        elif is_cash and t.type in CASH_MOVING_EVENT_TYPES:
+            # `quantity` when the writer set it, else `amount` — for a cash position
+            # the two are the same number by construction (a unit of cash is worth
+            # one unit), and requiring the redundant column would make a
+            # contribution impossible to record without restating it.
+            quantity += qty if t.quantity is not None else (t.amount or ZERO)
     return quantity, quantize_storage(basis)
 
 
@@ -516,6 +550,9 @@ async def history_positions(
 
     A list endpoint asking per holding would be one query per row; this is one for
     the lot, with the ordering the fold depends on applied in the database.
+
+    Two queries, not one: which positions *are* cash is a property of the security,
+    and the fold needs it (ADR-0033 §4 — see ``fold_history``).
     """
     ids = list(account_ids)
     if not ids:
@@ -538,6 +575,18 @@ async def history_positions(
             )
         ).scalars().all()
     )
+    if not txs:
+        return {}
+    cash_ids = set(
+        (
+            await session.execute(
+                select(Security.id).where(
+                    Security.id.in_({t.security_id for t in txs}),
+                    Security.security_type == CASH_SECURITY_TYPE,
+                )
+            )
+        ).scalars().all()
+    )
     grouped: dict[tuple[uuid.UUID, uuid.UUID], list] = {}
     for t in txs:
         grouped.setdefault((t.account_id, t.security_id), []).append(t)
@@ -545,7 +594,7 @@ async def history_positions(
         # position — and is filtered out above rather than folded into one.
     out: dict[tuple[uuid.UUID, uuid.UUID], Position] = {}
     for key, rows in grouped.items():
-        quantity, basis = fold_history(rows)
+        quantity, basis = fold_history(rows, is_cash=key[1] in cash_ids)
         out[key] = Position(quantity=quantity, cost_basis=basis, source=HISTORY)
     return out
 
@@ -618,7 +667,10 @@ class PositionRecord:
 
 
 async def positions_for(
-    session: AsyncSession, *, account_ids: set[uuid.UUID] | list[uuid.UUID]
+    session: AsyncSession,
+    *,
+    account_ids: set[uuid.UUID] | list[uuid.UUID],
+    drop_closed: bool = True,
 ) -> dict[tuple[uuid.UUID, uuid.UUID], PositionRecord]:
     """Every position in these accounts — hand-entered rows **and** recorded
     trades, merged on ``(account, security)``.
@@ -666,7 +718,126 @@ async def positions_for(
     # sharper half of ADR-0034: a position fully sold reads 0 from its trades, and
     # 0 × price is 0, so keeping it would only render a 0% line forever. A negative
     # quantity is a short and is kept.
+    #
+    # `drop_closed=False` is for the as-of-a-past-date path, which has to unwind a
+    # position that has since been closed and so must see it at zero rather than
+    # not see it at all.
+    if not drop_closed:
+        return out
     return {key: rec for key, rec in out.items() if rec.quantity != 0}
+
+
+async def quantities_at(
+    session: AsyncSession, *, account_ids: set[uuid.UUID] | list[uuid.UUID], on: date
+) -> dict[tuple[uuid.UUID, uuid.UUID], Decimal]:
+    """Quantity per position **as of ``on``**, by unwinding the trades after it.
+
+    ADR-0032 §3 needs a market value at a past date, and a position's quantity is
+    itself a function of time: the household that holds 20 shares today may have
+    held 10 then. Every trade is recorded, so the quantity at any past date is
+    today's minus the trades since — which is the second, independent reason for
+    ADR-0020's single-authority rule (a basis computed from a scalar in one place
+    and from history in another has no single source to unwind).
+
+    A position closed since ``on`` unwinds *up* from zero and reappears, which is
+    the whole point: its sale is inside the window and its value then is part of
+    what the window changed.
+    """
+    ids = list(account_ids)
+    if not ids:
+        return {}
+    current = await positions_for(session, account_ids=ids, drop_closed=False)
+    out: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {
+        key: rec.quantity for key, rec in current.items()
+    }
+    later = (
+        await session.execute(
+            select(InvestmentTransaction).where(
+                InvestmentTransaction.account_id.in_(ids),
+                InvestmentTransaction.security_id.is_not(None),
+                InvestmentTransaction.trade_date > on,
+            )
+        )
+    ).scalars().all()
+    for t in later:
+        key = (t.account_id, t.security_id)
+        out[key] = out.get(key, ZERO) - (t.quantity or ZERO)
+    return {key: qty for key, qty in out.items() if qty != 0}
+
+
+async def securities_value_base(
+    session: AsyncSession,
+    *,
+    quantities: dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+    on: date,
+    base_ccy: str,
+    exclude_cash: bool = True,
+) -> Decimal:
+    """Σ(quantity × the latest price on or before ``on``) in base, for an explicit
+    quantity map.
+
+    Reuses the valuation path's FX hops rather than re-deriving them, so a market
+    value computed here and one computed by ``value_account`` cannot disagree about
+    what a conversion means.
+
+    ``exclude_cash`` defaults to **True**, which is the reporting distinction
+    ADR-0032 §3 draws: appreciation is the market move of the *securities*, and the
+    account's cash is covered by the cash-flow term instead (a dividend is income;
+    a contribution is a transfer). Counting cash here would double-count both.
+    """
+    if not quantities:
+        return ZERO
+    account_ids = {key[0] for key in quantities}
+    accounts = {
+        a.id: a
+        for a in (
+            await session.execute(select(Account).where(Account.id.in_(account_ids)))
+        )
+        .scalars()
+        .all()
+    }
+    securities = {
+        s.id: s
+        for s in (
+            await session.execute(
+                select(Security).where(Security.id.in_({key[1] for key in quantities}))
+            )
+        )
+        .scalars()
+        .all()
+    }
+    if exclude_cash:
+        securities = {
+            sid: s for sid, s in securities.items() if s.security_type != CASH_SECURITY_TYPE
+        }
+
+    by_account: dict[uuid.UUID, list[PositionRecord]] = {}
+    for (account_id, security_id), quantity in quantities.items():
+        if security_id not in securities or account_id not in accounts:
+            continue
+        by_account.setdefault(account_id, []).append(
+            PositionRecord(
+                account_id=account_id,
+                security_id=security_id,
+                holding=None,
+                quantity=quantity,
+                cost_basis=ZERO,
+                source=MANUAL,
+            )
+        )
+
+    total = ZERO
+    for account_id, positions in by_account.items():
+        values = await _value_holdings(
+            session,
+            positions,
+            securities,
+            on=on,
+            base_ccy=base_ccy,
+            account_currency=accounts[account_id].currency,
+        )
+        total += sum((v.value_base for v in values if v.value_base is not None), ZERO)
+    return quantize_storage(total)
 
 
 @dataclass
@@ -735,7 +906,9 @@ async def _accounts_holding_security(
     """
     accounts = set(
         (
-            await session.execute(select(Holding.account_id).where(Holding.security_id == security_id))
+            await session.execute(
+                select(Holding.account_id).where(Holding.security_id == security_id)
+            )
         )
         .scalars()
         .all()
@@ -1139,6 +1312,9 @@ async def create_investment_transaction(
         raise LedgerError(f"Unknown investment transaction type {data.type!r}", 422)
     if data.security_id is not None:
         await get_security(session, data.security_id)
+    group_id = getattr(data, "transfer_group_id", None)
+    if group_id is not None:
+        await _check_transfer_group(session, household_id, group_id)
 
     account = (
         await session.execute(select(Account).where(Account.id == data.account_id))
@@ -1168,15 +1344,36 @@ async def create_investment_transaction(
         description=data.description,
         notes=data.notes,
         source="manual",
-        field_sources={
-            f: "user"
-            for f in ("amount", "trade_date", "quantity", "price", "type", "security")
-        },
+        transfer_group_id=group_id,
+        field_sources=dict.fromkeys(
+            ("amount", "trade_date", "quantity", "price", "type", "security"), "user"
+        ),
     )
     session.add(txn)
     await session.flush()
     await _recompute_accounts(session, {data.account_id})
     return txn
+
+
+async def _check_transfer_group(
+    session: AsyncSession, household_id: uuid.UUID, group_id: uuid.UUID
+) -> None:
+    """The group must be this household's, or the write is a 404.
+
+    Checked rather than left to the foreign key: the FK would accept another
+    household's group if RLS ever let the row through, and an IntegrityError on a
+    bad id is a 500 where the caller needs a 404.
+    """
+    found = (
+        await session.execute(
+            select(TransferGroup.id).where(
+                TransferGroup.id == group_id,
+                TransferGroup.household_id == household_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if found is None:
+        raise LedgerError("Transfer group not found", 404)
 
 
 async def update_investment_transaction(
@@ -1188,11 +1385,20 @@ async def update_investment_transaction(
             raise LedgerError(f"Unknown investment transaction type {data.type!r}", 422)
         txn.type = data.type
         txn.field_sources = {**(txn.field_sources or {}), "type": "user"}
-    for field in ("trade_date", "quantity", "price", "amount", "description", "notes"):
-        if is_set(data, field):
-            setattr(txn, field, getattr(data, field))
-            if field in ("trade_date", "quantity", "price", "amount"):
-                txn.field_sources = {**(txn.field_sources or {}), field: "user"}
+    # `name`, not `field`: `dataclasses.field` is imported above and a loop
+    # variable that shadows it is a trap for the next reader, not a style nit.
+    for name in ("trade_date", "quantity", "price", "amount", "description", "notes"):
+        if is_set(data, name):
+            setattr(txn, name, getattr(data, name))
+            if name in ("trade_date", "quantity", "price", "amount"):
+                txn.field_sources = {**(txn.field_sources or {}), name: "user"}
+    if is_set(data, "transfer_group_id"):
+        # Nullable and clearable, unlike the fields above: un-pairing a
+        # contribution is how a household corrects a wrong link, and it has to
+        # leave the leg itself alone.
+        if data.transfer_group_id is not None:
+            await _check_transfer_group(session, txn.household_id, data.transfer_group_id)
+        txn.transfer_group_id = data.transfer_group_id
     await session.flush()
     await _recompute_accounts(session, {txn.account_id})
     return txn

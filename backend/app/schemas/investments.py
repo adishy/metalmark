@@ -172,6 +172,12 @@ class InvestmentTransactionCreate(BaseModel):
     amount: Decimal
     description: str | None = None
     notes: str | None = None
+    #: ADR-0033 §3: money crossing between the cash world and the investment world
+    #: is one `transfer_groups` row whose legs are a `transactions` row on the
+    #: funding account and this row. Setting the same group on both is what makes
+    #: ADR-0008's exclusion apply unchanged, so a contribution stops reading as an
+    #: expense while still landing in the account's cash position (ADR-0033 §4).
+    transfer_group_id: uuid.UUID | None = None
 
 
 class InvestmentTransactionUpdate(BaseModel):
@@ -182,6 +188,7 @@ class InvestmentTransactionUpdate(BaseModel):
     amount: Decimal | None = None
     description: str | None = None
     notes: str | None = None
+    transfer_group_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _required_fields_not_clearable(self) -> InvestmentTransactionUpdate:

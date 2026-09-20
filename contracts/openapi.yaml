@@ -3169,16 +3169,10 @@ components:
           type: array
           title: Holdings
         unpriced:
-          items:
-            type: string
-            format: uuid
-          type: array
+          type: integer
           title: Unpriced
         no_rate:
-          items:
-            type: string
-            format: uuid
-          type: array
+          type: integer
           title: No Rate
         oldest_price_date:
           anyOf:
@@ -3868,8 +3862,10 @@ components:
     HoldingOut:
       properties:
         id:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Id
         account_id:
           type: string
@@ -3898,8 +3894,10 @@ components:
           type: string
           title: Basis Source
         manual_quantity:
-          type: string
-          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
           title: Manual Quantity
         manual_cost_basis:
           anyOf:
@@ -3954,8 +3952,10 @@ components:
     HoldingValueOut:
       properties:
         holding_id:
-          type: string
-          format: uuid
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
           title: Holding Id
         account_id:
           type: string
@@ -4154,6 +4154,12 @@ components:
           - type: string
           - type: 'null'
           title: Notes
+        transfer_group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transfer Group Id
       type: object
       required:
       - account_id
@@ -4283,6 +4289,12 @@ components:
           - type: string
           - type: 'null'
           title: Notes
+        transfer_group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transfer Group Id
       type: object
       title: InvestmentTransactionUpdate
     LoginRequest:
@@ -4422,10 +4434,25 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Currency Revaluation
+        market_appreciation:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Market Appreciation
+        unexplained:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Unexplained
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          default: []
         attribution:
           type: string
           title: Attribution
           default: account
+      additionalProperties: false
       type: object
       required:
       - base_currency
@@ -4433,7 +4460,21 @@ components:
       - delta_net_worth
       - net_cash_flow
       - currency_revaluation
+      - market_appreciation
+      - unexplained
       title: NetWorthSeries
+      description: 'The net-worth series and the reconciliation of its change (ADR-0032).
+
+
+        ``extra="forbid"`` is load-bearing rather than tidy: the API builds this from
+
+        the service''s dict, and Pydantic''s default is to *drop* a key it does not know
+
+        about — so a term added to the identity but forgotten here would vanish from the
+
+        response with nothing failing, and the terms that did land would no longer add
+
+        up to the delta. Forbidding extras turns that into a loud error instead.'
     OfxCommitOut:
       properties:
         inserted:

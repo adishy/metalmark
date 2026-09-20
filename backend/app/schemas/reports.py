@@ -4,7 +4,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class NetWorthPoint(BaseModel):
@@ -36,12 +36,34 @@ class CategorySpendRow(BaseModel):
 
 
 class NetWorthSeries(BaseModel):
+    """The net-worth series and the reconciliation of its change (ADR-0032).
+
+    ``extra="forbid"`` is load-bearing rather than tidy: the API builds this from
+    the service's dict, and Pydantic's default is to *drop* a key it does not know
+    about — so a term added to the identity but forgotten here would vanish from the
+    response with nothing failing, and the terms that did land would no longer add
+    up to the delta. Forbidding extras turns that into a loud error instead.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     base_currency: str
     points: list[NetWorthPoint]
-    # reconciliation over the whole range: Δ net worth = cash flow + revaluation
+
+    # Δ net worth = net cash flow + currency revaluation + market appreciation
+    #               + unexplained
+    #
+    # The first three are each computed from data; `unexplained` is the remainder by
+    # construction and is therefore the only term that can be *wrong*. A non-zero
+    # value is not an error to hide — it is the report telling the truth about a gap,
+    # and `warnings` says what could not be converted or priced (ADR-0032 §5).
     delta_net_worth: Decimal
     net_cash_flow: Decimal
     currency_revaluation: Decimal
+    market_appreciation: Decimal
+    unexplained: Decimal
+    warnings: list[str] = []
+
     # Always "account": an owner filter on this report selects accounts, not rows
     # (ADR-0026). Carried in the payload so the UI can say so instead of implying
     # the figures here add up with the row-scoped reports.

@@ -115,9 +115,11 @@ async def test_demo_ledger_revaluation_is_only_currency(household_factory):
     """``currency_revaluation`` is the euro balance's FX move, to the cent.
 
     The euro account holds the same 2000 EUR all period and nothing touches it, so
-    the only thing that can move its base value is the rate. Anything else arriving
-    here — a dropped row, a mis-signed leg, a split that does not sum — lands in
-    this number, because revaluation is a residual.
+    the only thing that can move its base value is the rate — which is now stated
+    as arithmetic on the balance and the two rates rather than being whatever the
+    identity failed to explain. Anything else the demo contains that revaluation
+    does not cover — a dropped row, a mis-signed leg, a split that does not sum —
+    lands in ``unexplained`` instead, where the next test pins it at zero.
     """
     hh, demo = await _seeded(household_factory)
     async with scoped_session(household_id=hh) as s:
@@ -140,8 +142,15 @@ async def test_demo_ledger_net_worth_is_the_accounts_it_opened(household_factory
     assert {a.id for a in accounts} == set(demo["accounts"].values())
     assert nw["unconverted_currencies"] == []
     assert series["delta_net_worth"] == (
-        series["net_cash_flow"] + series["currency_revaluation"]
+        series["net_cash_flow"]
+        + series["currency_revaluation"]
+        + series["market_appreciation"]
+        + series["unexplained"]
     )
+    # The demo holds no securities and no hidden accounts, so every term but cash
+    # flow and revaluation is zero — and it has to be *zero*, not merely present.
+    assert series["market_appreciation"] == D("0.0000")
+    assert series["unexplained"] == D("0.0000")
     # The owner filter is account-scoped here, which the response says out loud.
     assert series["attribution"] == "account"
 

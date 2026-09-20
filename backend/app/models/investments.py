@@ -63,6 +63,11 @@ INVESTMENT_TX_TYPES = ("buy", "sell", "dividend", "interest", "fee", "split", "t
 #: makes "a buy does not move the account balance" true.
 CASH_SECURITY_TYPE = "cash"
 
+#: The event types whose entire effect on a **cash** position is to move currency
+#: into or out of it — ADR-0033 §4's table, minus the trade rows, which are the
+#: same events seen from the securities side. `fold_history` is the only reader.
+CASH_MOVING_EVENT_TYPES = ("dividend", "interest", "fee", "transfer")
+
 
 class Security(UUIDPkMixin, TimestampMixin, Base):
     """A reusable instrument ("VTI", "USD cash", "AAPL"), shared by the

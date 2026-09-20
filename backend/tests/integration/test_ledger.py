@@ -105,6 +105,11 @@ async def test_reconciliation_single_currency(household_factory):
     assert series["net_cash_flow"] == D("300.0000")
     # single-currency reconciles exactly: revaluation is zero
     assert series["currency_revaluation"] == D("0.0000")
+    # ... as is the term nothing owns, which is the point of ADR-0032: three
+    # computed terms, one residual, and the residual is genuinely nothing here
+    # rather than the place the other three were defined to add up.
+    assert series["market_appreciation"] == D("0.0000")
+    assert series["unexplained"] == D("0.0000")
 
 
 async def test_reconciliation_with_fx_revaluation(household_factory):
@@ -129,8 +134,17 @@ async def test_reconciliation_with_fx_revaluation(household_factory):
 
     assert series["net_cash_flow"] == D("0.0000")
     assert series["currency_revaluation"] == D("20.0000")
-    # Δ net worth == cash flow + revaluation (the invariant)
-    assert series["delta_net_worth"] == series["net_cash_flow"] + series["currency_revaluation"]
+    # Δ net worth == cash flow + revaluation + appreciation + unexplained
+    # (the invariant, ADR-0032). The revaluation is now computed from the balance
+    # and the two rates rather than being whatever is left over, so the assertion
+    # on it above and this one are independent statements.
+    assert series["delta_net_worth"] == (
+        series["net_cash_flow"]
+        + series["currency_revaluation"]
+        + series["market_appreciation"]
+        + series["unexplained"]
+    )
+    assert series["unexplained"] == D("0.0000")
 
 
 async def test_report_range_covers_the_whole_end_day(household_factory):
