@@ -28,7 +28,7 @@ from app.models import (
 )
 from app.schemas.patch import is_set
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
-from app.services import fx
+from app.services import fx, rules
 from app.services.errors import LedgerError
 from app.services.ledger import base_currency
 from app.services.ownership import require_owners
@@ -72,8 +72,9 @@ async def _tag_ids_for(session: AsyncSession, txn_ids: list[uuid.UUID]) -> dict:
 
 async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
                              data: TransactionCreate,
-                             *, source: str = "manual") -> Transaction:
-    """Create one transaction.
+                             *, source: str = "manual",
+                             rules_loaded: rules.LoadedRules | None = None) -> Transaction:
+    """Create one transaction, then run the household's rules over it.
 
     ``source`` records where the row came from (``manual`` by hand, ``csv`` from an
     import file, ``simplefin`` from sync). It does not change provenance: everything
@@ -81,6 +82,17 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
     way. The distinction that matters for sync is ADR-0019's manual-origin boundary,
     which keys off ``external_id`` — an imported row has none, so sync never
     overwrites it.
+
+    Rules run here rather than at each caller because *every* way a row arrives is
+    supposed to get them (ARCHITECTURE §4: sync "runs the rules engine on newly
+    ingested transactions"), and three call sites applying them independently is
+    three chances to forget. The engine is provenance-gated, so a value the caller
+    set above is marked ``user`` and no rule may touch it — a row the human
+    categorized comes back exactly as they typed it.
+
+    ``rules_loaded`` is the batching hook: a caller inserting many rows — the CSV
+    importer — loads and compiles the rules once and passes them in, which takes
+    the per-row cost to zero when the household has no rules that tag.
     """
     acct = await _account(session, data.account_id)
     await require_owners(session, [data.owner_id])
@@ -125,6 +137,11 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
     if data.tag_ids:
         await _set_tags(session, txn.id, data.tag_ids)
     await session.flush()
+    # Last, and after the caller's own tags are on the row: the engine reads the
+    # existing tags to union its own onto them, so running it first would let
+    # ``_set_tags`` above overwrite what a rule had just added. It flushes what it
+    # changes, so the caller reads back the row the rules produced.
+    await rules.apply_to_transaction(session, household_id, txn, loaded=rules_loaded)
     return txn
 
 

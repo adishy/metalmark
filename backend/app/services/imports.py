@@ -42,6 +42,7 @@ from app.core.money import quantize_storage
 from app.models import Category, Owner, Transaction
 from app.schemas.imports import MAPPABLE_FIELDS
 from app.schemas.transactions import TransactionCreate
+from app.services import rules
 from app.services.errors import LedgerError
 from app.services.ledger import get_account
 from app.services.transactions import create_transaction
@@ -609,6 +610,12 @@ async def commit_csv(
             ).scalars().all()
         )
 
+    # Compiled once for the whole file. Every row runs the rules (a sheet of bank
+    # rows is exactly what a rule is written for), and loading them per row would
+    # re-read and re-validate the same rule set five thousand times. A household
+    # with no tagging rules is not charged for this at all.
+    loaded_rules = await rules.load_rules(session)
+
     for _line, data, digest in parsed:
         if digest in already:
             result.skipped += 1
@@ -622,7 +629,10 @@ async def commit_csv(
             # other both pass the check, and the loser must count a skip rather
             # than fail the whole file. A savepoint scopes that to the one row.
             async with session.begin_nested():
-                txn = await create_transaction(session, household_id, data, source="csv")
+                txn = await create_transaction(
+                    session, household_id, data, source="csv",
+                    rules_loaded=loaded_rules,
+                )
                 txn.import_hash = digest
                 if suspect:
                     # A possible duplicate goes to review, not to the bin and not

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import {
+  useAccounts,
   useCategories,
   useCategoryGroups,
   useCreateCategory,
@@ -20,8 +21,20 @@ import {
   useUpdateOwner,
   useUpsertFxRate,
 } from "@/api/hooks";
+import {
+  useApplyRules,
+  useDeleteRule,
+  useRules,
+  useUpdateRule,
+  type Rule,
+  type RuleActions,
+  type RuleConditions,
+  type RuleApplyResult,
+} from "@/api/rules";
+import RuleBuilder from "@/components/RuleBuilder";
 import type { Owner, OwnerReassignment } from "@/api/types";
 import { formatDate } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 import {
   Button,
   Field,
@@ -39,6 +52,7 @@ const TABS = [
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
   { id: "owners", label: "Owners" },
+  { id: "rules", label: "Rules" },
   { id: "profile", label: "Profile" },
 ] as const;
 
@@ -72,6 +86,7 @@ export default function Settings() {
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
         {tab === "owners" && <OwnersSection />}
+        {tab === "rules" && <RulesSection />}
         {tab === "profile" && <ProfileSection />}
       </div>
     </div>
@@ -308,7 +323,7 @@ function CurrenciesSection() {
   const [baseCcy, setBaseCcy] = useState(base);
   const [quote, setQuote] = useState("");
   const [rate, setRate] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayIso());
   const [errs, setErrs] = useState<Record<string, string | null>>({});
 
   const ids = {
@@ -658,6 +673,202 @@ function OwnerRow({
       )}
     </li>
   );
+}
+
+// -------------------------------------------------------------------- rules
+
+function RulesSection() {
+  const rules = useRules();
+  const update = useUpdateRule();
+  const del = useDeleteRule();
+  const apply = useApplyRules();
+  const household = useHousehold();
+  const categories = useCategories();
+  const owners = useOwners();
+  const tags = useTags();
+  const accounts = useAccounts();
+  // A rule rewrites ledger history, so every control that writes one is
+  // owner-only — the same split the API enforces via require_owner. A member
+  // still sees the list, which is a household-scoped read.
+  const isOwner = household.data?.role === "owner";
+
+  const [editing, setEditing] = useState<Rule | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [applied, setApplied] = useState<RuleApplyResult | null>(null);
+
+  const name = (list: { id: string; name: string }[] | undefined) => (id: string) =>
+    list?.find((x) => x.id === id)?.name ?? "—";
+  const names = {
+    account: name(accounts.data),
+    category: name(categories.data),
+    owner: name(owners.data),
+    tag: name(tags.data),
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card title="Rules">
+        <p className="text-xs text-slate-500">
+          Rules run over new transactions as they arrive and over the existing ledger when you ask
+          them to. Lower priority runs first, and a rule never overwrites a field a person has set.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={!isOwner}
+            onClick={() => setCreating(true)}
+            data-testid="rule-new"
+          >
+            New rule
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!isOwner || apply.isPending || !rules.data?.length}
+            onClick={() => apply.mutate(undefined, { onSuccess: (r) => setApplied(r) })}
+            data-testid="rule-apply"
+          >
+            {apply.isPending ? "Applying…" : "Apply to existing"}
+          </Button>
+          {!isOwner && (
+            <span className="text-xs text-slate-500">
+              Only a household owner can create, edit or apply rules.
+            </span>
+          )}
+        </div>
+
+        {applied && (
+          <p className="text-xs text-slate-400" data-testid="rule-apply-result">
+            {applied.updated === 0
+              ? `Matched ${applied.matched} transactions — nothing left to change, the rules are already applied.`
+              : `Matched ${applied.matched} transactions and updated ${applied.updated}.`}
+          </p>
+        )}
+        {apply.isError && (
+          <p className="text-sm text-red-400" data-testid="rule-apply-error">
+            {(apply.error as Error).message}
+          </p>
+        )}
+
+        <ul className="space-y-2" data-testid="rule-list">
+          {rules.data?.map((r) => (
+            <li
+              key={r.id}
+              className="flex flex-wrap items-start gap-3 rounded-lg bg-slate-800/40 px-3 py-2"
+              data-testid={`rule-row-${r.id}`}
+            >
+              <label className="flex items-center gap-2 pt-0.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={r.enabled}
+                  disabled={!isOwner || update.isPending}
+                  onChange={(e) =>
+                    update.mutate({ id: r.id, body: { enabled: e.target.checked } })
+                  }
+                  aria-label={`${r.name} enabled`}
+                  data-testid={`rule-enabled-${r.id}`}
+                />
+              </label>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-100">
+                  {r.name}{" "}
+                  <span className="text-xs text-slate-500">priority {r.priority}</span>
+                  {!r.enabled && <span className="ml-2 text-xs text-amber-400/90">disabled</span>}
+                </p>
+                <p className="text-xs text-slate-400" data-testid={`rule-when-${r.id}`}>
+                  When {describeConditions(r.conditions, names)}
+                </p>
+                <p className="text-xs text-slate-400" data-testid={`rule-then-${r.id}`}>
+                  Then {describeActions(r.actions, names)}
+                </p>
+              </div>
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  className="px-2 py-1 text-xs"
+                  disabled={!isOwner}
+                  onClick={() => setEditing(r)}
+                  data-testid={`rule-edit-${r.id}`}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="px-2 py-1 text-xs"
+                  disabled={!isOwner || del.isPending}
+                  onClick={() => del.mutate(r.id)}
+                  data-testid={`rule-delete-${r.id}`}
+                >
+                  Delete
+                </Button>
+              </div>
+              {update.isError && update.variables?.id === r.id && (
+                <p className="w-full text-xs text-red-400">{(update.error as Error).message}</p>
+              )}
+            </li>
+          ))}
+          {rules.data?.length === 0 && (
+            <li className="text-xs text-slate-500" data-testid="rule-empty">
+              No rules yet. A rule can categorise, tag, rename or hide transactions for you.
+            </li>
+          )}
+        </ul>
+      </Card>
+
+      {/* Keyed on the id so switching rules remounts the draft rather than
+          carrying the previous rule's values into this one. */}
+      {(creating || editing) && (
+        <RuleBuilder
+          key={editing?.id ?? "new"}
+          rule={editing}
+          onClose={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function describeConditions(c: RuleConditions, names: Names): string {
+  const parts: string[] = [];
+  if (c.merchant_contains) parts.push(`merchant contains “${c.merchant_contains}”`);
+  if (c.description_regex) parts.push(`description matches /${c.description_regex}/`);
+  // The bounds are on the signed amount, so they are shown that way rather than
+  // as a currency — a rule has no currency, and "$-100" would read backwards.
+  if (c.amount_min != null) parts.push(`amount is at least ${c.amount_min}`);
+  if (c.amount_max != null) parts.push(`amount is at most ${c.amount_max}`);
+  if (c.direction) parts.push(c.direction === "in" ? "money in" : "money out");
+  if (c.account_ids?.length) parts.push(`in ${list(c.account_ids, names.account)}`);
+  if (c.category_id) parts.push(`category is ${names.category(c.category_id)}`);
+  if (c.is_pending != null) parts.push(c.is_pending ? "it is pending" : "it has posted");
+  return parts.length ? parts.join(" and ") : "any transaction";
+}
+
+function describeActions(a: RuleActions, names: Names): string {
+  const parts: string[] = [];
+  if (a.set_category_id) parts.push(`set category to ${names.category(a.set_category_id)}`);
+  if (a.add_tag_ids?.length) parts.push(`add ${list(a.add_tag_ids, names.tag)}`);
+  if (a.set_owner_id) parts.push(`set owner to ${names.owner(a.set_owner_id)}`);
+  if (a.rename_merchant) parts.push(`rename merchant to “${a.rename_merchant}”`);
+  if (a.set_hidden != null) parts.push(a.set_hidden ? "hide it" : "unhide it");
+  if (a.mark_reviewed != null) {
+    parts.push(a.mark_reviewed ? "mark it reviewed" : "mark it needs review");
+  }
+  return parts.length ? parts.join(", ") : "do nothing";
+}
+
+interface Names {
+  account: (id: string) => string;
+  category: (id: string) => string;
+  owner: (id: string) => string;
+  tag: (id: string) => string;
+}
+
+/** A rule can name a category, owner or tag that has since been deleted — the
+ * ids live in JSONB, so no foreign key stops it. The server skips such a rule
+ * and keeps the rest running, and "—" here says the same thing. */
+function list(ids: string[], name: (id: string) => string): string {
+  return ids.map(name).join(", ");
 }
 
 // ----------------------------------------------------------------- profile

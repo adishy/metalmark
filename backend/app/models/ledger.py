@@ -318,3 +318,36 @@ class BalanceSnapshot(Base):
     balance_date: Mapped[date] = mapped_column(Date, nullable=False)
     balance: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+
+
+class Rule(UUIDPkMixin, TimestampMixin, Base):
+    """A priority-ordered "when these conditions, set these fields" instruction.
+
+    ``conditions`` and ``actions`` are JSONB rather than columns because the key
+    sets are still moving (auto-split lands in Phase 2, §2), and a rule is read
+    and written whole — never queried by an individual key. The trade is that
+    nothing in the database constrains their shape, so the API schemas own it
+    (``app.schemas.rules``): the key set is closed and an unknown key is a 422.
+
+    What a rule may write is decided by provenance, not by this table (ADR-0007):
+    ``services/rules.py`` skips any field whose ``field_sources`` entry is
+    ``user``, so a rule can fill a blank or improve a provider/earlier-rule value
+    and never a human's.
+    """
+
+    __tablename__ = "rules"
+
+    household_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False,
+        index=True,
+    )
+    # Lower runs first; ties break on (created_at, id) so the order is total.
+    priority: Mapped[int] = mapped_column(nullable=False, default=100)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # {merchant_contains?, description_regex?, amount_min?, amount_max?, direction?,
+    #  account_ids?, category_id?, is_pending?} — all AND-ed.
+    conditions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # {set_category_id?, add_tag_ids?, set_owner_id?, rename_merchant?, set_hidden?,
+    #  mark_reviewed?} — auto-split is deferred to the sync phase (§2).
+    actions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
