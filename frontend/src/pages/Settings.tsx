@@ -32,6 +32,7 @@ import {
   type RuleApplyResult,
 } from "@/api/rules";
 import RuleBuilder from "@/components/RuleBuilder";
+import { CloseIcon } from "@/components/icons";
 import type { Owner, OwnerReassignment } from "@/api/types";
 import { formatDate } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
@@ -253,13 +254,17 @@ function CategoriesSection() {
                 <p className="text-sm font-medium text-fg">
                   {g.name} <span className="text-xs text-fg-muted">({g.type})</span>
                 </p>
-                <button
-                  className="text-xs text-fg-muted hover:text-negative"
+                {/* A raw <button> here computed to 67x16 — the `text-xs` line
+                    box with no padding, well under the 44 px floor (§5). The
+                    primitives carry `min-h-11`; use them. */}
+                <Button
+                  variant="ghost"
+                  className="px-2 py-1 text-xs"
                   onClick={() => delGroup.mutate(g.id)}
                   data-testid={`group-delete-${g.id}`}
                 >
                   Delete group
-                </button>
+                </Button>
               </div>
               <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
@@ -268,13 +273,14 @@ function CategoriesSection() {
                       <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
                       {c.name}
                     </span>
-                    <button
-                      className="text-xs text-fg-muted hover:text-negative"
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
                       onClick={() => delCat.mutate(c.id)}
                       data-testid={`category-delete-${c.id}`}
                     >
                       Delete
-                    </button>
+                    </Button>
                   </li>
                 ))}
                 {(byGroup.get(g.id) ?? []).length === 0 && (
@@ -328,18 +334,23 @@ function TagsSection() {
       </Card>
 
       <Card title="Tags">
+        {/* `pr-1` and no `py-1`: the icon button is 44 px and sets the pill's
+            height itself, so extra padding would only make the chip taller than
+            its target. Note the tag list is not seeded, so the target-size
+            sweep cannot see this control — it was fixed by reading §4.2, not by
+            watching it go red. */}
         <ul className="flex flex-wrap gap-2" data-testid="tag-list">
           {tags.data?.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 rounded-full bg-surface-inset px-3 py-1 text-sm">
+            <li key={t.id} className="flex items-center gap-2 rounded-full bg-surface-inset py-0 pl-3 pr-1 text-sm">
               <span className="inline-block h-3 w-3 rounded-full" style={{ background: t.color ?? "#64748b" }} />
               {t.name}
               <button
-                className="text-fg-muted hover:text-negative"
+                className="inline-flex size-11 items-center justify-center rounded-full text-fg-muted hover:text-negative"
                 onClick={() => delTag.mutate(t.id)}
                 aria-label={`Delete ${t.name}`}
                 data-testid={`tag-delete-${t.id}`}
               >
-                ✕
+                <CloseIcon />
               </button>
             </li>
           ))}

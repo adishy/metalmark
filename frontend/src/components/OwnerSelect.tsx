@@ -78,15 +78,20 @@ export default function OwnerSelect({
         ))}
       </Select>
 
+      {/* Ghost, not a raw <button>: `text-xs` with no padding computed to
+          68x16. `underline` goes with it — the ghost variant's muted colour and
+          hover fill already say "secondary action", and an underline on a 44 px
+          hit area reads as a link that is not there (§4.1). */}
       {!allowCreate ? null : !adding ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          className="self-start px-2 py-1 text-xs"
           onClick={() => setAdding(true)}
-          className="text-xs text-fg-muted underline hover:text-fg"
           data-testid={`${testid}-new`}
         >
           + New owner
-        </button>
+        </Button>
       ) : (
         <div className="flex items-start gap-2">
           <Input
