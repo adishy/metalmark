@@ -63,3 +63,4 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0029](0029-job-claim-heartbeat-fence.md) | Job claim: heartbeat, fence, per-household enumeration (claim half of 0004) | Accepted |
 | [0030](0030-ofx-import-scope.md) | OFX/QFX import: 2.x only, FITID-first dedupe, banking rows only | Accepted |
 | [0031](0031-auto-split-rules.md) | Auto-split rules: balanced by construction, a human's split is final | Accepted |
+| [0032](0032-reconciliation-with-investments.md) | Investments in the reconciliation identity: a third term, and one residual only | Accepted |
