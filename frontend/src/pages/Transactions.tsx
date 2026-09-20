@@ -45,6 +45,24 @@ function isFiltered(f: TxnFilter): boolean {
   );
 }
 
+/**
+ * The ledger's columns at `lg:` (§9.4), shared by the header row and every
+ * transaction row so the two cannot drift — one string, two call sites.
+ *
+ * Written out as a literal rather than built from parts because Tailwind reads
+ * source *text*: `grid-cols-${n}` is never generated, and the failure is a
+ * silent one (the columns collapse to a single column and the row still
+ * renders, just wrong).
+ *
+ * The widths are chosen for the *narrower* of the two cases this row is used
+ * at: §9.3 puts the list beside the detail pane, so the list gets roughly two
+ * thirds of the page — about 805 px — and every fixed column is sized to hold
+ * its own worst value there. The description takes what is left, which is the
+ * one column that can still say something useful when it is 300 px wide.
+ */
+const ROW_COLUMNS =
+  "lg:grid-cols-[1.75rem_minmax(0,1fr)_5rem_7rem_5.5rem_7rem] lg:gap-3";
+
 export default function Transactions() {
   const accounts = useAccounts();
   const categories = useCategories();
@@ -133,51 +151,130 @@ export default function Transactions() {
         onChange={setFilter}
       />
 
-      <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="txn-list">
-        {items.map((t) => (
-          <li key={t.id}>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-inset/60"
-              onClick={() => setSelected(t)}
-              data-testid={`txn-row-${t.id}`}
-            >
-              {/* The mark leads the row because it answers the question the
-                  description cannot: a ledger running several accounts shows
-                  "Coffee" three times, and which one it came out of is the
-                  difference between a personal and a business expense. At 20px
-                  it costs the description 28px of width, and gives back the
-                  account without a second line. */}
-              <div className="flex min-w-0 items-center gap-2">
+      {/* The header row and the list share a wrapper so they are one item in the
+          page's `space-y-4` stack rather than two.
+
+          Deliberately **no `overflow-hidden`** here, which is the usual way to
+          hold a child's background inside a rounded parent. It would also clip
+          the row's focus ring — `outline-offset: 2px` puts two pixels of outline
+          outside the row on each side — and a clipped focus indicator is the one
+          thing §7 item 3 cannot have. Nothing here needs clipping anyway: the
+          rows paint no background of their own (§9.5's hover is on the row, and
+          that is inside the `<ul>`'s own rounded box). */}
+      <div>
+        {/* A real header row, and `lg:` only: below that the row is a phone row
+            with no columns to name. `aria-hidden` because it is a *second*
+            naming of values every row already carries as text — the visual
+            reader needs to know which column is which, and a screen reader
+            hearing "Description Date Category Owner Amount" before every row's
+            own values would be read the same thing twice.
+
+            The first cell is empty on purpose: the mark column holds a picture,
+            and a picture with a printed caption above it is worse than the
+            accessible name and `title` that `AccountMark` already carries. */}
+        <div
+          aria-hidden="true"
+          className={`hidden px-4 pb-2 text-xs font-medium text-fg-muted lg:grid ${ROW_COLUMNS}`}
+        >
+          <span />
+          <span>Description</span>
+          <span>Date</span>
+          <span>Category</span>
+          <span>Owner</span>
+          <span className="text-right">Amount</span>
+        </div>
+        <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="txn-list">
+          {items.map((t) => (
+            <li key={t.id}>
+              <button
+                type="button"
+                // `flex` is the phone row; `lg:grid` is §9.4's row that gains
+                // columns. One element, one set of children, two layouts — the
+                // `min-h-12` at `lg:` is a floor of 48 px, and §5's 44 px target
+                // rule still applies above it, which is why the row gets shorter
+                // on a desktop but never short.
+                className={`flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-surface-inset/60 lg:min-h-12 lg:grid ${ROW_COLUMNS}`}
+                onClick={() => setSelected(t)}
+                data-testid={`txn-row-${t.id}`}
+              >
+                {/* The mark leads the row because it answers the question the
+                    description cannot: a ledger running several accounts shows
+                    "Coffee" three times, and which one it came out of is the
+                    difference between a personal and a business expense. At 20px
+                    it costs the description 28px of width, and gives back the
+                    account without a second line.
+
+                    At `lg:` this is §9.4's account column — the one column with
+                    no header above it, because it holds a picture and
+                    `AccountMark` already carries the account's name twice over,
+                    as its accessible name and as its `title` (§9.5). */}
                 <AccountMark
                   name={acctFor.get(t.account_id)?.name ?? "(unknown account)"}
                   institution={acctFor.get(t.account_id)?.institution}
                 />
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
+
+                {/* `lg:contents` is what lets one piece of JSX be both the phone
+                    row and the desktop row rather than two trees that drift
+                    (§9). The wrapper is layout at 360 px and stops existing at
+                    1024, which promotes its three children — the description,
+                    the meta line and the tags — to grid items of the row itself,
+                    free to be given `col-start`s.
+
+                    Nothing is hidden at either width, so the row's accessible
+                    name is the same text at both. A duplicate-and-hide pair of
+                    trees could not promise that, and the name a screen reader
+                    hears changing with the viewport is a bug nobody would notice
+                    writing. */}
+                <div className="flex min-w-0 flex-1 items-center gap-2 lg:contents">
+                  <div className="flex min-w-0 items-center gap-2 lg:col-start-2 lg:row-start-1">
                     <p className="truncate font-medium">
                       {t.merchant || t.description || "(no description)"}
                     </p>
+                    {/* A sibling of the truncating text, not part of it: a badge
+                        clipped to "spl…" is not a label. */}
                     {t.is_split_parent && (
-                      // A sibling of the truncating text, not part of it: a badge
-                      // clipped to "spl…" is not a label.
                       <span className="shrink-0 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
                         split
                       </span>
                     )}
                   </div>
-                  <p className="truncate text-xs text-fg-muted">
+
+                  {/* The phone meta line, and at `lg:` the three middle columns.
+                      `lg:contents` dissolves the paragraph so its children take
+                      `col-start`s of their own — the meta line *becomes* the
+                      columns instead of sitting beside them (§9.4).
+
+                      The `·` separators are `lg:hidden` and `aria-hidden`: they
+                      are phone punctuation, and at `lg:` the columns already say
+                      where one value ends and the next begins. */}
+                  <p className="truncate text-xs text-fg-muted lg:contents">
                     {/* `compact`: "Today"/"Yesterday" at a glance, the date once
                         it is older. The row is the densest surface in the app, so
                         it gets the shortest vocabulary — the ISO form is a hover
-                        away either way. */}
-                    <Day value={t.transacted_at} style="compact" />
-                    {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
+                        away either way, and `<Day>` carries it in both `title`
+                        and `datetime` (§9.5). */}
+                    <Day
+                      value={t.transacted_at}
+                      style="compact"
+                      className="lg:col-start-3 lg:truncate"
+                    />
+                    <span className="lg:col-start-4 lg:truncate">
+                      {t.category_id && (
+                        <>
+                          <span aria-hidden="true" className="lg:hidden">
+                            {" · "}
+                          </span>
+                          {catName.get(t.category_id) ?? ""}
+                        </>
+                      )}
+                    </span>
                     {/* The effective owner is what reports actually bucket by, so
                         that is what the row shows; a muted style marks the ones
                         that only inherit it from their account. */}
                     <span
-                      className={t.owner_id ? "text-fg" : "italic text-fg-muted"}
+                      className={`lg:col-start-5 lg:truncate ${
+                        t.owner_id ? "text-fg" : "italic text-fg-muted"
+                      }`}
                       title={
                         t.owner_id
                           ? "Owner set on this transaction"
@@ -185,7 +282,10 @@ export default function Transactions() {
                       }
                       data-testid={`txn-owner-${t.id}`}
                     >
-                      {` · ${ownerName.get(t.effective_owner_id) ?? "Shared"}`}
+                      <span aria-hidden="true" className="lg:hidden">
+                        {" · "}
+                      </span>
+                      {ownerName.get(t.effective_owner_id) ?? "Shared"}
                       {!t.owner_id && (
                         <>
                           {/* Inherited needs a marker that survives touch and
@@ -198,10 +298,37 @@ export default function Transactions() {
                         </>
                       )}
                     </span>
-                    {t.review_status === "needs_review" && " · needs review"}
+                    {/* Last in the meta line at 360 px, exactly where it has
+                        always been — a badge next to the description was tried
+                        and it costs the merchant its name ("Corner Pharmacy"
+                        truncated to "Cor…" at 360 px, because the badge is 110 px
+                        of a 188 px cell).
+
+                        At `lg:` it is a badge again, on its own row of the
+                        description column: it is a state *of* this row, not a
+                        column, so it has no column to sit in, and a row of its
+                        own is the honest place for it. Row 3 rather than row 2
+                        because the tags take row 2 when they exist — a flagged,
+                        tagged row is three lines, and neither of the other two
+                        cases pays for an empty track. */}
+                    {t.review_status === "needs_review" && (
+                      <span
+                        className="lg:col-start-2 lg:row-start-3 lg:justify-self-start lg:rounded lg:bg-warning/15 lg:px-1.5 lg:py-0.5 lg:text-warning"
+                        data-testid={`txn-review-${t.id}`}
+                      >
+                        <span aria-hidden="true" className="lg:hidden">
+                          {" · "}
+                        </span>
+                        needs review
+                      </span>
+                    )}
                   </p>
+
+                  {/* Row two of the description column at `lg:`, under the name
+                      it belongs to. `col-start-2` is what puts the tags under
+                      the description rather than under the mark. */}
                   {t.tag_ids.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
+                    <div className="mt-1 flex flex-wrap gap-1 lg:col-start-2 lg:row-start-2 lg:mt-0">
                       {t.tag_ids.map((id) => (
                         <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
                           {tagName.get(id) ?? "tag"}
@@ -210,43 +337,44 @@ export default function Transactions() {
                     </div>
                   )}
                 </div>
-              </div>
-              {/* shrink-0 and text-right: the merchant gives way, the number
-                  never does (§6.5). */}
-              <span
-                className={`shrink-0 text-right text-base font-semibold tabular-nums ${
-                  Number(t.amount) < 0 ? "text-fg" : "text-positive"
-                }`}
-              >
-                {formatMoney(t.amount, t.currency)}
-              </span>
-            </button>
-          </li>
-        ))}
-        {items.length === 0 && !txns.isLoading && (
-          <li className="px-4">
-            {/* The message *about* the results, not the list itself: a filter
-                change that empties the ledger is otherwise silent (§7.6).
 
-                Two sentences, not one: "no transactions match" is a claim about
-                the filters, and on a genuinely empty ledger nothing was
-                filtered, so it would be describing a cause that isn't there. */}
-            <p role="status" aria-atomic="true" className="pt-6 text-center text-sm text-fg-muted">
-              {filtered ? "No transactions match these filters." : "No transactions yet."}
-            </p>
-            {/* §4.10's escape hatch, at the point of failure. The filter bar has
-                its own Clear, but it is off-screen above by the time the user
-                has scrolled here to find out why the list is empty. */}
-            {filtered && (
-              <div className="flex justify-center pb-6 pt-3">
-                <Button variant="secondary" onClick={() => setFilter({})} data-testid="empty-clear-filters">
-                  Clear filters
-                </Button>
-              </div>
-            )}
-          </li>
-        )}
-      </ul>
+                {/* shrink-0 and text-right: the merchant gives way, the number
+                    never does (§6.5). */}
+                <span
+                  className={`shrink-0 text-right text-base font-semibold tabular-nums lg:col-start-6 lg:row-start-1 ${
+                    Number(t.amount) < 0 ? "text-fg" : "text-positive"
+                  }`}
+                >
+                  {formatMoney(t.amount, t.currency)}
+                </span>
+              </button>
+            </li>
+          ))}
+          {items.length === 0 && !txns.isLoading && (
+            <li className="px-4">
+              {/* The message *about* the results, not the list itself: a filter
+                  change that empties the ledger is otherwise silent (§7.6).
+
+                  Two sentences, not one: "no transactions match" is a claim
+                  about the filters, and on a genuinely empty ledger nothing was
+                  filtered, so it would be describing a cause that isn't there. */}
+              <p role="status" aria-atomic="true" className="pt-6 text-center text-sm text-fg-muted">
+                {filtered ? "No transactions match these filters." : "No transactions yet."}
+              </p>
+              {/* §4.10's escape hatch, at the point of failure. The filter bar
+                  has its own Clear, but it is off-screen above by the time the
+                  user has scrolled here to find out why the list is empty. */}
+              {filtered && (
+                <div className="flex justify-center pb-6 pt-3">
+                  <Button variant="secondary" onClick={() => setFilter({})} data-testid="empty-clear-filters">
+                    Clear filters
+                  </Button>
+                </div>
+              )}
+            </li>
+          )}
+        </ul>
+      </div>
 
       {txns.hasNextPage && (
         <div className="flex justify-center">
