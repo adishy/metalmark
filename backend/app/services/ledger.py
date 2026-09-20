@@ -216,6 +216,34 @@ async def list_tags(session: AsyncSession) -> list[Tag]:
     return list((await session.execute(select(Tag).order_by(Tag.name))).scalars().all())
 
 
+async def delete_category(session: AsyncSession, category_id: uuid.UUID) -> None:
+    obj = (
+        await session.execute(select(Category).where(Category.id == category_id))
+    ).scalar_one_or_none()
+    if obj is None:
+        raise LedgerError("Category not found", 404)
+    await session.delete(obj)
+    await session.flush()
+
+
+async def delete_category_group(session: AsyncSession, group_id: uuid.UUID) -> None:
+    obj = (
+        await session.execute(select(CategoryGroup).where(CategoryGroup.id == group_id))
+    ).scalar_one_or_none()
+    if obj is None:
+        raise LedgerError("Category group not found", 404)
+    await session.delete(obj)
+    await session.flush()
+
+
+async def delete_tag(session: AsyncSession, tag_id: uuid.UUID) -> None:
+    obj = (await session.execute(select(Tag).where(Tag.id == tag_id))).scalar_one_or_none()
+    if obj is None:
+        raise LedgerError("Tag not found", 404)
+    await session.delete(obj)
+    await session.flush()
+
+
 # ---- FX rates (with cache invalidation) -----------------------------------
 
 async def upsert_fx_rate(session: AsyncSession, household_id: uuid.UUID, *, base_ccy: str,

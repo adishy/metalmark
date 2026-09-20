@@ -176,6 +176,22 @@ async def test_transfer_excluded_from_cash_flow(household_factory):
     assert after[0]["income"] == D("0.0000")
 
 
+async def test_transaction_owner_and_provenance(household_factory):
+    from app.services import auth as authsvc
+
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        members = await authsvc.list_members(s, hh)
+        owner = members[0]["user_id"]
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Chk", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-10"), transacted_at=_dt(2026, 1, 5),
+            owner_user_id=owner))
+    assert txn.owner_user_id == owner
+    assert txn.field_sources.get("owner") == "user"
+
+
 async def test_provenance_marks_user_fields(household_factory):
     hh = await household_factory(base="USD")
     async with scoped_session(household_id=hh) as s:

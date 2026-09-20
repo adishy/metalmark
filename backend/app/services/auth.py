@@ -141,6 +141,21 @@ async def membership_for(session: AsyncSession, user_id: uuid.UUID) -> Household
     ).scalar_one_or_none()
 
 
+async def list_members(session: AsyncSession, household_id: uuid.UUID) -> list[dict]:
+    rows = (
+        await session.execute(
+            select(User.id, User.display_name, User.email, HouseholdMember.role)
+            .join(HouseholdMember, HouseholdMember.user_id == User.id)
+            .where(HouseholdMember.household_id == household_id)
+            .order_by(HouseholdMember.role, User.display_name)
+        )
+    ).all()
+    return [
+        {"user_id": uid, "display_name": name, "email": email, "role": role}
+        for uid, name, email, role in rows
+    ]
+
+
 async def create_invite(session: AsyncSession, *, household_id: uuid.UUID, email: str,
                         role: str) -> tuple[Invite, str]:
     raw = new_token()

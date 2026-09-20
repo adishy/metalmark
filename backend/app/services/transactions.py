@@ -80,6 +80,8 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
         _mark(field_sources, ["category"], "user")
     if data.merchant is not None:
         _mark(field_sources, ["merchant"], "user")
+    if data.owner_user_id is not None:
+        _mark(field_sources, ["owner"], "user")
 
     txn = Transaction(
         household_id=household_id,
@@ -93,6 +95,7 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
         description=data.description,
         merchant=data.merchant,
         category_id=data.category_id,
+        owner_user_id=data.owner_user_id,
         is_pending=data.is_pending,
         # a human entering a categorized txn has effectively reviewed it
         review_status="reviewed" if data.category_id else "needs_review",
@@ -144,6 +147,9 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
     if data.category_id is not None:
         txn.category_id = data.category_id
         _mark(fs, ["category"], "user")
+    if data.owner_user_id is not None:
+        txn.owner_user_id = data.owner_user_id
+        _mark(fs, ["owner"], "user")
     if data.is_pending is not None:
         txn.is_pending = data.is_pending
     if data.is_hidden is not None:

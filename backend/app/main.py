@@ -10,7 +10,16 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from app.api import accounts, auth, categories, fx, health, reports, transactions
+from app.api import (
+    accounts,
+    auth,
+    categories,
+    fx,
+    health,
+    household,
+    reports,
+    transactions,
+)
 from app.logging import configure_logging, get_logger
 from app.services.auth import AuthError
 from app.services.ledger import LedgerError
@@ -75,6 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(transactions.router)
     app.include_router(fx.router)
     app.include_router(reports.router)
+    app.include_router(household.router)
     return app
 
 

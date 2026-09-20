@@ -34,6 +34,7 @@ class TransactionCreate(BaseModel):
     description: str | None = None
     merchant: str | None = None
     category_id: uuid.UUID | None = None
+    owner_user_id: uuid.UUID | None = None
     is_pending: bool = False
     notes: str | None = None
     tag_ids: list[uuid.UUID] = []
@@ -46,6 +47,7 @@ class TransactionUpdate(BaseModel):
     description: str | None = None
     merchant: str | None = None
     category_id: uuid.UUID | None = None
+    owner_user_id: uuid.UUID | None = None
     is_pending: bool | None = None
     is_hidden: bool | None = None
     review_status: str | None = Field(default=None, pattern="^(needs_review|reviewed|ignored)$")
@@ -66,6 +68,7 @@ class TransactionOut(BaseModel):
     description: str | None
     merchant: str | None
     category_id: uuid.UUID | None
+    owner_user_id: uuid.UUID | None
     is_pending: bool
     review_status: str
     is_hidden: bool

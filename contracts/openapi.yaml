@@ -545,6 +545,99 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /categories/{category_id}:
+    delete:
+      tags:
+      - categories
+      summary: Delete Category
+      operationId: delete_category_categories__category_id__delete
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /category-groups/{group_id}:
+    delete:
+      tags:
+      - categories
+      summary: Delete Category Group
+      operationId: delete_category_group_category_groups__group_id__delete
+      parameters:
+      - name: group_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Group Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /tags/{tag_id}:
+    delete:
+      tags:
+      - categories
+      summary: Delete Tag
+      operationId: delete_tag_tags__tag_id__delete
+      parameters:
+      - name: tag_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tag Id
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /transactions:
     post:
       tags:
@@ -1061,6 +1154,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /household:
+    get:
+      tags:
+      - household
+      summary: Get Household
+      operationId: get_household_household_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /household/members:
+    get:
+      tags:
+      - household
+      summary: List Members
+      operationId: list_members_household_members_get
+      parameters:
+      - name: kestrel_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kestrel Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MemberOut'
+                title: Response List Members Household Members Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AccountCreate:
@@ -1447,6 +1599,32 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HouseholdOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        base_currency:
+          type: string
+          title: Base Currency
+        timezone:
+          type: string
+          title: Timezone
+        role:
+          type: string
+          title: Role
+      type: object
+      required:
+      - id
+      - name
+      - base_currency
+      - timezone
+      - role
+      title: HouseholdOut
     InviteCreateRequest:
       properties:
         email:
@@ -1529,6 +1707,29 @@ components:
       - role
       - csrf_token
       title: MeResponse
+    MemberOut:
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          title: User Id
+        display_name:
+          type: string
+          title: Display Name
+        email:
+          type: string
+          format: email
+          title: Email
+        role:
+          type: string
+          title: Role
+      type: object
+      required:
+      - user_id
+      - display_name
+      - email
+      - role
+      title: MemberOut
     NetWorthOut:
       properties:
         base_currency:
@@ -1801,6 +2002,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
         is_pending:
           type: boolean
           title: Is Pending
@@ -1878,6 +2085,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
         is_pending:
           type: boolean
           title: Is Pending
@@ -1934,6 +2147,7 @@ components:
       - description
       - merchant
       - category_id
+      - owner_user_id
       - is_pending
       - review_status
       - is_hidden
@@ -1996,6 +2210,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
+        owner_user_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner User Id
         is_pending:
           anyOf:
           - type: boolean

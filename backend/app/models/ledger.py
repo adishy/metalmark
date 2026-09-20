@@ -196,6 +196,11 @@ class Transaction(UUIDPkMixin, TimestampMixin, Base):
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
     )
+    # Transaction-level owner. Attribution precedence: split.owner → transaction
+    # owner → account.owner → joint (null). Fractional per-txn ownership deferred.
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     is_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     review_status: Mapped[str] = mapped_column(String(16), nullable=False, default="needs_review")
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
