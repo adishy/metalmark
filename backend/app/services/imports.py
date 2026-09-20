@@ -34,24 +34,30 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import quantize_storage
-from app.models import Category, Owner, Transaction
+from app.logging import get_logger
+from app.models import Account, Category, Owner, Transaction
 from app.schemas.imports import MAPPABLE_FIELDS
 from app.schemas.transactions import TransactionCreate
-from app.services import rules
+from app.services import ofx, rules
 from app.services.errors import LedgerError
-from app.services.ledger import get_account
+from app.services.ledger import get_account, upsert_balance_snapshot
 from app.services.transactions import create_transaction
+
+log = get_logger(__name__)
 
 # ---- Limits (ARCHITECTURE §5: user-supplied files are size- and column-limited)
 
 # A year of statement exports is well under this; anything larger is not a bank
-# CSV, and bounding it is what keeps the parse (and the response) finite.
-MAX_FILE_BYTES = 2 * 1024 * 1024
+# file, and bounding it is what keeps the parse (and the response) finite. One
+# bound for both formats: the CSV path enforces it in ``_decode``, the OFX path in
+# ``ofx.parse_ofx``, and the route reads it here (``svc.MAX_FILE_BYTES``) before
+# either of them sees the bytes.
+MAX_FILE_BYTES = ofx.MAX_FILE_BYTES
 MAX_ROWS = 5_000
 MAX_COLUMNS = 100
 SAMPLE_ROWS = 10
@@ -86,6 +92,54 @@ class Preview:
     headers: list[str]
     sample: list[list[str]]
     suggested: dict[str, str | None]
+
+
+@dataclass(frozen=True)
+class OfxPreview:
+    """What the file says about itself, and how much is in it.
+
+    The account fields are *reported*, never matched on (ADR-0030 §4): the human
+    picks the ledger account at commit, exactly as the CSV path does. That makes
+    them confirmation that the right statement was downloaded — which is what
+    auto-matching would have given, without inventing a persistent account-mapping
+    concept for a ledger that belongs to the household rather than to a file.
+    """
+
+    org: str | None
+    acct_id: str | None
+    acct_type: str | None
+    currency: str | None
+    start: datetime | None
+    end: datetime | None
+    transaction_count: int
+    investment_count: int
+
+
+@dataclass(frozen=True)
+class OfxRowIssue:
+    """One OFX row the importer refused to guess at.
+
+    ``position`` is 1-based *within the statement*: OFX has no line numbers, and
+    "the third transaction in the file" is the thing a human can go and find. The
+    CSV path's ``RowIssue`` carries a file line instead, which is why the two are
+    different shapes rather than one with a misleading field name.
+    """
+
+    position: int
+    message: str
+
+
+@dataclass
+class OfxCommitResult:
+    inserted: int = 0
+    skipped: int = 0
+    suspects: int = 0
+    #: Investment rows counted and left out (ADR-0030 §5). Its own number rather
+    #: than folded into ``skipped``: a skipped row is one the ledger already has,
+    #: and these are rows the ledger cannot hold yet. An investment-only file has
+    #: to read as "0 imported, 5 skipped" and not as a silent success.
+    investments_skipped: int = 0
+    errors: list[OfxRowIssue] = field(default_factory=list)
 
 
 # ---- Parsing ---------------------------------------------------------------
@@ -647,3 +701,211 @@ async def commit_csv(
             result.suspects += 1
 
     return result
+
+
+# ---- OFX/QFX (ADR-0030) ----------------------------------------------------
+
+
+def preview_ofx(raw: bytes) -> OfxPreview:
+    """Read an OFX/QFX file and say what is in it. Writes nothing.
+
+    Everything that makes a file unimportable is refused here — a 1.x SGML file
+    by name, XML that is malformed or unsafe, a document with no statement in it —
+    so the dialog never leads the user into a confirm step for a file that cannot
+    land.
+    """
+    parsed = ofx.parse_ofx(raw)
+    statement = parsed.primary
+    return OfxPreview(
+        org=parsed.org,
+        acct_id=statement.acct_id,
+        acct_type=statement.acct_type,
+        currency=statement.currency,
+        start=statement.start,
+        end=statement.end,
+        transaction_count=len(parsed.transactions),
+        investment_count=parsed.investment_count,
+    )
+
+
+async def _statement_balance(
+    session: AsyncSession, account: Account, statement: ofx.OfxStatement
+) -> None:
+    """Write ``<LEDGERBAL>`` the way sync writes a balance (ADR-0030 §6).
+
+    The account's own columns move and the snapshot for the balance's own date is
+    upserted — sync's order, sync's upsert (``ledger.upsert_balance_snapshot``),
+    because an imported statement and a synced statement must not disagree about
+    what a balance snapshot means or which date it belongs to.
+
+    A *derived* investment account (ADR-0021) gets the columns and not the
+    snapshot: its balance history comes from its holdings, which is the same
+    reason sync skips it — an imported point in that series would be a second
+    author for a number that has one.
+    """
+    if statement.ledger_balance is None:
+        return
+    account.current_balance = statement.ledger_balance
+    if statement.ledger_balance_at is not None:
+        account.balance_date = statement.ledger_balance_at.date()
+    await session.flush()
+
+    if account.balance_source == "derived":
+        log.debug(
+            "balance.derived_skipped",
+            account_id=str(account.id),
+            reason="this account's balance history comes from its holdings (ADR-0021)",
+        )
+        return
+    await upsert_balance_snapshot(session, account)
+
+
+def _notes_for(txn: ofx.OfxTransaction) -> str | None:
+    """The one piece of ``<STMTTRN>`` that is neither description nor amount.
+
+    A check's number is the only way to trace it afterwards, and the file is the
+    only place it exists. It is read from ``<CHECKNUM>`` only when ``<TRNTYPE>``
+    says the row *is* a check: the same element carries a reference number on
+    other transaction types, and labelling one of those "Check" would be the
+    importer inventing a fact rather than reporting one.
+    """
+    if txn.trn_type == "CHECK" and txn.check_number:
+        return f"Check {txn.check_number}"
+    return None
+
+
+async def commit_ofx(
+    session: AsyncSession,
+    household_id: uuid.UUID,
+    *,
+    raw: bytes,
+    account_id: uuid.UUID,
+    default_category_id: uuid.UUID | None = None,
+) -> OfxCommitResult:
+    """Import an OFX/QFX file's banking rows into ``account_id``.
+
+    The same skeleton as :func:`commit_csv` — parse, one dedupe query for the whole
+    file, one ``load_rules`` for the whole file, a savepoint per row — with a
+    different parser and a better key.
+
+    **Dedupe is FITID first (ADR-0030 §3).** A row carrying ``<FITID>`` writes it to
+    ``external_id``, which is what makes an overlapping re-export a skip even when
+    the bank rewrote the description between the two files; a row with no FITID
+    falls back to the CSV path's ``import_hash``. Both partial unique indexes stay
+    in force, and a collision on either is a counted skip rather than a 500.
+
+    Both keys are written for a FITID row, and both are checked. That is more than
+    the ADR's "falling back" needs, and it is deliberate: ``import_hash`` is the
+    one key the CSV importer knows, so writing it here is what makes "the same
+    transaction arriving by CSV and then by OFX does not double" true (PLAN-v0.9
+    decision J) rather than aspirational. FITID still dominates — a rewritten
+    description changes the hash and changes nothing about the skip.
+
+    Investment rows are counted, not imported (§5), and ``<LEDGERBAL>`` is written
+    as a balance snapshot through sync's own upsert (§6).
+    """
+    parsed = ofx.parse_ofx(raw)
+
+    # Resolve the target before touching a row, exactly as the CSV path does: an
+    # unknown or foreign account is a 404, not a partly-imported file.
+    account = await get_account(session, account_id)
+    if default_category_id is not None:
+        found = (
+            await session.execute(select(Category.id).where(Category.id == default_category_id))
+        ).scalar_one_or_none()
+        if found is None:
+            raise LedgerError("Category not found", 404)
+
+    result = OfxCommitResult(
+        investments_skipped=parsed.investment_count,
+        errors=[OfxRowIssue(e.position, e.message) for e in parsed.errors],
+    )
+
+    # The digest fallback needs the same ordinal the CSV path uses: the 0-based
+    # count of identical preceding rows in *this* file, which is what separates
+    # two genuine identical rows from a re-import of the same file.
+    ordinals: dict[tuple, int] = {}
+    rows: list[tuple[ofx.OfxTransaction, str, str | None]] = []
+    for txn in parsed.transactions:
+        key = (txn.transacted_at, quantize_storage(txn.amount), txn.description)
+        ordinal = ordinals.get(key, 0)
+        ordinals[key] = ordinal + 1
+        rows.append((
+            txn,
+            import_hash(account_id, txn.transacted_at, txn.amount, txn.description, ordinal),
+            txn.fitid,
+        ))
+
+    # Pass 2 — one query for the whole file, over both keys at once. A row is
+    # already here if *either* key is: the FITID says the institution has seen it,
+    # the hash says this ledger has the same row from a CSV import.
+    fitids = {fitid for _t, _d, fitid in rows if fitid}
+    digests = {digest for _t, digest, _f in rows}
+    conditions = []
+    if fitids:
+        conditions.append(Transaction.external_id.in_(fitids))
+    if digests:
+        conditions.append(Transaction.import_hash.in_(digests))
+    seen_fitids: set[str] = set()
+    seen_digests: set[str] = set()
+    if conditions:
+        found = (
+            await session.execute(
+                select(Transaction.external_id, Transaction.import_hash).where(
+                    Transaction.account_id == account_id, or_(*conditions)
+                )
+            )
+        ).all()
+        for external_id, digest in found:
+            if external_id is not None:
+                seen_fitids.add(external_id)
+            if digest is not None:
+                seen_digests.add(digest)
+
+    # The statement's own summary, written once and independently of its rows.
+    await _statement_balance(session, account, parsed.primary)
+
+    # Compiled once for the whole file, for the CSV path's reason: a downloaded
+    # statement is precisely the artefact a rule is written for (ADR-0030 §7), and
+    # loading the rule set per row would re-read and re-validate it every time.
+    loaded_rules = await rules.load_rules(session)
+
+    for txn, digest, fitid in rows:
+        if (fitid is not None and fitid in seen_fitids) or digest in seen_digests:
+            result.skipped += 1
+            continue
+        suspect = await _near_duplicate(
+            session, account_id, quantize_storage(txn.amount), txn.transacted_at
+        )
+        data = TransactionCreate(
+            account_id=account_id,
+            amount=txn.amount,
+            transacted_at=txn.transacted_at,
+            posted_at=txn.posted_at,
+            description=txn.description,
+            category_id=default_category_id,
+            notes=_notes_for(txn),
+        )
+        try:
+            # A savepoint per row, not a commit: an unexpected unique-index
+            # collision must cost that one row and not the file. Two keys are in
+            # force here, so it is the backstop that stops a race (or a bank that
+            # repeated a FITID inside one export) from being a 500.
+            async with session.begin_nested():
+                created = await create_transaction(
+                    session, household_id, data, source="ofx", rules_loaded=loaded_rules,
+                )
+                created.external_id = fitid
+                created.import_hash = digest
+                if suspect:
+                    created.review_status = "needs_review"
+                await session.flush()
+        except IntegrityError:
+            result.skipped += 1
+            continue
+        result.inserted += 1
+        if suspect:
+            result.suspects += 1
+
+    return result
+

@@ -39,9 +39,40 @@ export interface RuleConditions {
 }
 
 /**
+ * One leg of a rule's `split` action (ADR-0031). A leg names a share of the
+ * transaction it matches, never a sum of its own — which is what lets a rule
+ * written once apply to transactions whose amounts it cannot know.
+ *
+ * Exactly one leg in a split is the `remainder`: it carries no amount and no
+ * percent, and takes whatever the other legs leave. Every other leg carries
+ * exactly one of `amount` (signed like every money field, and matching the
+ * parent's sign — a mixed-sign split is a transfer, ADR-0018) or `percent`
+ * (`0 < p < 100`, taken from the parent's magnitude and signed to the parent).
+ * The server is a 422 for anything else, and its message names the leg.
+ *
+ * Read and write are the same shape, as everywhere in this file: a response
+ * carries every key with unset ones null, and a write may leave a key out — an
+ * omitted key is an unset one.
+ */
+export interface RuleSplitLeg {
+  /** Signed decimal string; money is never a JS float (ADR-0005). */
+  amount?: Money | null;
+  /** Decimal string strictly between 0 and 100. */
+  percent?: Money | null;
+  /** `true` on the one leg that takes what the others leave. */
+  remainder?: boolean | null;
+  /** null = this leg's share is uncategorized. */
+  category_id?: UUID | null;
+  /** null = inherit the parent transaction's owner (ADR-0026). */
+  owner_id?: UUID | null;
+  notes?: string | null;
+}
+
+/**
  * What a matching rule writes. Tags are the one additive action (union, never
  * removed); every other field is subject to provenance — the server skips any
- * field a human has already set (ADR-0007).
+ * field a human has already set (ADR-0007), and `splits` is already such a key,
+ * so a split a person built is final (ADR-0031 §3).
  *
  * `false` is a real action for `set_hidden` and `mark_reviewed`, not "unset":
  * it means unhide / needs_review. Leaving the key out means "do nothing".
@@ -53,6 +84,9 @@ export interface RuleActions {
   rename_merchant?: string | null;
   set_hidden?: boolean | null;
   mark_reviewed?: boolean | null;
+  /** The legs of a rule-made split, or null for no split. At least two, exactly
+   * one of them the remainder. */
+  split?: RuleSplitLeg[] | null;
 }
 
 export interface Rule {

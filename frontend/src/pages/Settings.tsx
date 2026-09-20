@@ -30,6 +30,7 @@ import {
   type Rule,
   type RuleActions,
   type RuleConditions,
+  type RuleSplitLeg,
   type RuleApplyResult,
 } from "@/api/rules";
 import {
@@ -41,8 +42,8 @@ import {
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { CloseIcon } from "@/components/icons";
+import { Day, Instant } from "@/components/datetime";
 import type { Owner, OwnerReassignment } from "@/api/types";
-import { formatDate, relativeTime } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import {
   Button,
@@ -360,9 +361,13 @@ function ConnectionsSection() {
                   <ConnectionBadge connection={c} />
                 </div>
                 <p className="text-xs text-fg-muted">
-                  {c.last_synced_at
-                    ? `Last synced ${relativeTime(c.last_synced_at)}`
-                    : "Never synced"}
+                  {c.last_synced_at ? (
+                    <>
+                      Last synced <Instant value={c.last_synced_at} style="relative" />
+                    </>
+                  ) : (
+                    "Never synced"
+                  )}
                 </p>
                 {c.last_error && (
                   <p className="text-xs text-negative" data-testid={`conn-last-error-${c.id}`}>
@@ -732,7 +737,11 @@ function CurrenciesSection() {
           {rates.data?.map((r) => (
             <li key={r.id} className="flex justify-between px-1 py-2 text-sm">
               <span>1 {r.base_currency} = {r.rate} {r.quote_currency}</span>
-              <span className="text-fg-muted">{formatDate(r.rate_date)}</span>
+              {/* A date-only value, so it is a calendar day and not an instant:
+                  a rate dated the 1st is the 1st wherever it is read. */}
+              <span className="text-fg-muted">
+                <Day value={r.rate_date} style="long" />
+              </span>
             </li>
           ))}
           {rates.data?.length === 0 && <li className="py-2 text-xs text-fg-muted">No rates yet.</li>}
@@ -1249,7 +1258,25 @@ function describeActions(a: RuleActions, names: Names): string {
   if (a.mark_reviewed != null) {
     parts.push(a.mark_reviewed ? "mark it reviewed" : "mark it needs review");
   }
+  // Without this a rule whose only action is a split (ADR-0031) would read
+  // "do nothing", which is the opposite of what it does.
+  if (a.split?.length) parts.push(`split ${describeSplit(a.split, names)}`);
   return parts.length ? parts.join(", ") : "do nothing";
+}
+
+/** A rule-made split, as the rule list reads it: what each leg takes, and where
+ * it goes. Never a total — the rule was written before it met the transactions
+ * it will split, and the leg that takes the rest is exactly what says so. */
+function describeSplit(legs: RuleSplitLeg[], names: Names): string {
+  return legs
+    .map((leg) => {
+      const to = leg.category_id ? ` to ${names.category(leg.category_id)}` : "";
+      if (leg.remainder) return `the rest${to}`;
+      if (leg.percent != null) return `${leg.percent}%${to}`;
+      if (leg.amount != null) return `${leg.amount}${to}`;
+      return `a leg${to}`;
+    })
+    .join(", ");
 }
 
 interface Names {

@@ -85,6 +85,35 @@ const RULE: Rule = {
   created_at: "2026-09-20T00:00:00Z",
 };
 
+/** The same rule with the split action (ADR-0031): an amount leg and the leg
+ * that takes what is left, as the server sends one — every leg key present, the
+ * unset ones null. `RULE`'s `direction: "out"` is what makes a negative amount
+ * leg the one this rule can actually have. */
+const SPLIT_RULE: Rule = {
+  ...RULE,
+  actions: {
+    ...RULE.actions,
+    split: [
+      {
+        amount: "-50.00",
+        percent: null,
+        remainder: null,
+        category_id: DINING.id,
+        owner_id: null,
+        notes: null,
+      },
+      {
+        amount: null,
+        percent: null,
+        remainder: true,
+        category_id: TRAVEL.id,
+        owner_id: SHARED.id,
+        notes: "the rest of the week",
+      },
+    ],
+  },
+};
+
 beforeEach(() => {
   h.categories = [DINING, TRAVEL];
   h.accounts = [CHECKING];
@@ -252,6 +281,241 @@ describe("<RuleBuilder />", () => {
     await userEvent.setup().click(screen.getByTestId("rule-cancel"));
 
     expect(onClose).toHaveBeenCalled();
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  // ---- the split action (ADR-0031) ----------------------------------------
+
+  it("adds a split with an amount leg and the leg that takes the rest", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("rule-name"), "Amazon split");
+    await user.click(screen.getByTestId("rule-split-toggle"));
+
+    // Switching it on seeds the shape a split has to have, so the first thing
+    // the section shows is not a split the server would refuse.
+    expect(screen.getByTestId("rule-split-leg-1-rest")).toBeChecked();
+    expect(screen.getByTestId("rule-split-leg-1-takes")).toHaveTextContent("Takes the rest");
+
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
+    await user.selectOptions(screen.getByTestId("rule-split-leg-0-category"), DINING.id);
+    expect(screen.getByTestId("rule-split-leg-0-takes")).toHaveTextContent("Takes -50");
+    await user.click(screen.getByTestId("rule-save"));
+
+    // The leg that is not the rest carries one of amount or percent; the rest
+    // carries neither, which is what makes the sum exact for any parent amount.
+    expect(h.create.mock.calls[0][0].actions.split).toEqual([
+      { amount: "-50", category_id: DINING.id },
+      { remainder: true },
+    ]);
+  });
+
+  it("loads a stored split and sends it back unchanged", async () => {
+    render(<RuleBuilder rule={SPLIT_RULE} onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("rule-split-leg-0-amount")).toHaveValue("-50.00");
+    expect(screen.getByTestId("rule-split-leg-0-category")).toHaveValue(DINING.id);
+    expect(screen.getByTestId("rule-split-leg-1-rest")).toBeChecked();
+    expect(screen.getByTestId("rule-split-leg-1-owner")).toHaveValue(SHARED.id);
+    expect(screen.getByTestId("rule-split-leg-1-takes")).toHaveTextContent("Takes the rest");
+
+    await userEvent.setup().click(screen.getByTestId("rule-save"));
+
+    const [call] = h.update.mock.calls[0];
+    expect(call.id).toBe(SPLIT_RULE.id);
+    // Every leg key the response carried, back out in the write shape: the unset
+    // ones omitted, and the one note the server had still there — a re-save that
+    // dropped it would be a silent edit.
+    expect(call.body.actions).toEqual({
+      set_category_id: TRAVEL.id,
+      add_tag_ids: [COFFEE.id],
+      set_hidden: true,
+      split: [
+        { amount: "-50.00", category_id: DINING.id },
+        {
+          remainder: true,
+          category_id: TRAVEL.id,
+          owner_id: SHARED.id,
+          notes: "the rest of the week",
+        },
+      ],
+    });
+  });
+
+  it("carries a percent leg and says what it takes", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("rule-name"), "Split by percent");
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.type(screen.getByTestId("rule-split-leg-0-percent"), "25");
+    await user.selectOptions(screen.getByTestId("rule-split-leg-1-owner"), ALICE.id);
+
+    expect(screen.getByTestId("rule-split-leg-0-takes")).toHaveTextContent("Takes 25%");
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(h.create.mock.calls[0][0].actions.split).toEqual([
+      { percent: "25" },
+      { remainder: true, owner_id: ALICE.id },
+    ]);
+  });
+
+  it("removes the split when the toggle is switched off", async () => {
+    render(<RuleBuilder rule={SPLIT_RULE} onClose={vi.fn()} />);
+    await userEvent.setup().click(screen.getByTestId("rule-split-toggle"));
+    await userEvent.setup().click(screen.getByTestId("rule-save"));
+
+    const [call] = h.update.mock.calls[0];
+    // Actions replace wholesale, so an omitted key is how a stored split is
+    // cleared — the same way a cleared condition disappears.
+    expect(call.body.actions).toEqual({
+      set_category_id: TRAVEL.id,
+      add_tag_ids: [COFFEE.id],
+      set_hidden: true,
+    });
+  });
+
+  it("drops a leg's share when the leg is marked as the rest", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
+    expect(screen.getByTestId("rule-split-leg-0-amount")).toHaveValue("-50");
+
+    await user.click(screen.getByTestId("rule-split-leg-0-rest"));
+
+    // A leg that takes the rest takes no share of its own, so the amount it was
+    // carrying goes rather than sitting there as a value the server refuses.
+    expect(screen.getByTestId("rule-split-leg-0-amount")).toHaveValue("");
+    expect(screen.getByTestId("rule-split-leg-0-takes")).toHaveTextContent("Takes the rest");
+  });
+
+  it("refuses a split with no leg taking the rest, in the API's own words", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("rule-name"), "Split");
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
+    await user.type(screen.getByTestId("rule-split-leg-1-amount"), "-20");
+    // Untick the seeded remainder: two fixed amounts, which is the shape ADR-0031
+    // refuses, because a bank correcting the amount would leave a sum that does
+    // not add up.
+    await user.click(screen.getByTestId("rule-split-leg-1-rest"));
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /No leg takes the rest — mark exactly one leg as the remainder/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses two legs marked as the rest", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
+    await user.click(screen.getByTestId("rule-split-leg-0-rest"));
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /leg 1 and leg 2 are marked as the rest/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a leg carrying both an amount and a percent", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
+    await user.type(screen.getByTestId("rule-split-leg-0-percent"), "25");
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /Leg 1 carries both an amount and a percent/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a percent that is not strictly between 0 and 100", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    const percent = screen.getByTestId("rule-split-leg-0-percent");
+
+    await user.type(percent, "0");
+    await user.click(screen.getByTestId("rule-save"));
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /percent must be greater than 0 and less than 100/,
+    );
+
+    await user.clear(percent);
+    await user.type(percent, "100");
+    await user.click(screen.getByTestId("rule-save"));
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /percent must be greater than 0 and less than 100/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses percent legs that come to 100% between them", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.click(screen.getByTestId("rule-split-add-leg"));
+    await user.type(screen.getByTestId("rule-split-leg-0-percent"), "60");
+    await user.type(screen.getByTestId("rule-split-leg-2-percent"), "40");
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /they must come to less than 100%/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an amount leg of zero", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.click(screen.getByTestId("rule-split-add-leg"));
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "0");
+    await user.type(screen.getByTestId("rule-split-leg-2-amount"), "50");
+    await user.click(screen.getByTestId("rule-save"));
+
+    const errors = screen.getByTestId("rule-split-error");
+    expect(errors).toHaveTextContent(/Leg 1: an amount leg must be non-zero/);
+    // A zero leg has no sign to disagree with, so it is not also reported as
+    // legs pointing both ways.
+    expect(errors).not.toHaveTextContent(/point both ways/);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an enabled split with no legs at all", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.click(screen.getByTestId("rule-split-leg-1-remove"));
+    await user.click(screen.getByTestId("rule-split-leg-0-remove"));
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /A split needs at least two legs/,
+    );
+    expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses amount legs pointing the other way from the rule's own direction", async () => {
+    render(<RuleBuilder onClose={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("rule-split-toggle"));
+    await user.selectOptions(screen.getByTestId("rule-direction"), "out");
+    // The rule matches money out, so every transaction it matches is negative —
+    // and an amount leg has to share the parent's sign.
+    await user.type(screen.getByTestId("rule-split-leg-0-amount"), "50");
+    await user.click(screen.getByTestId("rule-save"));
+
+    expect(screen.getByTestId("rule-split-error")).toHaveTextContent(
+      /its amount legs must be negative too/,
+    );
     expect(h.create).not.toHaveBeenCalled();
   });
 });

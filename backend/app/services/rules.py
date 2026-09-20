@@ -26,12 +26,16 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.core.money import quantize_money
 from app.logging import get_logger
 from app.models import Category, Owner, Tag, Transaction, TransactionTag
 from app.models.ledger import Rule
@@ -41,8 +45,10 @@ from app.schemas.rules import (
     RuleApplyResult,
     RuleConditions,
     RuleCreate,
+    RuleSplitLeg,
     RuleUpdate,
 )
+from app.schemas.transactions import SplitIn
 from app.services.errors import LedgerError
 from app.services.ownership import require_owners
 
@@ -272,7 +278,135 @@ def _add_tags(
         changed.add("tags")
 
 
-def _apply_to_row(
+def _leg_key(amount, category_id, owner_id, notes) -> tuple:
+    """A leg as a comparable value: what the leg *is*, not how it was stored.
+
+    ``base_amount`` is deliberately absent — it is derived from the others, so
+    including it would report a change whenever an FX rate moved.
+    """
+    return (amount, category_id, owner_id, notes)
+
+
+def _resolved_legs(legs: list[RuleSplitLeg], txn: Transaction) -> list[SplitIn] | None:
+    """The rule's legs as concrete amounts for **this** transaction.
+
+    ADR-0031 §2: the remainder leg takes the parent's amount minus every other
+    leg, which is what makes the set sum to the parent for any amount the rule
+    could not have known when it was written. Percent legs are resolved here into
+    exact amounts — a percent of the parent's *magnitude*, signed to the parent —
+    so that what reaches the writer is the same shape a human's split arrives in,
+    and the allocation code has one input shape rather than two.
+
+    ``None`` means "this rule cannot split this transaction", which is a fact about
+    the row rather than about the rule (the legs point the wrong way for a
+    transaction of this sign, which is what a refund of a split expense looks
+    like). The caller leaves the row alone; the rule's other actions still apply.
+    """
+    parent = txn.amount
+    resolved: list[SplitIn] = []
+    remainder_at: int | None = None
+    taken = Decimal(0)
+    for leg in legs:
+        if leg.remainder is True:
+            remainder_at = len(resolved)
+            resolved.append(SplitIn(
+                category_id=leg.category_id, owner_id=leg.owner_id, notes=leg.notes
+            ))
+            continue
+        if leg.percent is not None:
+            amount = quantize_money(parent * leg.percent / 100, txn.currency)
+        else:
+            amount = leg.amount
+            if amount != 0 and parent != 0 and (amount > 0) != (parent > 0):
+                # §2's sign rule, at the only moment the parent's sign is known.
+                return None
+        taken += amount
+        resolved.append(SplitIn(
+            amount=amount, category_id=leg.category_id, owner_id=leg.owner_id,
+            notes=leg.notes,
+        ))
+
+    remainder = parent - taken
+    if remainder != 0 and parent != 0 and (remainder > 0) != (parent > 0):
+        # The other legs already take more than the parent, so "what is left" has
+        # the wrong sign — the set would still sum to the parent, but one leg
+        # moving the other way is a transfer, not a split.
+        return None
+    if remainder_at is not None:
+        resolved[remainder_at] = resolved[remainder_at].model_copy(
+            update={"amount": remainder}
+        )
+    return resolved
+
+
+async def _apply_split(
+    session: AsyncSession, rule: _CompiledRule, txn: Transaction, changed: set[str]
+) -> None:
+    """Write a rule's split onto a transaction (ADR-0031 §2-4).
+
+    Three gates, in the order that keeps the cheapest first:
+
+    * **Provenance (§3).** ``field_sources["splits"] == "user"`` means a human
+      built this split, and ADR-0007 already says a rule does not write what a
+      human owns. No new column, no new concept: the map already carries the key.
+    * **Idempotence by comparison (§4).** The legs are recomputed from the rule and
+      the *current* parent amount, and written only when they differ from what is
+      stored. That is what makes a second "apply to existing" report
+      ``updated == 0``, and what makes §5's re-derive a no-op when nothing moved.
+    * **One allocation path (§6).** The legs are handed to ``transactions.set_splits``
+      — the same function ``replace_splits`` calls — so base-amount distribution
+      and the rounding cent cannot differ between a split a person made and a
+      split a rule made.
+    """
+    # Local import: ``services.transactions`` imports this module at module scope
+    # (the on-create path runs the rules), so importing it back at module scope
+    # would make the pair unimportable.
+    from app.services import transactions
+
+    legs = rule.actions.split
+    if legs is None:
+        return
+    if (txn.field_sources or {}).get(transactions.SPLITS_FIELD) == USER:
+        log.debug(
+            "rules.split_user_owned",
+            rule_id=str(rule.id), transaction_id=str(txn.id),
+        )
+        return
+    resolved = _resolved_legs(legs, txn)
+    if resolved is None:
+        # §2's sign rule cannot be honoured for this row (a refund meeting a rule
+        # written for expenses), so the rule's split is skipped and its other
+        # actions still apply. But a *stale* split cannot be left behind: §5's
+        # whole point is that a parent never disagrees with its children, and this
+        # is the one path where the amount moved and the legs could not follow —
+        # exactly the state §5 calls the worst of the available outcomes. The
+        # engine owns this split (§3 gated the human's out above), so it clears
+        # what it can no longer justify and the row lands coherent.
+        log.info(
+            "rules.split_skipped_sign",
+            rule_id=str(rule.id), transaction_id=str(txn.id), amount=str(txn.amount),
+        )
+        await transactions.ensure_splits_loaded(session, txn)
+        if txn.splits:
+            await transactions.set_splits(session, txn, [], owned_by=RULE)
+            changed.add(transactions.SPLITS_FIELD)
+        return
+    await transactions.ensure_splits_loaded(session, txn)
+    stored = Counter(
+        _leg_key(s.amount, s.category_id, s.owner_id, s.notes) for s in txn.splits
+    )
+    recomputed = Counter(
+        _leg_key(leg.amount, leg.category_id, leg.owner_id, leg.notes) for leg in resolved
+    )
+    if stored == recomputed:
+        # Already exactly what the rule would write: nothing to write, nothing
+        # changed, and — the bar — a second apply reports ``updated == 0``.
+        return
+    await transactions.set_splits(session, txn, resolved, owned_by=RULE)
+    changed.add(transactions.SPLITS_FIELD)
+
+
+async def _apply_to_row(
     session: AsyncSession,
     txn: Transaction,
     rules: list[_CompiledRule],
@@ -284,6 +418,10 @@ def _apply_to_row(
     provenance fields actually ended up written. A later rule can overwrite an
     earlier rule's value (ADR-0007 lets a rule beat an earlier rule), which is
     what makes priority mean something.
+
+    Async for one action: a ``split`` allocates across legs, which reads the
+    household's base currency, and that is a query (ADR-0031 §6 keeps it on the
+    same path the human's split takes rather than special-casing it here).
     """
     matched = False
     changed: set[str] = set()
@@ -309,6 +447,8 @@ def _apply_to_row(
                    value="reviewed" if actions.mark_reviewed else "needs_review")
         if actions.add_tag_ids is not None:
             _add_tags(session, txn, actions.add_tag_ids, present_tags, changed)
+        if actions.split is not None:
+            await _apply_split(session, rule, txn, changed)
     return matched, changed
 
 
@@ -357,23 +497,39 @@ async def _missing_kinds(
     the right answer for "charges in that account" once the account is gone, and
     it keeps a stale condition from blocking anything at all.
     """
-    known_owners = await _known(
-        session, Owner.id, {a.set_owner_id for a in actions_list} - {None}
-    )
-    known_categories = await _known(
-        session, Category.id, {a.set_category_id for a in actions_list} - {None}
-    )
+    owners_wanted = {a.set_owner_id for a in actions_list} - {None}
+    categories_wanted = {a.set_category_id for a in actions_list} - {None}
+    # A split leg names its own category and owner (ADR-0031 §1), and they are
+    # references exactly like the top-level ones: a leg pointing at a deleted
+    # category would otherwise write through the foreign key's ON DELETE SET NULL
+    # and quietly land the leg uncategorized.
+    for actions in actions_list:
+        for leg in actions.split or ():
+            if leg.owner_id is not None:
+                owners_wanted.add(leg.owner_id)
+            if leg.category_id is not None:
+                categories_wanted.add(leg.category_id)
+    known_owners = await _known(session, Owner.id, owners_wanted)
+    known_categories = await _known(session, Category.id, categories_wanted)
     wanted_tags = {t for a in actions_list if a.add_tag_ids for t in a.add_tag_ids}
     known_tags = await _known(session, Tag.id, wanted_tags)
 
+    def _leg_missing(actions: RuleActions, known: set[uuid.UUID], attr: str) -> bool:
+        return any(
+            getattr(leg, attr) is not None and getattr(leg, attr) not in known
+            for leg in actions.split or ()
+        )
+
     out: dict[int, str] = {}
     for i, actions in enumerate(actions_list):
-        if actions.set_owner_id is not None and actions.set_owner_id not in known_owners:
+        if (
+            actions.set_owner_id is not None and actions.set_owner_id not in known_owners
+        ) or _leg_missing(actions, known_owners, "owner_id"):
             out[i] = "owner"
         elif (
             actions.set_category_id is not None
             and actions.set_category_id not in known_categories
-        ):
+        ) or _leg_missing(actions, known_categories, "category_id"):
             out[i] = "category"
         elif actions.add_tag_ids and not set(actions.add_tag_ids) <= known_tags:
             out[i] = "tag"
@@ -390,7 +546,11 @@ async def _require_actions(
     or asking for the rules to run — so a bad reference is a 404 it can act on,
     rather than an enabled rule that silently does nothing.
     """
-    await require_owners(session, [a.set_owner_id for a in actions_list])
+    await require_owners(
+        session,
+        [a.set_owner_id for a in actions_list]
+        + [leg.owner_id for a in actions_list for leg in (a.split or ())],
+    )
     missing = await _missing_kinds(session, actions_list)
     if missing:
         kind = _REF_MESSAGES[next(iter(missing.values()))]
@@ -521,7 +681,7 @@ async def apply_to_transaction(
         # Only a tagging rule needs the row's tags, and the lookup is the one
         # query left per row — so a rule set that never tags does not pay it.
         present = (await _tag_map(session, [txn.id])).get(txn.id, set())
-    _matched, changed = _apply_to_row(session, txn, loaded.compiled, present)
+    _matched, changed = await _apply_to_row(session, txn, loaded.compiled, present)
     if changed:
         # Nothing to publish when nothing changed, and on the second pass over a
         # row that is the common case — so a repeat costs no round trip.
@@ -549,6 +709,11 @@ async def apply(session: AsyncSession, household_id: uuid.UUID) -> RuleApplyResu
         return RuleApplyResult(matched=0, updated=0)
     await _require_refs(session, compiled)
     tags_wanted = any(r.actions.add_tag_ids for r in compiled)
+    # A split rule compares its legs against the row's, which means reading them.
+    # Loaded per chunk rather than left to the split action's own refresh, for the
+    # same reason the tag map is: a household applying a split rule across the
+    # ledger must not pay one SELECT per row for it.
+    splits_wanted = any(r.actions.split for r in compiled)
 
     matched = 0
     updated = 0
@@ -563,6 +728,8 @@ async def apply(session: AsyncSession, household_id: uuid.UUID) -> RuleApplyResu
             .order_by(Transaction.id)
             .limit(APPLY_CHUNK)
         )
+        if splits_wanted:
+            stmt = stmt.options(selectinload(Transaction.splits))
         if last_id is not None:
             stmt = stmt.where(Transaction.id > last_id)
         rows = list((await session.execute(stmt)).scalars().all())
@@ -572,7 +739,7 @@ async def apply(session: AsyncSession, household_id: uuid.UUID) -> RuleApplyResu
 
         tags = await _tag_map(session, [r.id for r in rows]) if tags_wanted else {}
         for txn in rows:
-            did_match, changed = _apply_to_row(
+            did_match, changed = await _apply_to_row(
                 session, txn, compiled, tags.setdefault(txn.id, set())
             )
             if did_match:

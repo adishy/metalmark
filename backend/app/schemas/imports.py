@@ -1,4 +1,4 @@
-"""Request/response models for CSV import (WS-IMP, M1a).
+"""Request/response models for import (WS-IMP, M1a; OFX per ADR-0030).
 
 The vocabulary of mappable fields lives here rather than in the service, because
 it is a contract with the client: the mapping UI offers exactly these names, and
@@ -7,6 +7,7 @@ the service validates the confirmed mapping against the same tuple.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -54,3 +55,54 @@ class CsvCommitOut(BaseModel):
     skipped: int
     suspects: int
     errors: list[CsvRowError] = []
+
+
+class OfxPreviewOut(BaseModel):
+    """What the file says about itself before anything is written (ADR-0030 §4).
+
+    The account fields are *reported* and not obeyed: the human picks the ledger
+    account at commit, exactly as the CSV path does. They exist so the dialog can
+    show "this is the statement for 000111222333" — confirmation that the right
+    file was downloaded — rather than so anything can be matched on. ``acct_id``
+    is a string because an account number is an identifier, never an amount: it
+    may carry leading zeros, and it is never arithmetic.
+    """
+
+    org: str | None = None
+    acct_id: str | None = None
+    acct_type: str | None = None
+    currency: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+    #: Banking rows this file will offer. Investment rows are counted separately
+    #: and left out (§5), so a file can honestly preview as zero of the former.
+    transaction_count: int
+    investment_count: int
+
+
+class OfxRowError(BaseModel):
+    """One ``<STMTTRN>`` the importer refused to guess at.
+
+    ``position`` is 1-based within the statement, not a file line: OFX has no
+    line numbers to point at, and "the third transaction in the file" is what a
+    human can go and find.
+    """
+
+    position: int
+    message: str
+
+
+class OfxCommitOut(BaseModel):
+    """The same three counts as the CSV path, plus what could not come in.
+
+    ``investments_skipped`` is its own number rather than folded into ``skipped``
+    (ADR-0030 §5): a skipped row is one the ledger already has, and these are rows
+    it cannot hold yet, so an all-investment file reads as "0 imported, 5 skipped"
+    instead of as a silent success.
+    """
+
+    inserted: int
+    skipped: int
+    suspects: int
+    investments_skipped: int
+    errors: list[OfxRowError] = []

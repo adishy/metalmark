@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <FI>
+        <ORG>Harborline Credit Union</ORG>
+  </SIGNONMSGSRSV1>
+  <BANKMSGSRSV1>
+    <STMTTRNRS>
+      <STMTRS>
+        <CURDEF>USD</CURDEF>
+        <BANKTRANLIST>
+          <STMTTRN>
+            <TRNAMT>-42.75</TRNAMT>
+            <FITID>2026010500001</FITID>

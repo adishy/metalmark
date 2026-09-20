@@ -21,10 +21,12 @@ import httpx
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.db import scoped_session
 from app.deps import SESSION_COOKIE
 from app.models import TransactionTag
+from app.models.ledger import Transaction
 from app.schemas.ledger import AccountCreate
 from app.schemas.rules import (
     ACTION_KEYS,
@@ -34,7 +36,7 @@ from app.schemas.rules import (
     RuleCreate,
     RuleUpdate,
 )
-from app.schemas.transactions import TransactionCreate, TransactionUpdate
+from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, owners, rules
 from app.services import transactions as txns
 from app.services.errors import LedgerError
@@ -133,10 +135,15 @@ def test_an_unknown_condition_key_is_rejected_not_ignored():
 def test_an_unknown_action_key_is_rejected():
     with pytest.raises(ValidationError):
         RuleActions(set_catgory_id=uuid.uuid4())
-    # `split` is the Phase-2 auto-split action: not built, so not accepted — and
-    # accepting-then-dropping it would be the silent no-op the closed set prevents.
+    # `split` is a real action (ADR-0031), and its legs are a second closed shape:
+    # `pct` is the *manual* path's spelling and is not a rule leg's key, and a leg
+    # set with no remainder leg cannot sum to an amount the rule does not know.
     with pytest.raises(ValidationError):
         RuleCreate.model_validate({"name": "x", "actions": {"split": [{"pct": "50"}]}})
+    with pytest.raises(ValidationError):
+        RuleCreate.model_validate({
+            "name": "x", "actions": {"split": [{"amount": "-50"}, {"amount": "-50"}]},
+        })
 
 
 def test_a_bad_regex_is_rejected_when_the_rule_is_written():
@@ -1015,3 +1022,491 @@ async def test_apply_over_http_reports_counts_and_is_idempotent(api):
     # And the rule's work is visible in the ledger the client reads.
     page = (await client.get("/transactions")).json()
     assert {t["category_id"] for t in page["items"]} == {cat["id"]}
+
+
+# ---- Splits (ADR-0031) -----------------------------------------------------
+
+
+def _legs(txn) -> list[tuple]:
+    """A transaction's legs as ``(amount, category, owner, notes)``, by amount.
+
+    Sorted by amount rather than by the relationship's order: the relationship
+    carries no ``order_by``, so a re-query may hand them back in any order and a
+    test that depended on one would be pinning the planner.
+    """
+    return sorted(
+        (s.amount, s.category_id, s.owner_id, s.notes) for s in txn.splits
+    )
+
+
+def _amounts(txn) -> list[tuple]:
+    """A transaction's legs as ``(amount, base_amount)``, by amount — the pair the
+    two allocation paths have to agree on to the last cent, in an order the
+    relationship does not promise."""
+    return sorted((s.amount, s.base_amount) for s in txn.splits)
+
+
+async def _reload(session, txn):
+    """Re-read a transaction *and its legs*, inside the session.
+
+    A plain ``refresh`` reloads the row's columns and leaves the relationship
+    alone, and reading an unloaded collection after the session closes is a
+    ``DetachedInstanceError`` rather than a value — so the legs are named
+    explicitly wherever a test asserts on them.
+    """
+    await session.refresh(txn, ["splits"])
+    return txn
+
+
+def _split_action(legs: list[dict]) -> dict:
+    return {"split": legs}
+
+
+async def test_a_split_rule_sums_to_its_parent_for_a_gain_and_a_loss(household_factory):
+    """ADR-0031 §2's whole point: the remainder leg is what makes the set sum to
+    the parent, for any parent amount — here a charge and its refund, where the
+    one rule has to produce legs of both signs.
+
+    The legs are a percent plus the remainder, which is the pair §2 defines to
+    adapt to the parent: a percent leg takes that fraction of the parent's
+    *magnitude*, signed to the parent. An *amount* leg is the other kind — it is
+    written signed and has to match the parent, so it does not adapt (see the
+    wrong-way test below)."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        rent = await _category(s, hh, "Rent")
+        utilities = await _category(s, hh, "Utilities")
+        out = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        back = await _txn(s, hh, acct.id, "100.00", merchant="LANDLORD")
+        await _rule(
+            s, hh, conditions={"merchant_contains": "landlord"},
+            actions=_split_action([
+                {"percent": "60", "category_id": str(rent.id)},
+                {"remainder": True, "category_id": str(utilities.id)},
+            ]),
+        )
+        await rules.apply(s, hh)
+        await _reload(s, out)
+        await _reload(s, back)
+
+    # Compared as a set of legs rather than in relationship order, which is not
+    # promised (``Transaction.splits`` carries no ``order_by``).
+    assert _legs(out) == [
+        (D("-60.0000"), rent.id, None, None),
+        (D("-40.0000"), utilities.id, None, None),
+    ]
+    # The same rule on money coming back: every leg takes the parent's sign, so
+    # this is a split rather than a transfer in disguise (§2).
+    assert [leg[0] for leg in _legs(back)] == [D("40.0000"), D("60.0000")]
+    assert sum((s.amount for s in out.splits), D(0)) == out.amount
+    assert sum((s.amount for s in back.splits), D(0)) == back.amount
+
+
+async def test_a_percent_leg_takes_that_fraction_of_the_parents_magnitude(household_factory):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        txn = await _txn(s, hh, acct.id, "-123.45", merchant="SPLIT ME")
+        await _rule(s, hh, actions=_split_action([
+            {"percent": "25"},
+            {"remainder": True},
+        ]))
+        await rules.apply(s, hh)
+        await _reload(s, txn)
+
+    # 25% of 123.45 is 30.8625, at the currency's minor unit. The remainder takes
+    # what is left, so the rounding has somewhere to go by construction.
+    assert sorted(s.amount for s in txn.splits) == [D("-92.5900"), D("-30.8600")]
+    assert sum((s.amount for s in txn.splits), D(0)) == txn.amount
+
+
+async def test_the_remainder_holds_when_the_parent_amount_changes(household_factory):
+    """§5: a rule-split row whose amount moves is re-derived rather than left
+    summing to the old number. The fixed leg stays; the remainder absorbs the
+    difference — which is exactly why the fixed leg can be fixed."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        await _rule(s, hh, actions=_split_action([
+            {"amount": "-60.00"}, {"remainder": True},
+        ]))
+        await rules.apply(s, hh)
+        await _reload(s, txn)
+        assert sorted(s.amount for s in txn.splits) == [D("-60.0000"), D("-40.0000")]
+
+        # The bank corrects the amount, as a human PATCH.
+        await txns.update_transaction(
+            s, hh, txn.id, TransactionUpdate(amount=D("-75.00")),
+        )
+        await _reload(s, txn)
+
+    assert txn.amount == D("-75.0000")
+    assert sorted(s.amount for s in txn.splits) == [D("-60.0000"), D("-15.0000")]
+    assert sum((s.amount for s in txn.splits), D(0)) == txn.amount
+    assert txn.field_sources["splits"] == "rule"
+
+
+async def test_a_rule_split_parent_whose_rule_no_longer_applies_refuses_the_edit(household_factory):
+    """The one case where the amount cannot move: there is nothing left to
+    re-derive the legs from, and landing the new amount would leave the parent
+    disagreeing with the children every total is summed from."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        rule = await _rule(s, hh, actions=_split_action([
+            {"amount": "-60.00"}, {"remainder": True},
+        ]))
+        await rules.apply(s, hh)
+        await rules.delete_rule(s, rule.id)
+
+        with pytest.raises(LedgerError) as exc:
+            await txns.update_transaction(s, hh, txn.id, TransactionUpdate(amount=D("-75.00")))
+    assert exc.value.status == 409
+    assert "splits" in exc.value.message
+
+
+async def test_a_humans_split_survives_a_re_run_of_the_rule(household_factory):
+    """§3, which is ADR-0007 applied to a key that already exists: a rule may only
+    split a transaction whose splits it owns."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        human = await _category(s, hh, "Human's split")
+        rule_cat = await _category(s, hh, "Rule's split")
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        await txns.replace_splits(s, txn.id, [
+            SplitIn(amount=D("-10.00"), category_id=human.id),
+            SplitIn(amount=D("-90.00")),
+        ])
+        await _rule(s, hh, actions=_split_action([
+            {"amount": "-60.00", "category_id": str(rule_cat.id)},
+            {"remainder": True},
+        ]))
+        result = await rules.apply(s, hh)
+        await _reload(s, txn)
+
+    assert sorted(s.amount for s in txn.splits) == [D("-90.0000"), D("-10.0000")]
+    assert human.id in {s.category_id for s in txn.splits}
+    assert txn.field_sources["splits"] == "user"
+    # Matched — the rule's conditions hit — and changed nothing, which is the
+    # difference the two counts exist to report.
+    assert result.matched == 1 and result.updated == 0
+
+
+async def test_applying_a_split_rule_twice_reports_changed_zero(household_factory):
+    """§4: idempotence by comparison, not by a flag — the legs are recomputed and
+    written only when the set differs."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        for i in range(3):
+            await _txn(s, hh, acct.id, f"-{20 + i}.00", merchant="LANDLORD")
+        await _rule(s, hh, actions=_split_action([
+            {"amount": "-12.00"}, {"remainder": True},
+        ]))
+
+    async with scoped_session(household_id=hh) as s:
+        first = await rules.apply(s, hh)
+    async with scoped_session(household_id=hh) as s:
+        before = [
+            (t.id, _legs(t))
+            for t in (
+                await s.execute(
+                    select(Transaction).options(selectinload(Transaction.splits))
+                )
+            ).scalars()
+        ]
+    async with scoped_session(household_id=hh) as s:
+        second = await rules.apply(s, hh)
+        after = [
+            (t.id, _legs(t))
+            for t in (
+                await s.execute(
+                    select(Transaction).options(selectinload(Transaction.splits))
+                )
+            ).scalars()
+        ]
+
+    assert first.matched == first.updated == 3
+    assert second.matched == 3
+    assert second.updated == 0
+    assert sorted(before) == sorted(after)
+
+
+async def test_a_split_rule_and_a_human_split_allocate_identically(household_factory):
+    """§6, which is the reason ``set_splits`` is one function: two implementations
+    of "divide this amount across these legs" is how a split a person made and a
+    split a rule made end up differing by a cent while both claim to be exact."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        by_human = await _txn(s, hh, acct.id, "-100.00", merchant="HAND AMOUNT")
+        by_rule = await _txn(s, hh, acct.id, "-100.00", merchant="RULE AMOUNT")
+        # 33.33 is the case the rounding cent exists for: 30% of it is not a whole
+        # cent, so the two paths have to agree on where the remainder goes.
+        by_hand_pct = await _txn(s, hh, acct.id, "-33.33", merchant="HAND PERCENT")
+        by_rule_pct = await _txn(s, hh, acct.id, "-33.33", merchant="RULE PERCENT")
+
+        await txns.replace_splits(s, by_human.id, [
+            SplitIn(amount=D("-30.00")), SplitIn(amount=D("-70.00")),
+        ])
+        await txns.replace_splits(s, by_hand_pct.id, [
+            SplitIn(pct=D("30")), SplitIn(pct=D("70")),
+        ])
+        await _rule(
+            s, hh, conditions={"merchant_contains": "rule amount"},
+            actions=_split_action([
+                {"amount": "-30.00"}, {"remainder": True},
+            ]),
+        )
+        # The rule side of the percent case: a percent leg plus the remainder, which
+        # is the rule-path spelling of the two weights the human path takes.
+        await _rule(
+            s, hh, conditions={"merchant_contains": "rule percent"},
+            actions=_split_action([
+                {"percent": "30"}, {"remainder": True},
+            ]),
+        )
+        await rules.apply(s, hh)
+        await _reload(s, by_rule)
+        await _reload(s, by_rule_pct)
+
+    # The same shape, the same legs — amounts *and* the base amounts allocated
+    # across them, which is where a second implementation would show up.
+    assert _legs(by_rule) == _legs(by_human)
+    assert _amounts(by_rule) == _amounts(by_human)
+    assert _amounts(by_rule_pct) == _amounts(by_hand_pct)
+
+
+async def test_a_split_leg_naming_a_foreign_category_is_refused(household_factory):
+    a = await household_factory(name="A")
+    b = await household_factory(name="B")
+    async with scoped_session(household_id=a) as s:
+        foreign = await _category(s, a, "A's category")
+    async with scoped_session(household_id=b) as s:
+        with pytest.raises(LedgerError) as exc:
+            await _rule(s, b, actions=_split_action([
+                {"amount": "-50.00", "category_id": str(foreign.id)},
+                {"remainder": True},
+            ]))
+        assert exc.value.status == 404
+
+
+async def test_a_stored_split_rule_survives_the_round_trip_through_jsonb(household_factory):
+    """The legs are stored as decimal *strings* (RuleBlob.stored) — JSONB has no
+    number type that keeps cents — and read back as Decimals."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        cat = await _category(s, hh, "Rent")
+        rule = await _rule(s, hh, actions=_split_action([
+            {"amount": "-60.50", "category_id": str(cat.id), "notes": "the fixed part"},
+            {"percent": "10"},
+            {"remainder": True},
+        ]))
+        stored = (await rules.get_rule(s, rule.id)).actions["split"]
+
+    assert stored[0]["amount"] == "-60.50"
+    assert stored[1]["percent"] == "10"
+    assert stored[2] == {"remainder": True}
+    assert RuleActions.model_validate({"split": stored}).split[0].amount == D("-60.50")
+
+
+async def test_a_split_rule_whose_legs_point_the_wrong_way_skips_the_split_only(household_factory):
+    """An amount leg has to match the parent's sign (§2), and a rule written for
+    expenses will meet a refund. The row keeps the rule's *other* actions and gets
+    no split, rather than a split that turns an expense into a transfer."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        refund = await _txn(s, hh, acct.id, "100.00", merchant="LANDLORD")
+        await _rule(
+            s, hh, conditions={"merchant_contains": "landlord"},
+            actions={
+                "mark_reviewed": True,
+                **_split_action([{"amount": "-60.00"}, {"remainder": True}]),
+            },
+        )
+        result = await rules.apply(s, hh)
+        await _reload(s, refund)
+
+    assert refund.splits == []
+    assert refund.review_status == "reviewed"  # the other action still applied
+    assert result.matched == 1 and result.updated == 1
+
+
+async def test_a_rule_owned_split_goes_when_the_rule_can_no_longer_derive_it(household_factory):
+    """§5, at the edge §2's sign rule creates: the amount moves *past zero*, so the
+    rule's signed amount leg no longer matches the parent and no legs can be
+    derived. Leaving the old ones would put the parent and its children in
+    disagreement — the state §5 exists to prevent, and the one where every total
+    downstream is quietly wrong — so the engine clears the split it owns and the
+    new amount lands."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        await _rule(s, hh, actions=_split_action([
+            {"amount": "-60.00"}, {"remainder": True},
+        ]))
+        await rules.apply(s, hh)
+        await _reload(s, txn)
+        assert sorted(s.amount for s in txn.splits) == [D("-60.0000"), D("-40.0000")]
+
+        # The charge is reversed: the same rule now has nothing it can derive.
+        await txns.update_transaction(
+            s, hh, txn.id, TransactionUpdate(amount=D("100.00")),
+        )
+        await _reload(s, txn)
+
+    assert txn.amount == D("100.0000")
+    assert txn.splits == []
+    assert txn.is_split_parent is False
+    # Still the rule's field: a human has not taken it over, so a later amount that
+    # the rule *can* derive is split again.
+    assert txn.field_sources["splits"] == "rule"
+    async with scoped_session(household_id=hh) as s:
+        await txns.update_transaction(
+            s, hh, txn.id, TransactionUpdate(amount=D("-90.00")),
+        )
+        txn = await txns.get_transaction(s, txn.id)
+        await _reload(s, txn)
+    assert sorted(s.amount for s in txn.splits) == [D("-60.0000"), D("-30.0000")]
+
+
+async def test_a_split_applies_to_a_row_the_moment_it_is_created(household_factory):
+    """The on-create path runs the same engine, so an imported or hand-entered row
+    is split as it lands rather than needing a second "apply" pass."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        await _rule(s, hh, conditions={"merchant_contains": "landlord"},
+                    actions=_split_action([{"amount": "-60.00"}, {"remainder": True}]))
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        await _reload(s, txn)
+
+    assert sorted(s.amount for s in txn.splits) == [D("-60.0000"), D("-40.0000")]
+    assert txn.is_split_parent is True
+    assert txn.field_sources["splits"] == "rule"
+
+
+async def test_a_users_split_is_still_refused_an_amount_change(household_factory):
+    """The refusal that was there before ADR-0031, unchanged: there is nothing to
+    re-derive a human's split from, so the amount is edited through the splits."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh)
+        txn = await _txn(s, hh, acct.id, "-100.00", merchant="LANDLORD")
+        await txns.replace_splits(s, txn.id, [
+            SplitIn(amount=D("-60.00")), SplitIn(amount=D("-40.00")),
+        ])
+        with pytest.raises(LedgerError) as exc:
+            await txns.update_transaction(s, hh, txn.id, TransactionUpdate(amount=D("-75.00")))
+    assert exc.value.status == 409
+    assert "splits" in exc.value.message
+
+
+@pytest.mark.parametrize(
+    "legs, expected",
+    [
+        ([{"amount": "-50"}], "at least two legs"),
+        ([{"amount": "-50"}, {"amount": "-50"}], "exactly one leg with remainder"),
+        (
+            [{"remainder": True}, {"remainder": True}],
+            "leg 1 and leg 2 are both marked remainder",
+        ),
+        (
+            [{"amount": "-50", "percent": "50"}, {"remainder": True}],
+            "split leg 1: carries both amount and percent",
+        ),
+        ([{"percent": "0"}, {"remainder": True}], "split leg 1: percent must be"),
+        ([{"percent": "100"}, {"remainder": True}], "split leg 1: percent must be"),
+        (
+            [{"percent": "60"}, {"percent": "60"}, {"remainder": True}],
+            "must come to less than 100%",
+        ),
+        (
+            [{"amount": "-50"}, {"amount": "50"}, {"remainder": True}],
+            "must all share the parent transaction's sign",
+        ),
+        ([{"amount": "0"}, {"remainder": True}], "split leg 1: an amount leg must be non-zero"),
+        ([{"remainder": True}], "at least two legs"),
+        ([{"amount": "-50", "remainder": True}], "split leg 1: a remainder leg takes no amount"),
+    ],
+)
+def test_a_malformed_split_is_rejected_and_the_message_names_the_leg(legs, expected):
+    """ADR-0031 §2: "the schema is a 422 otherwise" is only actionable if the 422
+    says which leg and why — a split has several of them."""
+    with pytest.raises(ValidationError) as exc:
+        RuleCreate.model_validate({"name": "x", "actions": {"split": legs}})
+    assert expected in str(exc.value)
+
+
+def test_split_legs_are_a_closed_shape_too():
+    """The action's inner shape is a second ``RuleBlob`` with the same
+    discipline, so a misspelled leg key is refused rather than stored and ignored."""
+    with pytest.raises(ValidationError):
+        RuleCreate.model_validate({
+            "name": "x",
+            "actions": {"split": [{"amout": "-50"}, {"remainder": True}]},
+        })
+    with pytest.raises(ValidationError):
+        RuleCreate.model_validate({
+            "name": "x",
+            "actions": {"split": [{"amount": "-50"}, {"remainder": True, "pct": "10"}]},
+        })
+
+
+async def test_a_split_over_http_round_trips_and_a_bad_one_is_a_422(api):
+    """The route the rule editor actually talks to: `split` is stored, read back,
+    and a malformed one comes back as a 422 naming the leg."""
+    client, _me, _hh = api
+    acct = (
+        await client.post("/accounts", json={
+            "name": "Card", "type": "credit", "currency": "USD",
+        })
+    ).json()
+    group = (
+        await client.post("/category-groups", json={"name": "Expense", "type": "expense"})
+    ).json()
+    cat = (
+        await client.post("/categories", json={"group_id": group["id"], "name": "Rent"})
+    ).json()
+
+    created = await client.post("/rules", json={
+        "name": "Split the rent",
+        "conditions": {"merchant_contains": "landlord"},
+        "actions": {"split": [
+            {"amount": "-60.00", "category_id": cat["id"]},
+            {"remainder": True},
+        ]},
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["actions"]["split"] == [
+        {"amount": "-60.00", "category_id": cat["id"], "owner_id": None, "percent": None,
+         "remainder": None, "notes": None},
+        {"amount": None, "category_id": None, "owner_id": None, "percent": None,
+         "remainder": True, "notes": None},
+    ]
+
+    bad = await client.post("/rules", json={
+        "name": "No remainder",
+        "actions": {"split": [{"amount": "-60.00"}, {"amount": "-40.00"}]},
+    })
+    assert bad.status_code == 422
+    assert "exactly one leg with remainder" in bad.text
+
+    # And the rule splits a real row over the same API it was written through.
+    txn = (
+        await client.post("/transactions", json={
+            "account_id": acct["id"], "amount": "-100.00",
+            "transacted_at": "2026-01-05T00:00:00Z", "merchant": "LANDLORD",
+        })
+    ).json()
+    assert txn["is_split_parent"] is True
+    splits = (await client.get(f"/transactions/{txn['id']}")).json()["splits"]
+    # Sorted as strings, which is what the API hands back: "-40.0000" sorts before
+    # "-60.0000".
+    assert sorted(s["amount"] for s in splits) == ["-40.0000", "-60.0000"]

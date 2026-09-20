@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, extract, func, or_, select
+from sqlalchemy import and_, delete, extract, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -183,6 +183,9 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
     txn = await get_transaction(session, txn_id)
     fs = dict(txn.field_sources or {})
     recompute = False
+    # Set when the amount moves on a split a *rule* owns: the legs are re-derived
+    # from the rule below, after the new amount is on the row (ADR-0031 §5).
+    rule_split = False
 
     # ``is_set`` rather than ``is not None``: for the nullable fields an explicit
     # null is how a client clears a value, and treating it as "absent" made a PATCH
@@ -194,12 +197,30 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         # claim one number while every total shows another — the PATCH succeeds and
         # changes nothing a user can see. The splits are where a parent's amount is
         # edited, and ``replace_splits`` enforces the sum there.
-        if txn.splits and data.amount != txn.amount:
-            raise LedgerError(
-                "A split transaction's amount comes from its splits; "
-                "edit the splits or un-split it first",
-                409,
-            )
+        #
+        # A rule-made split is the exception, and only because the rule can be
+        # asked again: the legs are re-derived from it for the new amount, so the
+        # row ends with a split that still sums to it (ADR-0031 §5). A split a
+        # *human* made is refused exactly as it always was — there is nothing to
+        # re-derive it from, and ADR-0007 says a rule does not touch what a person
+        # wrote.
+        #
+        # The rule-owned case is checked on the *provenance* and not on there being
+        # legs right now: the engine can have cleared a split it could no longer
+        # derive (§2's sign rule) while keeping the field, and a row the rule says
+        # should be split has to be split again when the amount comes back — not
+        # left bare because the last amount happened to point the other way.
+        if data.amount != txn.amount and (
+            txn.splits or (txn.field_sources or {}).get(SPLITS_FIELD) == rules.RULE
+        ):
+            if (txn.field_sources or {}).get(SPLITS_FIELD) == rules.RULE:
+                rule_split = True
+            else:
+                raise LedgerError(
+                    "A split transaction's amount comes from its splits; "
+                    "edit the splits or un-split it first",
+                    409,
+                )
         txn.amount = data.amount
         _mark(fs, ["amount"], "user")
         recompute = True
@@ -264,7 +285,11 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         # sums — have to be re-allocated exactly as ``replace_splits`` does them.
         # Without this they keep the old day's conversion and stop summing to the
         # parent, which is the same silent divergence as a drifted amount.
-        if txn.splits:
+        #
+        # Skipped when a rule owns the set: those legs are about to be rebuilt from
+        # the rule for the new amount, and re-allocating them first would be work
+        # whose result nothing reads.
+        if txn.splits and not rule_split:
             realloc = allocate(
                 conv, [abs(s.amount) or Decimal(1) for s in txn.splits], currency=base
             )
@@ -276,6 +301,37 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         # null = clear for the nullable fields; ``is not None`` here quietly broke
         # that promise, so an attempt to clear tags looked like it worked.
         await _set_tags(session, txn.id, data.tag_ids or [])
+
+    if rule_split:
+        # The amount moved on a split the rules own, so the rules are asked again:
+        # the split action recomputes its legs from the rule and the *current*
+        # amount and writes only if they differ (ADR-0031 §4-5). This is the whole
+        # of "re-derive rather than leave stale", and it is a re-run of the engine
+        # rather than a second allocation path — the legs land through the same
+        # ``set_splits`` a human's do.
+        #
+        # Running the rules here is deliberate and is the same thing
+        # ``create_transaction`` does for every row it inserts: a rule that owns a
+        # split also categorizes or renames, and re-deriving one half of what it
+        # writes while withholding the other would be arbitrary.
+        await ensure_splits_loaded(session, txn)
+        await rules.apply_to_transaction(session, household_id, txn)
+        if txn.splits:
+            total = sum((s.amount for s in txn.splits), Decimal(0))
+            if total != txn.amount:
+                # The rule that split this row did not fire for the new amount
+                # (deleted, disabled, or its conditions no longer match), so there
+                # is nothing to re-derive the legs from. Landing the new amount
+                # anyway would leave a parent that disagrees with the children
+                # every total is summed from — the exact silent divergence §5
+                # exists to prevent — so the edit is refused and the human is told
+                # what to do instead.
+                raise LedgerError(
+                    "A rule split this transaction, and that rule no longer applies "
+                    "to it: changing the amount would leave its splits summed to "
+                    "the old one. Edit the splits directly, or un-split it first.",
+                    409,
+                )
 
     await session.flush()
     return txn
@@ -289,17 +345,61 @@ async def delete_transaction(session: AsyncSession, txn_id: uuid.UUID) -> None:
 
 # ---- Splits ---------------------------------------------------------------
 
-async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
-                         splits: list[SplitIn]) -> Transaction:
-    txn = await get_transaction(session, txn_id)
-    await require_owners(session, [s.owner_id for s in splits])
+#: ``field_sources`` key for the split set. A human's split is stamped ``user``
+#: (ADR-0007) and a rule's ``rule`` (ADR-0031 §3), which is what makes "a human's
+#: split is final" a provenance lookup rather than a new mechanism.
+SPLITS_FIELD = "splits"
+
+
+async def ensure_splits_loaded(session: AsyncSession, txn: Transaction) -> None:
+    """Load ``txn.splits`` if whoever fetched the row did not.
+
+    The rule engine's split action compares the legs it computed against the legs
+    stored, and reading an unloaded relationship on an async session raises
+    ``MissingGreenlet`` rather than returning a value. Not every path that runs
+    the rules eager-loads them — sync's ``_by_external_id`` and ``apply``'s chunk
+    walk do not — so the split action asks first, and the cost is one SELECT for a
+    row a split rule actually matched.
+    """
+    state = inspect(txn)
+    if state.persistent and SPLITS_FIELD in state.unloaded:
+        await session.refresh(txn, [SPLITS_FIELD])
+
+
+async def set_splits(
+    session: AsyncSession, txn: Transaction, splits: list[SplitIn], *, owned_by: str
+) -> None:
+    """Allocate ``splits`` across ``txn`` and store them. **The** allocation path.
+
+    Two callers, and they must not diverge (ADR-0031 §6): ``replace_splits`` for a
+    split a human made, the rules engine for a split a rule made. "Divide this
+    amount across these legs" has one right answer — including where the rounding
+    cent goes, which ``allocate`` gives to the largest part — and a second
+    implementation of it is how a person's split and a rule's split end up
+    differing by a cent while both claim to be exact.
+
+    ``owned_by`` is the provenance the split set is stamped with: ``user`` for the
+    human path, ``rule`` for the engine's. Everything else about the write is
+    identical, which is the point.
+
+    An empty ``splits`` un-splits the row — the engine's way of giving up a split
+    it can no longer derive (ADR-0031 §5: it owns the field, so it may clear it,
+    and a parent must never be left disagreeing with its children). The human
+    path has its own un-split in ``replace_splits``, which deliberately does not
+    stamp provenance: a human clearing a rule's split is not yet a decision to
+    take the field over, and the existing behaviour is left alone.
+    """
     if not splits:
-        # un-split (delete-orphan cascade removes children)
+        await ensure_splits_loaded(session, txn)
         txn.splits.clear()
         txn.is_split_parent = False
+        fs = dict(txn.field_sources or {})
+        _mark(fs, [SPLITS_FIELD], owned_by)
+        txn.field_sources = fs
         await session.flush()
-        return await get_transaction(session, txn_id)
+        return
 
+    await require_owners(session, [s.owner_id for s in splits])
     use_pct = any(s.pct is not None for s in splits)
     if use_pct:
         if not all(s.pct is not None for s in splits):
@@ -329,9 +429,22 @@ async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
         )
     txn.is_split_parent = True
     fs = dict(txn.field_sources or {})
-    _mark(fs, ["splits"], "user")
+    _mark(fs, [SPLITS_FIELD], owned_by)
     txn.field_sources = fs
     await session.flush()
+
+
+async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
+                         splits: list[SplitIn]) -> Transaction:
+    txn = await get_transaction(session, txn_id)
+    if not splits:
+        # un-split (delete-orphan cascade removes children)
+        txn.splits.clear()
+        txn.is_split_parent = False
+        await session.flush()
+        return await get_transaction(session, txn_id)
+
+    await set_splits(session, txn, splits, owned_by="user")
     return await get_transaction(session, txn_id)
 
 

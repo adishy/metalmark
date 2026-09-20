@@ -1,11 +1,16 @@
-// The CSV import vertical's own API surface: preview a file, then commit it.
+// The import vertical's own API surface: preview a file, then commit it.
+//
+// Two formats, one shape (ADR-0030): a CSV whose columns the user maps, and an
+// OFX/QFX statement that names its own fields. Both preview without writing,
+// both take an explicit `account_id` at commit, and both return the same three
+// counts — so the dialog is one flow with a branch in it rather than two pages.
 //
 // Kept out of api/hooks.ts (shared, and pinned by other workstreams) while
 // following its conventions — the commit reuses the shared invalidation list, so
 // an import refreshes the ledger and the reports exactly like any other write.
 // That matters more here than elsewhere: one commit can add hundreds of rows.
 //
-// These two calls are multipart, which api/client.ts cannot express (its one
+// These calls are multipart, which api/client.ts cannot express (its one
 // `request` helper JSON-encodes every body), so they speak fetch directly. The
 // CSRF token comes from the auth context rather than the client's module-private
 // copy — the same token, read from a place this module is allowed to look.
@@ -71,6 +76,68 @@ export interface CsvCommitInput {
   dayfirst?: boolean;
 }
 
+/** What an OFX/QFX file says about itself (ADR-0030 §4).
+ *
+ * The account fields are for the human to recognise the statement by — "this is
+ * the one for 000111222333" — and are deliberately not a matching key: the
+ * ledger account is chosen at commit, exactly as in the CSV path. `acct_id` is a
+ * string because an account number is an identifier and never arithmetic.
+ */
+export interface OfxPreview {
+  org: string | null;
+  acct_id: string | null;
+  acct_type: string | null;
+  currency: string | null;
+  start: string | null;
+  end: string | null;
+  /** Banking rows this file offers. Investment rows are counted separately. */
+  transaction_count: number;
+  investment_count: number;
+}
+
+/** One row the importer refused to guess at. `position` is 1-based within the
+ * statement — OFX has no line numbers to point at. */
+export interface OfxRowError {
+  position: number;
+  message: string;
+}
+
+/** The same three counts as CSV, plus what the ledger cannot hold yet.
+ *
+ * `investments_skipped` is its own number rather than folded into `skipped`
+ * (§5): a skipped row is one the ledger already has, and these are rows it
+ * cannot represent — an all-investment file reads as "0 imported, 5 skipped"
+ * instead of as a silent success.
+ */
+export interface OfxCommitResult {
+  inserted: number;
+  skipped: number;
+  suspects: number;
+  investments_skipped: number;
+  errors: OfxRowError[];
+}
+
+export interface OfxCommitInput {
+  file: File;
+  accountId: UUID;
+  /** Where an otherwise uncategorised row lands; "Uncategorized" if unset. */
+  defaultCategoryId?: UUID | null;
+}
+
+/** The extensions the OFX branch claims. QFX is OFX 2.x from Quicken.
+ *
+ * The branch is decided by name because the alternative is reading the file in
+ * the browser to sniff its first bytes, and the browser is not where the format
+ * rules live: `services/ofx.py` decides what a file *is*, and it refuses one
+ * whose header disagrees with what was picked — a message, not a wrong import.
+ */
+const OFX_EXTENSIONS = [".ofx", ".qfx"];
+
+export function isOfxFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return OFX_EXTENSIONS.some((ext) => name.endsWith(ext));
+}
+
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api";
 
 async function upload<T>(path: string, body: FormData, csrf: string | null): Promise<T> {
@@ -105,6 +172,36 @@ export function useCsvPreview() {
       form.set("file", file);
       return upload<CsvPreview>("/import/csv/preview", form, me?.csrf_token ?? null);
     },
+  });
+}
+
+/** The file's own account fields, currency, date span and row counts. Writes
+ * nothing, so it is safe to run on every file the user picks up. */
+export function useOfxPreview() {
+  const { me } = useAuth();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.set("file", file);
+      return upload<OfxPreview>("/import/ofx/preview", form, me?.csrf_token ?? null);
+    },
+  });
+}
+
+/** No `mapping` and no `dayfirst`: an OFX file names its own fields, and its
+ * dates carry the bank's own zone offset. */
+export function useOfxCommit() {
+  const invalidate = useInvalidateLedger();
+  const { me } = useAuth();
+  return useMutation({
+    mutationFn: (input: OfxCommitInput) => {
+      const form = new FormData();
+      form.set("file", input.file);
+      form.set("account_id", input.accountId);
+      if (input.defaultCategoryId) form.set("default_category_id", input.defaultCategoryId);
+      return upload<OfxCommitResult>("/import/ofx/commit", form, me?.csrf_token ?? null);
+    },
+    onSuccess: invalidate,
   });
 }
 

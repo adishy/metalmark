@@ -397,5 +397,7 @@ class Rule(UUIDPkMixin, TimestampMixin, Base):
     #  account_ids?, category_id?, is_pending?} — all AND-ed.
     conditions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # {set_category_id?, add_tag_ids?, set_owner_id?, rename_merchant?, set_hidden?,
-    #  mark_reviewed?} — auto-split is deferred to the sync phase (§2).
+    #  mark_reviewed?, split?} — the closed set in ``schemas.rules.ACTION_KEYS``.
+    #  ``split`` is a list of legs: exactly one ``{remainder: true}``, and every
+    #  other leg carrying exactly one of ``amount``/``percent`` (ADR-0031 §1-2).
     actions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
