@@ -11,7 +11,7 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import and_, delete, extract, func, or_, select
@@ -37,6 +37,27 @@ from app.services.ownership import require_owners
 def _mark(field_sources: dict, fields: list[str], origin: str = "user") -> None:
     for f in fields:
         field_sources[f] = origin
+
+
+async def compute_base_amount(
+    session: AsyncSession, household_id: uuid.UUID, *,
+    amount: Decimal, currency: str, on: date,
+) -> tuple[Decimal | None, date | None]:
+    """Convert ``amount`` to the household's base currency for the ``base_amount`` cache.
+
+    Shared by the manual path and by sync rather than duplicated. The two would
+    otherwise be two answers to "what is this worth in base currency", and the
+    second one would be the one that drifted — a cache is only safe when every
+    writer fills it the same way.
+
+    ``None`` for the amount means "no rate available", ADR-0017's explicit flag,
+    and it must stay ``None``: substituting zero here would make a foreign
+    transaction look free.
+    """
+    base = await base_currency(session, household_id)
+    return await fx.to_base(
+        session, amount=amount, currency=currency, on=on, base_ccy=base
+    )
 
 
 async def _account(session: AsyncSession, account_id: uuid.UUID) -> Account:
@@ -96,10 +117,9 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
     """
     acct = await _account(session, data.account_id)
     await require_owners(session, [data.owner_id])
-    base = await base_currency(session, household_id)
-    conv, rate_date = await fx.to_base(
-        session, amount=data.amount, currency=acct.currency,
-        on=data.transacted_at.date(), base_ccy=base,
+    conv, rate_date = await compute_base_amount(
+        session, household_id,
+        amount=data.amount, currency=acct.currency, on=data.transacted_at.date(),
     )
     field_sources: dict = {}
     _mark(field_sources, ["amount"], "user")
@@ -183,13 +203,28 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         txn.amount = data.amount
         _mark(fs, ["amount"], "user")
         recompute = True
+    # These three are provider-owned for a synced row (ADR-0007), so writing one by
+    # hand has to record *who* wrote it — otherwise the next sync reads an empty
+    # provenance entry, calls the field its own, and puts the bank's value back.
+    # A human correcting a merchant's mangled payee or a mis-dated charge would
+    # watch the correction silently revert on the next run. This is ADR-0007's
+    # precedence applied at the only place that can apply it: the write.
+    #
+    # ``is_pending`` is deliberately *not* marked here. It is not independent state
+    # — it is ``posted_at is None`` in another shape (aggregator.ProviderTransaction)
+    # — so sync gates the two together, and letting a human write one of them
+    # alone could leave a row claiming to be pending while carrying a posted time.
+    # The pair moves as one, and it moves with ``posted_at``.
     if is_set(data, "transacted_at"):
         txn.transacted_at = data.transacted_at
+        _mark(fs, ["transacted_at"], "user")
         recompute = True
     if is_set(data, "posted_at"):
         txn.posted_at = data.posted_at
+        _mark(fs, ["posted_at"], "user")
     if is_set(data, "description"):
         txn.description = data.description
+        _mark(fs, ["description"], "user")
     if is_set(data, "merchant"):
         txn.merchant = data.merchant
         _mark(fs, ["merchant"], "user")
@@ -218,9 +253,9 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
     if recompute:
         base = await base_currency(session, household_id)
         acct = await _account(session, txn.account_id)
-        conv, rate_date = await fx.to_base(
-            session, amount=txn.amount, currency=acct.currency,
-            on=txn.transacted_at.date(), base_ccy=base,
+        conv, rate_date = await compute_base_amount(
+            session, household_id,
+            amount=txn.amount, currency=acct.currency, on=txn.transacted_at.date(),
         )
         txn.base_amount = conv
         txn.fx_rate_date = rate_date
@@ -356,16 +391,19 @@ def _matches_on_amounts(subject: Transaction, other: Transaction,
 
 
 async def link_transfer(session: AsyncSession, household_id: uuid.UUID,
-                        from_txn_id: uuid.UUID, to_txn_id: uuid.UUID) -> TransferGroup:
+                        from_txn_id: uuid.UUID, to_txn_id: uuid.UUID, *,
+                        matched_by: str = "manual") -> TransferGroup:
     a = await get_transaction(session, from_txn_id)
     b = await get_transaction(session, to_txn_id)
     if a.account_id == b.account_id:
         raise LedgerError("A transfer must span two different accounts", 400)
     if (a.amount > 0) == (b.amount > 0):
         raise LedgerError("Transfer legs must have opposite signs", 400)
+    if matched_by not in ("auto", "manual"):
+        raise LedgerError("Transfer groups are auto or manual", 400)
 
     # Residual base value: 0 for same-currency, the FX spread for cross-currency.
-    group = TransferGroup(household_id=household_id, matched_by="manual",
+    group = TransferGroup(household_id=household_id, matched_by=matched_by,
                           fx_cost_base=_residual_base(a, b))
     session.add(group)
     await session.flush()
@@ -549,6 +587,50 @@ async def list_transfer_candidates(
             )
         )
     return candidates
+
+
+# The window the auto-matcher scans. Deliberately the picker's own default: the
+# two answer the same question, and a different number here would mean the picker
+# offering a pair the matcher would never propose, or linking one it never showed.
+TRANSFER_MATCH_DAYS = 5
+
+
+async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
+                               txn_ids: list[uuid.UUID]) -> int:
+    """Link unambiguous transfer pairs among ``txn_ids``. Returns how many it linked.
+
+    ADR-0018's automatic half. The conditions are ``list_transfer_candidates``'
+    exactly — it is *called*, not reimplemented — so a pair the picker would
+    refuse to offer is a pair this cannot link.
+
+    **Exactly one candidate, or none.** The picker shows a human the alternatives
+    and lets them choose; the matcher has nobody to ask, and two plausible legs
+    ("which of these two identical withdrawals is the transfer?") is exactly the
+    case where guessing silently rewrites one real payment into another. Ambiguity
+    means no match, and the pair stays available for the human to link by hand.
+
+    A second pass over the rows a sync touched, never inside the insert loop:
+    two legs arriving in the same payload would otherwise each be examined before
+    the other existed, and neither would find its counterpart.
+    """
+    linked = 0
+    for txn_id in txn_ids:
+        txn = await get_transaction(session, txn_id)
+        if txn.transfer_group_id is not None:
+            # Already half of a transfer — matched earlier in this pass, or by the
+            # user — and so not free to match again.
+            continue
+        candidates = await list_transfer_candidates(
+            session, household_id, txn_id, days=TRANSFER_MATCH_DAYS
+        )
+        matching = [c for c in candidates if c.within_tolerance]
+        if len(matching) != 1:
+            continue
+        await link_transfer(
+            session, household_id, txn_id, matching[0].txn.id, matched_by="auto"
+        )
+        linked += 1
+    return linked
 
 
 # ---- Listing (keyset pagination) ------------------------------------------

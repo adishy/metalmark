@@ -183,6 +183,11 @@ class SyncRun(UUIDPkMixin, Base):
     # "a reconnect loses zero transactions and creates zero dupes" — so the number
     # that proves it belongs on the row the dashboard reads.
     accounts_remapped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The other half of that bar: when a re-claim changes the provider's
+    # transaction ids too, the rows are re-pointed by content rather than
+    # inserted again, and this is how many. Separate from ``txns_reconciled``
+    # because nothing about the row changed except which id the bank calls it by.
+    txns_rekeyed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     txns_inserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Counted only when a value actually changed, so a no-op re-sync reports
     # inserted == 0 *and* updated == 0. That is the idempotency bar.

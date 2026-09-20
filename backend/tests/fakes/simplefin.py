@@ -202,35 +202,54 @@ def pending_then_posted_new_id() -> tuple[AccountSet, AccountSet]:
     return first, with_transactions(second, DEMO_SAVINGS, [reposted, *_rest(second)])
 
 
-def pending_then_posted_late(days: int = 5) -> tuple[AccountSet, AccountSet]:
-    """A pending charge posts ``days`` later — beyond the default overlap window.
+def pending_then_posted_late() -> tuple[AccountSet, AccountSet]:
+    """A pending charge that settles a few days after it was first reported.
 
-    This is the scenario that makes the fetch window load-bearing. If sync asks
-    for a fixed ``now - 3d``, the posting is never in the payload, the pending
-    row never reconciles, and the test can still pass for the wrong reason. The
-    caller must **also** assert the window covered it.
+    The scenario that makes the fetch window load-bearing — and the reason the
+    *clock* is what moves, not the transaction. A bank posts a pending charge on
+    or before the date it first showed it; nothing about the row travels forward
+    in time. What happens is that sync goes quiet and comes back later, so the
+    caller must sync the second fetch at ``NOW + LATE_DAYS``. If it syncs again at
+    ``NOW`` instead, the pending row is still inside any window at all and the
+    test proves nothing about the window — which is why the return value is the
+    pair and the caller owns the clock.
+
+    The posting carries a **new id**, two days after the pending date, so it has
+    to be matched on amount, date and description rather than recognised: a fetch
+    window anchored to a fixed ``now - 3d`` would miss it entirely, and a matcher
+    that only looked at the exact date would refuse it.
     """
     first, second = pending_then_posted_same_id()
     original = _first_txn(first)
-    delta = timedelta(days=days)
-    posted_at = original.transacted_at + delta
-    late = dataclasses.replace(
-        original, posted_at=posted_at, transacted_at=posted_at
+    settled_at = original.transacted_at + timedelta(days=2)
+    reposted = dataclasses.replace(
+        original,
+        external_id=f"new-{original.external_id}",
+        transacted_at=settled_at,
+        posted_at=settled_at,
     )
-    remaining = [
-        dataclasses.replace(t, transacted_at=t.transacted_at - delta)
-        for t in second.transactions
-        if t.external_id != original.external_id
-    ]
-    return first, with_transactions(second, DEMO_SAVINGS, [late, *remaining])
+    return first, with_transactions(second, DEMO_SAVINGS, [reposted, *_rest(second)])
 
 
-def pending_then_two_candidates() -> tuple[AccountSet, AccountSet]:
-    """The pending charge posts, but **two** rows could be it.
+def pending_then_two_lookalikes() -> tuple[AccountSet, AccountSet]:
+    """The pending charge posts, and a *second* new row looks identical to it.
 
-    Two identical coffees on the same day. ADR-0019: do not guess. Sync must
-    insert and flag rather than adopt, because a wrong adoption silently
-    rewrites one purchase into another and the human never sees it happen.
+    Two identical coffees on the same day, both arriving in one payload. What sync
+    actually does here is worth stating precisely, because the interesting part is
+    not that it refuses:
+
+    The rows are examined in order, and the first one resolves against the pending
+    row before the second exists in the ledger — so the first **adopts** it and the
+    second inserts. The tally comes out right (two charges in, two rows out), the
+    pending row is gone rather than stranded, and a human's category on the pending
+    charge lands on one of the two real ones. Since the two are identical in
+    amount, date and description, which of them inherits it is not a distinction
+    anybody can observe — and the alternative, refusing to adopt at all, strands a
+    pending row that then expires and leaves *three* rows for two charges.
+
+    So this is the case for adopting, not against it. The case *against* — two
+    ledger rows that both match one incoming transaction — is
+    ``two_pendings_one_posting``.
     """
     first, second = pending_then_posted_new_id()
     original = _first_txn(first)
@@ -239,6 +258,32 @@ def pending_then_two_candidates() -> tuple[AccountSet, AccountSet]:
     )
     twin = dataclasses.replace(reposted, external_id=f"twin-{original.external_id}")
     return first, with_transactions(second, DEMO_SAVINGS, [reposted, twin, *_rest(second)])
+
+
+def two_pendings_one_posting() -> tuple[AccountSet, AccountSet]:
+    """**Two** unsettled rows that one incoming transaction could equally be.
+
+    The literal "exactly one candidate, or none" rule — and this time the ambiguity
+    is genuinely visible to the matcher, because both rows are already in the
+    ledger when the posting arrives. Neither may be adopted: picking one would
+    rewrite an arbitrary purchase into another, and no fact available distinguishes
+    them.
+
+    Both pendings therefore stay unsettled and expire on their own TTL, which is
+    the visible failure ADR-0019 prefers over the silent one.
+    """
+    first = demo()
+    base = _first_txn(first)
+    twins = (
+        make_pending(base),
+        make_pending(dataclasses.replace(base, external_id=f"twin-{base.external_id}")),
+    )
+    rest = _rest(first)
+    posted = dataclasses.replace(base, external_id=f"new-{base.external_id}")
+    return (
+        with_transactions(first, DEMO_SAVINGS, [*twins, *rest]),
+        with_transactions(first, DEMO_SAVINGS, [posted, *rest]),
+    )
 
 
 def pending_then_gone() -> tuple[AccountSet, AccountSet]:
@@ -290,11 +335,12 @@ __all__ = [
     "pending_then_posted_late",
     "pending_then_posted_new_id",
     "pending_then_posted_same_id",
-    "pending_then_two_candidates",
+    "pending_then_two_lookalikes",
     "reidentified",
     "replace_account",
     "scenario",
     "shifted",
+    "two_pendings_one_posting",
     "with_errlist",
     "with_transactions",
 ]

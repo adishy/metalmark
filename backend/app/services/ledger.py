@@ -45,8 +45,18 @@ async def base_currency(session: AsyncSession, household_id: uuid.UUID) -> str:
 
 # ---- Accounts -------------------------------------------------------------
 
-async def _snapshot_balance(session: AsyncSession, account: Account) -> None:
-    """Upsert a balance snapshot for the account's balance_date (net-worth history)."""
+async def upsert_balance_snapshot(session: AsyncSession, account: Account) -> None:
+    """Upsert a balance snapshot for the account's balance_date (net-worth history).
+
+    Public because sync owns the other caller: a synced balance is history too,
+    and a second implementation of "which snapshot does this balance land on"
+    would be a second answer to a question that has one.
+
+    Whether to call this for a *derived* investment account (ADR-0021) is the
+    caller's decision, not this function's — M1a's manual path has always
+    snapshotted those, and changing that here to suit sync would silently alter
+    behaviour the ledger tests pin.
+    """
     d = account.balance_date or _today()
     existing = (
         await session.execute(
@@ -97,7 +107,7 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
     )
     session.add(acct)
     await session.flush()
-    await _snapshot_balance(session, acct)
+    await upsert_balance_snapshot(session, acct)
     await session.flush()
     return acct
 
@@ -141,7 +151,7 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
         changed_balance = True
     await session.flush()
     if changed_balance:
-        await _snapshot_balance(session, acct)
+        await upsert_balance_snapshot(session, acct)
         await session.flush()
     return acct
 
