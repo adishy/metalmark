@@ -34,3 +34,14 @@ export function useMediaQuery(query: string): boolean {
 export function useIsPhone(): boolean {
   return useMediaQuery("(max-width: 639px)");
 }
+
+/** Tailwind's `lg` (1024px), verbatim.
+ *
+ *  Same justification as above, one breakpoint up: §9.3 puts the transaction
+ *  detail *beside* the list at `lg:` instead of over it, and "beside" is not a
+ *  style — it is the difference between a pane and a modal. A pane traps no
+ *  focus, locks no scroll, closes on no Escape, and carries no `aria-modal`,
+ *  and no CSS class can tell an effect hook any of that. */
+export function useIsDesktop(): boolean {
+  return useMediaQuery("(min-width: 1024px)");
+}

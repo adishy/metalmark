@@ -7,6 +7,13 @@
 //   <640px  bottom sheet, flush to the bottom edge, drag-to-dismiss
 //   >=640px centred modal
 //   side    right slide-over, for detail views on wide screens
+//
+// And a fourth that is not an overlay at all: `inline` (§9.3) renders the same
+// header/body/footer as a card in the page, beside what it edits. That one is
+// **not a modal** — no backdrop, no focus trap, no scroll lock, no Escape — so
+// it drops `aria-modal` and takes `role="region"` instead of `role="dialog"`.
+// Saying "modal" about a panel the user is meant to click *past* is a lie the
+// next reader would have to un-learn.
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useIsPhone } from "@/lib/media";
@@ -23,6 +30,7 @@ export default function Dialog({
   children,
   footer,
   side = false,
+  inline = false,
   testid,
 }: {
   open: boolean;
@@ -32,6 +40,12 @@ export default function Dialog({
   footer?: ReactNode;
   /** Render as a right-hand slide-over instead of a centred modal. */
   side?: boolean;
+  /**
+   * Render in the page as a card rather than as an overlay (§9.3). Skips every
+   * modal behaviour — focus trap, initial focus, scroll lock, Escape — and
+   * takes the caller's layout instead. `side` is ignored when this is set.
+   */
+  inline?: boolean;
   testid?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -55,7 +69,11 @@ export default function Dialog({
   }, [onClose]);
 
   useEffect(() => {
-    if (!open) return;
+    // An inline panel is not a modal, so none of what follows applies: nothing
+    // is trapped, nothing is moved (clicking a row to *look* at it must not
+    // yank the keyboard into a form), and Escape belongs to whatever else on
+    // the page wants it — including a real dialog opened from inside the pane.
+    if (!open || inline) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
 
     const focusables = panelRef.current?.querySelectorAll<HTMLElement>(
@@ -93,17 +111,19 @@ export default function Dialog({
       document.removeEventListener("keydown", onKey);
       restoreRef.current?.focus?.();
     };
-  }, [open]);
+  }, [open, inline]);
 
   // A background that scrolls under a sheet is how a user taps the wrong row.
+  // The pane is the opposite case: it sits *in* the scrolling page and must
+  // scroll with it.
   useEffect(() => {
-    if (!open) return;
+    if (!open || inline) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previous;
     };
-  }, [open]);
+  }, [open, inline]);
 
   if (!open) return null;
 
@@ -111,75 +131,97 @@ export default function Dialog({
   // wobble. Reduced-motion users get no drag at all rather than an unanimated one.
   const draggable = isPhone && !side && !reduced;
 
+  const panel = (
+    <motion.div
+      ref={panelRef}
+      // A pane sits *beside* what it edits, so calling it a dialog would be a
+      // claim the layout does not honour: the list behind it stays live and
+      // focusable. `region` — a named landmark — is what it is.
+      role={inline ? "region" : "dialog"}
+      aria-modal={inline ? undefined : true}
+      // Labelled by the visible heading rather than a duplicate string, so the
+      // accessible name cannot drift from what is on screen.
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      drag={draggable ? "y" : false}
+      dragConstraints={{ top: 0, bottom: 0 }}
+      dragElastic={{ top: 0, bottom: 0.5 }}
+      dragSnapToOrigin
+      onDragEnd={(_e, info) => {
+        if (info.offset.y > DISMISS_PX || info.velocity.y > DISMISS_VELOCITY) onClose();
+      }}
+      className={
+        inline
+          ? // `rounded-card`, not `rounded-overlay`: a card in the page is not
+            // an overlay, and §2.6's one overlay shadow is spent on the
+            // things that actually float. The body keeps its own
+            // `overflow-y-auto`, which without a height constraint simply
+            // never scrolls — the page scrolls, and the pane scrolls with it.
+            "relative flex flex-col rounded-card bg-surface-raised"
+          : // shadow-lg, not shadow-2xl: §2.6 allows exactly one overlay shadow.
+            // No `outline-none`: the panel is `tabIndex={-1}` and receives focus
+            // when it has no focusable children, and that focus must be visible.
+            // The global `:focus-visible` rule supplies the ring.
+            "relative flex flex-col bg-surface-raised shadow-lg " +
+            (side
+              ? "h-full w-full max-w-md"
+              : // `dvh`, not `vh`: on iOS Safari `vh` is measured against the
+                // largest possible viewport, so an 85vh sheet overflows the screen
+                // while the URL bar is showing — exactly when it matters.
+                "max-h-[85dvh] w-full max-w-lg rounded-t-overlay sm:m-4 sm:max-h-[90vh] sm:rounded-overlay")
+      }
+      data-testid={testid}
+    >
+      {/* Grab handle. Decorative: the sheet is also dismissible by the close
+          button and by Escape, so this is an affordance, not the only route.
+          Nothing to drag in the pane or the slide-over, which cannot be
+          dismissed downward. */}
+      {!side && !inline && (
+        <div
+          aria-hidden="true"
+          className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border-strong sm:hidden"
+        />
+      )}
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
+        <h2 id={titleId} className="text-base font-semibold text-fg">
+          {title}
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="-mr-1 grid size-11 shrink-0 place-items-center rounded-control text-fg-muted hover:bg-surface-inset hover:text-fg"
+          data-testid={testid ? `${testid}-close` : undefined}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      {footer && (
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3">
+          {footer}
+        </div>
+      )}
+    </motion.div>
+  );
+
+  if (inline) return panel;
+
   return (
     <div
       className={`fixed inset-0 z-50 flex bg-black/60 ${
         side ? "items-stretch justify-end" : "items-end justify-center sm:items-center"
       }`}
+      // Tapping the backdrop closes; a mousedown that started inside the panel
+      // and ended here does not, because the target of the mousedown was the
+      // panel — which is also what stops a drag-to-select ending outside from
+      // dismissing the dialog mid-selection.
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
       data-testid={testid ? `${testid}-overlay` : undefined}
     >
-      <motion.div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        // Labelled by the visible heading rather than a duplicate string, so the
-        // accessible name cannot drift from what is on screen.
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        drag={draggable ? "y" : false}
-        dragConstraints={{ top: 0, bottom: 0 }}
-        dragElastic={{ top: 0, bottom: 0.5 }}
-        dragSnapToOrigin
-        onDragEnd={(_e, info) => {
-          if (info.offset.y > DISMISS_PX || info.velocity.y > DISMISS_VELOCITY) onClose();
-        }}
-        className={
-          // shadow-lg, not shadow-2xl: §2.6 allows exactly one overlay shadow.
-          // No `outline-none`: the panel is `tabIndex={-1}` and receives focus
-          // when it has no focusable children, and that focus must be visible.
-          // The global `:focus-visible` rule supplies the ring.
-          "relative flex flex-col bg-surface-raised shadow-lg " +
-          (side
-            ? "h-full w-full max-w-md"
-            : // `dvh`, not `vh`: on iOS Safari `vh` is measured against the
-              // largest possible viewport, so an 85vh sheet overflows the screen
-              // while the URL bar is showing — exactly when it matters.
-              "max-h-[85dvh] w-full max-w-lg rounded-t-overlay sm:m-4 sm:max-h-[90vh] sm:rounded-overlay")
-        }
-        data-testid={testid}
-      >
-        {/* Grab handle. Decorative: the sheet is also dismissible by the close
-            button and by Escape, so this is an affordance, not the only route. */}
-        {!side && (
-          <div
-            aria-hidden="true"
-            className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border-strong sm:hidden"
-          />
-        )}
-        <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
-          <h2 id={titleId} className="text-base font-semibold text-fg">
-            {title}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="-mr-1 grid size-11 shrink-0 place-items-center rounded-control text-fg-muted hover:bg-surface-inset hover:text-fg"
-            data-testid={testid ? `${testid}-close` : undefined}
-          >
-            <CloseIcon />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && (
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-3">
-            {footer}
-          </div>
-        )}
-      </motion.div>
+      {panel}
     </div>
   );
 }

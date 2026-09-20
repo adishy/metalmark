@@ -18,6 +18,7 @@ import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
+import { useIsDesktop } from "@/lib/media";
 import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
 
 interface TxnDetailSheetProps {
@@ -42,6 +43,12 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
   const update = useUpdateTransaction();
   const del = useDeleteTransaction();
   const owners = useOwners();
+  // Which of the two presentations this is (§9.3): beside the list in the
+  // page's second column at `lg:`, or over it as the phone's bottom sheet.
+  // Decided here rather than by the caller so there is one component and one
+  // form — a caller that rendered both and hid one would give the household
+  // two copies of every edit in flight.
+  const pane = useIsDesktop();
 
   const account = accounts.find((a) => a.id === txn.account_id);
   const [amount, setAmount] = useState(txn.amount);
@@ -102,6 +109,7 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
     <Dialog
       open
       side
+      inline={pane}
       onClose={onClose}
       title="Transaction"
       testid="txn-detail"
