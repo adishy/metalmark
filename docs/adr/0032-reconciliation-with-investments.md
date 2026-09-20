@@ -60,12 +60,38 @@ transaction types then split cleanly (ADR-0011):
 
 **3. `market appreciation` is computed from the price series, not from what is left over.**
 
-This is the load-bearing sentence. `Σ(holdings × price change over the window)`, from `security_prices` and
-`holdings` — a number derived from data, which can therefore be **wrong**, and can therefore be *checked*.
+This is the load-bearing sentence. It is a number derived from data, which can therefore be **wrong**, and
+can therefore be *checked*. Defining it as a second residual would have been the easy move and would have
+achieved nothing: a residual absorbs every error you fail to name, so adding a term to a tautology leaves a
+tautology with more words in it. The term has to be independently computable or this ADR is decoration.
 
-Defining it as a second residual would have been the easy move and would have achieved nothing: a residual
-absorbs every error you fail to name, so adding a term to a tautology leaves a tautology with more words in
-it. The term has to be independently computable or this ADR is decoration.
+*Amended 2026-09-20, before any code was written, because the first formula drafted here was wrong:*
+
+```
+appreciation = Σ(quantity × Δprice)          # WRONG — ignores trades inside the window
+```
+
+Buy 10 shares mid-window and that formula credits you with the whole window's price move on all 10, when you
+held them for part of it. The error is proportional to how much the household traded, which is to say it is
+largest for exactly the accounts this feature exists for.
+
+The correct decomposition works on position *values*, and unwinds the trades:
+
+```
+appreciation = (market value at end − market value at start) − net buys/sells in the window
+```
+
+Market value at end is current holdings at current prices. **Market value at start is derived by unwinding
+`investment_transactions` backwards from current holdings** — which is possible precisely because every trade
+is recorded, and is a second, independent reason for ADR-0020's "single authority" rule (if basis is
+computed from history in one place and from a scalar in another, this walk has no single source to walk).
+Adjusted for FX where the position is not in base currency, the same way ADR-0017 converts everything else.
+
+A consequence worth stating: this makes `appreciation` depend on the *completeness* of
+`investment_transactions`. An account whose holdings were entered by hand with no trade history will unwind
+to the same value at start and end, so its appreciation reads **zero** — which is honest, and is why §6
+excludes `stated` accounts from this computation rather than letting them report a market return they cannot
+evidence.
 
 **4. `currency revaluation` is computed too, and the residual becomes one explicit field: `unexplained`.**
 
