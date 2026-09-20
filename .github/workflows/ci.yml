@@ -7,7 +7,17 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs on branches and PRs, where only the tip matters.
+  #
+  # Do NOT cancel on `main`. Every commit there is supposed to be independently
+  # verified, and `cancel-in-progress` quietly destroys that: push two commits a
+  # minute apart and the first run is killed before it reports. That is not
+  # hypothetical — the admin-panel fix was pushed and its run was cancelled by
+  # the next push, so the only commit in the batch containing code was never
+  # checked by CI at all, and three doc commits after it never got a run either.
+  # A red main that *looks* green because the run was cancelled is the worst
+  # outcome this file can produce, and it is worse than a slow queue.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # The runner is pinned rather than `ubuntu-latest` deliberately: `latest` migrates to
 # Ubuntu 26 on 2026-10-19, and a runner image change is exactly the kind of thing that
