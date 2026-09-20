@@ -8,6 +8,7 @@ import type {
   Category,
   CategoryGroup,
   FxRate,
+  GranularityParam,
   Household,
   HouseholdUpdate,
   Me,
@@ -33,14 +34,30 @@ export function accountsUrl(path: string, ownerId?: string | null): string {
   return ownerId ? `${path}?owner_id=${encodeURIComponent(ownerId)}` : path;
 }
 
-/** Same owner scope, but for the report GETs that already carry start/end. */
+/**
+ * The report GETs: one window, one owner scope and one granularity.
+ *
+ * `start` may be `null`, and then the param is **omitted** rather than sent
+ * empty — a missing `start` means "from the beginning", which only the server
+ * can resolve, and it answers with the day it chose. `end` is never optional:
+ * the browser is the side that knows what day it is here, and a server in UTC
+ * would be a day off for a household in UTC+13.
+ *
+ * `granularity` goes on the wire even when it is `auto`, because `auto` is a real
+ * answer the server echoes back resolved — the response's `granularity` is what
+ * the chart labels come from, never the control's.
+ */
 export function reportUrl(
   path: string,
-  start: string,
+  start: string | null,
   end: string,
   ownerId?: string | null,
+  granularity?: GranularityParam,
 ): string {
-  const q = new URLSearchParams({ start, end });
+  const q = new URLSearchParams();
+  if (start) q.set("start", start);
+  q.set("end", end);
+  if (granularity) q.set("granularity", granularity);
   if (ownerId) q.set("owner_id", ownerId);
   return `${path}?${q}`;
 }
@@ -138,21 +155,38 @@ export function useInfiniteTransactions(filter: TxnFilter = {}) {
   });
 }
 
-export function useNetWorthSeries(start: string, end: string, ownerId?: string | null) {
+// The window, the owner scope and the cut are all in the key: each combination
+// is a different report, and stepping back through ranges should be instant
+// rather than a refetch of a series that was on screen a moment ago.
+export function useNetWorthSeries(
+  start: string | null,
+  end: string,
+  ownerId?: string | null,
+  granularity: GranularityParam = "auto",
+) {
   return useQuery({
-    queryKey: ["report-net-worth", start, end, ownerId ?? null],
-    queryFn: () => api.get<NetWorthSeries>(reportUrl("/reports/net-worth", start, end, ownerId)),
+    queryKey: ["report-net-worth", start, end, ownerId ?? null, granularity],
+    queryFn: () =>
+      api.get<NetWorthSeries>(reportUrl("/reports/net-worth", start, end, ownerId, granularity)),
   });
 }
 
-export function useCashFlow(start: string, end: string, ownerId?: string | null) {
+export function useCashFlow(
+  start: string | null,
+  end: string,
+  ownerId?: string | null,
+  granularity: GranularityParam = "auto",
+) {
   return useQuery({
-    queryKey: ["report-cash-flow", start, end, ownerId ?? null],
-    queryFn: () => api.get<CashFlowSeries>(reportUrl("/reports/cash-flow", start, end, ownerId)),
+    queryKey: ["report-cash-flow", start, end, ownerId ?? null, granularity],
+    queryFn: () =>
+      api.get<CashFlowSeries>(reportUrl("/reports/cash-flow", start, end, ownerId, granularity)),
   });
 }
 
-export function useSpending(start: string, end: string, ownerId?: string | null) {
+/** No granularity: `/reports/spending` is one total over the window and takes
+ *  none, so offering a cut here would be a control that changes nothing. */
+export function useSpending(start: string | null, end: string, ownerId?: string | null) {
   return useQuery({
     queryKey: ["report-spending", start, end, ownerId ?? null],
     queryFn: () => api.get<SpendingReport>(reportUrl("/reports/spending", start, end, ownerId)),

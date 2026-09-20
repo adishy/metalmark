@@ -59,3 +59,54 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await expect(page.getByTestId("spending-attribution")).toBeHidden();
   await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
 });
+
+// The window is the page's one piece of linkable state, and this is the only
+// place that proves it: the component test runs against a `MemoryRouter` with no
+// server, so nothing there can show that a window the reader set is still the
+// window they get back a day later.
+test("the report window is the reader's, and survives a reload", async ({ page }) => {
+  await login(page);
+  await page.getByTestId("nav-reports").click();
+
+  // The default is the current year. The control names the period ("This year"),
+  // and this line prints the days it resolved to, because a stored link read next
+  // month has to say which days it means. The `<time datetime>` is asserted and
+  // not the text: the text is locale-formatted, the attribute is not.
+  const windowLine = page.getByTestId("report-window");
+  const year = new Date().getFullYear();
+  await expect(windowLine.locator("time").first()).toHaveAttribute("datetime", `${year}-01-01`);
+  await expect(windowLine.locator("time").last()).toHaveAttribute("datetime", `${year}-12-31`);
+
+  // A custom window goes in the URL, not into a `useState`.
+  await page.getByTestId("range-custom").click();
+  await page.getByTestId("range-start").fill("2020-03-01");
+  await page.getByTestId("range-end").fill("2020-03-31");
+  await expect(page).toHaveURL(/range=custom/);
+  await expect(windowLine.locator("time").first()).toHaveAttribute("datetime", "2020-03-01");
+  await expect(windowLine.locator("time").last()).toHaveAttribute("datetime", "2020-03-31");
+  // A window with nothing in it still draws a chart — empty axes, not a
+  // missing card — which is what makes the reload below a real assertion.
+  await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
+
+  // Reload: it all comes back, because all of it was in the address bar.
+  await page.reload();
+  await expect(page.getByTestId("range-custom")).toHaveAttribute("aria-pressed", "true");
+  await expect(windowLine.locator("time").first()).toHaveAttribute("datetime", "2020-03-01");
+  await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
+
+  // An inverted window is refused in the control and draws nothing underneath it.
+  // Not an empty state either: that would read as a household with no money,
+  // which is a wrong answer to a question the reader never managed to ask.
+  await page.getByTestId("range-start").fill("2020-06-01");
+  await expect(page.getByTestId("range-invalid")).toBeVisible();
+  await expect(page.getByTestId("report-net-worth")).toContainText("ends before it starts");
+  await expect(page.getByTestId("net-worth-chart")).toHaveCount(0);
+  await expect(page.getByTestId("cash-flow-chart")).toHaveCount(0);
+  await expect(page.getByTestId("spending-donut")).toHaveCount(0);
+
+  // One click back to the default, and the charts return. The default preset is
+  // spelled by the absence of a param, so the URL is bare again.
+  await page.getByTestId("range-this-year").click();
+  await expect(page).not.toHaveURL(/range=/);
+  await expect(page.getByTestId("net-worth-chart").locator("canvas")).toBeVisible();
+});

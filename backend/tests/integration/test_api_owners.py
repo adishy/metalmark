@@ -534,6 +534,81 @@ async def test_every_report_declares_which_question_its_owner_filter_answered(cl
     assert isinstance(cf["points"], list)
 
 
+async def test_the_window_is_echoed_on_every_report(client):
+    """A payload that says which window it answered for needs no second source.
+
+    The chart labels its own axis from the response rather than from the controls,
+    so the picture and the numbers cannot disagree about what is on screen — and a
+    reader holding two of these does not have to remember what they asked for.
+    """
+    await _signup(client)
+    await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2026-01-01",
+    })
+    window = {"start": "2026-03-01", "end": "2026-09-20"}
+
+    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+        body = (await client.get(path, params=window)).json()
+        assert (body["start"], body["end"]) == ("2026-03-01", "2026-09-20"), path
+
+    # `granularity` is echoed *resolved* on the two reports that have buckets, and
+    # is absent from the one that does not: `auto` is a request, not a period, and
+    # a chart handed it back would be doing the resolution it delegated.
+    nw = (await client.get("/reports/net-worth", params=window)).json()
+    cf = (await client.get("/reports/cash-flow", params=window)).json()
+    assert nw["granularity"] == cf["granularity"] == "month"
+    assert "granularity" not in (await client.get("/reports/spending", params=window)).json()
+
+    # And an explicit granularity is honoured rather than re-resolved.
+    quarterly = (await client.get(
+        "/reports/cash-flow", params={**window, "granularity": "quarter"})).json()
+    assert quarterly["granularity"] == "quarter"
+    assert len(quarterly["points"]) == 3
+    # A granularity that is not in the vocabulary is a 422, not a silent `auto`.
+    assert (await client.get(
+        "/reports/cash-flow", params={**window, "granularity": "fortnight"})).status_code == 422
+
+
+async def test_an_omitted_start_opens_where_the_data_does(client):
+    """`start` is optional for exactly one preset, and it is the one a client
+    cannot compute: only the server knows where the household's data begins.
+
+    All three dated tables count. The balance here is the earliest thing the
+    household has and there is no transaction anywhere near it, which is the case
+    a "first transaction" rule would get wrong — a household whose first act was
+    to type a balance has no transactions at all.
+    """
+    await _signup(client)
+    acct = (await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2026-02-14",
+    })).json()
+    await client.post("/transactions", json={
+        "account_id": acct["id"], "amount": "-10", "transacted_at": "2026-05-01T12:00:00Z",
+    })
+
+    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+        body = (await client.get(path, params={"end": "2026-09-20"})).json()
+        assert body["start"] == "2026-02-14", path
+        assert body["end"] == "2026-09-20", path
+
+
+async def test_an_inverted_window_is_refused_rather_than_drawn_empty(client):
+    """`start` after `end` is a client bug, and an empty chart is the one answer
+    that hides it: it renders as "this household has no money", not as "you asked
+    backwards"."""
+    await _signup(client)
+    await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2026-01-01",
+    })
+    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+        resp = await client.get(path, params={"start": "2026-09-20", "end": "2026-01-01"})
+        assert resp.status_code == 422, f"{path}: {resp.status_code}"
+        assert resp.json()["detail"] == "start is after end"
+
+
 async def test_owner_filters_are_accepted_everywhere_they_are_offered(client):
     await _signup(client)
     alex = (await client.post("/owners", json={"name": "Alex"})).json()

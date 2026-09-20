@@ -40,7 +40,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import NamedTuple
 
-from sqlalchemy import or_, select
+from sqlalchemy import Date, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -154,6 +154,56 @@ async def _reporting_transactions(
     if account_ids is not None:
         stmt = stmt.where(Transaction.account_id.in_(account_ids))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def earliest_activity(session: AsyncSession) -> date | None:
+    """The first day this household has anything to report about, or ``None``.
+
+    ``start`` is optional on every report so a reader can ask for *all of it* —
+    the one range a client cannot work out for itself, because only the server
+    knows where the data begins. A client that guessed would either clip the
+    household's first months or open on an empty year of its own invention.
+
+    Three tables carry a date, and all three count: transactions are the obvious
+    one, but a household whose first act was to type a balance has snapshots and
+    no transactions, and an investment-only household has neither and a trade.
+    Every other source of a dated row in this schema is derived from these.
+
+    Hidden accounts are excluded, exactly as every report excludes them. A window
+    opening on a hidden account's first row would draw a flat line before the
+    account's own money appears in it, which reads as a gap in the data rather
+    than as the scope rule it is.
+
+    The cast is to ``Date`` in SQL, not in Python: Postgres reads a `date` against
+    a ``timestamptz`` in the **session** timezone, so casting anywhere else would
+    be a second opinion about which day a row is in, and "all time" would clip its
+    own first day for anyone not sitting in UTC.
+    """
+    visible = select(Account.id).where(Account.is_hidden.is_(False))
+    rows = (
+        await session.execute(
+            select(func.min(Transaction.transacted_at).cast(Date)).where(
+                Transaction.is_hidden.is_(False),
+                Transaction.account_id.in_(visible),
+            )
+        )
+    ).scalar()
+    snapshot = (
+        await session.execute(
+            select(func.min(BalanceSnapshot.balance_date)).where(
+                BalanceSnapshot.account_id.in_(visible)
+            )
+        )
+    ).scalar()
+    trade = (
+        await session.execute(
+            select(func.min(InvestmentTransaction.trade_date)).where(
+                InvestmentTransaction.account_id.in_(visible)
+            )
+        )
+    ).scalar()
+    days = [d for d in (rows, snapshot, trade) if d is not None]
+    return min(days) if days else None
 
 
 async def accounts_owned_by(session: AsyncSession, owner_id: uuid.UUID) -> set[uuid.UUID]:

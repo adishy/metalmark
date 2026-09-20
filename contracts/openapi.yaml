@@ -1315,13 +1315,6 @@ paths:
       summary: Net Worth Series
       operationId: net_worth_series_reports_net_worth_get
       parameters:
-      - name: start
-        in: query
-        required: true
-        schema:
-          type: string
-          format: date
-          title: Start
       - name: end
         in: query
         required: true
@@ -1329,6 +1322,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
       - name: owner_id
         in: query
         required: false
@@ -1380,13 +1382,6 @@ paths:
       summary: Cash Flow
       operationId: cash_flow_reports_cash_flow_get
       parameters:
-      - name: start
-        in: query
-        required: true
-        schema:
-          type: string
-          format: date
-          title: Start
       - name: end
         in: query
         required: true
@@ -1394,6 +1389,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
       - name: owner_id
         in: query
         required: false
@@ -1445,13 +1449,6 @@ paths:
       summary: Spending
       operationId: spending_reports_spending_get
       parameters:
-      - name: start
-        in: query
-        required: true
-        schema:
-          type: string
-          format: date
-          title: Start
       - name: end
         in: query
         required: true
@@ -1459,6 +1456,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
       - name: owner_id
         in: query
         required: false

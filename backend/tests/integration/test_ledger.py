@@ -11,9 +11,17 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.db import scoped_session
-from app.models import CategoryGroup, Tag
+from app.models import (
+    Account,
+    BalanceSnapshot,
+    CategoryGroup,
+    InvestmentTransaction,
+    Owner,
+    Tag,
+)
 from app.schemas.ledger import AccountCreate, AccountUpdate
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, periods, reports
@@ -264,6 +272,66 @@ async def test_net_worth_points_start_at_the_window_start_and_end_at_its_end(hou
     assert series["points"][0]["net_worth"] == D("1000.0000")
     assert guarded["points"][-1]["net_worth"] == D("1000.0000")
     assert guarded["delta_net_worth"] == D("0.0000")
+
+
+async def test_earliest_activity_is_the_first_day_of_any_evidence(household_factory):
+    """The start of "all of it", and the four ways a household can have a first day.
+
+    Every source is exercised in the order that makes the *minimum* the interesting
+    answer: the balance is earliest, so a rule that looked only at transactions
+    would open the window on 1 March and quietly drop February's level.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        assert await reports.earliest_activity(s) is None
+
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD",
+                                 current_balance=D("100"), balance_date=date(2026, 2, 14)))
+        assert await reports.earliest_activity(s) == date(2026, 2, 14)
+
+        await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-10"), transacted_at=_dt(2026, 5, 1)))
+        assert await reports.earliest_activity(s) == date(2026, 2, 14)
+
+        # A hidden account is out of every report, so it cannot open the window:
+        # a chart starting at its first day would draw months of flat line before
+        # any of the household's visible money appears.
+        hidden = await ledger.create_account(
+            s, hh, AccountCreate(name="Old", type="depository", currency="USD",
+                                 current_balance=D("5"), balance_date=date(2020, 1, 1)))
+        await ledger.update_account(s, hidden.id, AccountUpdate(is_hidden=True))
+        assert await reports.earliest_activity(s) == date(2026, 2, 14)
+
+
+async def test_earliest_activity_finds_an_investment_only_household(household_factory):
+    """Neither a transaction nor a snapshot, and still a first day.
+
+    A derived investment account has no balance series at all — its value is
+    quantities and a price series — so a rule built on the two ledger tables
+    returns ``None`` here and "all time" would open on the day you asked, which
+    renders as "this household has no history" rather than as the bug.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        # Built directly rather than through `ledger.create_account`, which would
+        # snapshot a balance — and a snapshot is the evidence this case is about
+        # the absence of.
+        owner_id = (await s.execute(select(Owner.id).limit(1))).scalar_one()
+        acct = Account(
+            household_id=hh, name="Brokerage", type="investment", currency="USD",
+            current_balance=D("0"), balance_source="derived", is_asset=True,
+            is_manual=True, owner_id=owner_id,
+        )
+        s.add(acct)
+        await s.flush()
+        s.add(InvestmentTransaction(
+            household_id=hh, account_id=acct.id, type="buy", currency="USD",
+            trade_date=date(2026, 4, 7), quantity=D("1"), amount=D("-100")))
+        await s.flush()
+
+        assert (await s.execute(select(BalanceSnapshot.id))).first() is None
+        assert await reports.earliest_activity(s) == date(2026, 4, 7)
 
 
 async def test_cash_flow_partitions_the_window_at_every_granularity(household_factory):

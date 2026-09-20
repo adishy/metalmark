@@ -157,6 +157,16 @@ test.describe("target size (SC 2.5.8)", () => {
     await expect(page.getByTestId("import-cancel")).toBeVisible();
     await measure("/transactions (import dialog)");
 
+    // The reports window is the same gap one level down. The route sweep above
+    // measures the range and granularity chips, but the custom range's two date
+    // inputs are in the DOM only once Custom is picked — and date inputs are
+    // exactly where a native control's own height can win over the padding that
+    // was supposed to set it.
+    await page.goto("/reports");
+    await page.getByTestId("range-custom").click();
+    await expect(page.getByTestId("range-start")).toBeVisible();
+    await measure("/reports#custom-window");
+
     expect(failures, `undersized targets:\n${failures.join("\n")}`).toEqual([]);
   });
 });
