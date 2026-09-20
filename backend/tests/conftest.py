@@ -11,11 +11,15 @@ Two backends, chosen automatically:
     migrate it. Used by ``docker compose`` on the same network as ``db``.
   * **testcontainers**: otherwise spin an ephemeral ``postgres:16`` container
     (host runs where the Docker socket + simple networking are available).
+
+The database's name is the only thing isolating one run from another, so it is
+settable — see ``METALMARK_TEST_DB`` and ``_test_db_name``.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -27,7 +31,39 @@ OWNER_USER = os.getenv("POSTGRES_USER", "metalmark")
 OWNER_PW = os.getenv("POSTGRES_PASSWORD", "metalmark_dev_only_change_me")
 APP_USER = "metalmark_app_test"
 APP_PW = "metalmark_app_test_pw"
-TEST_DB = "metalmark_test"
+
+
+def _test_db_name(name: str) -> str:
+    """The test database's name, guarded so it cannot be anything else.
+
+    The harness **drops and recreates** this database before every session, so
+    the one mistake worth making structurally impossible is pointing it at a
+    real one. ``POSTGRES_DB`` names the *development* database (``metalmark``,
+    see docker-compose.yml), and a typo that let the two meet would take a
+    household's ledger with it. A name that does not end in ``_test`` is
+    refused here, before anything connects.
+
+    Overridable so two runs can proceed at once. With one shared name the second
+    run drops the first's database mid-test, and the symptom is not a clear
+    error — it is whichever run loses the race failing inexplicably, which reads
+    as a flaky test and wastes an afternoon.
+
+    Only the *database* is renamed. The app role (``metalmark_app_test``) is
+    cluster-wide and deliberately shared: ``0001`` creates it behind a
+    ``pg_roles`` existence check, so the second run's attempt is a no-op.
+    """
+    if not re.fullmatch(r"[a-z0-9_]*_test(_[a-z0-9_]+)?", name):
+        raise RuntimeError(
+            f"METALMARK_TEST_DB={name!r} does not look like a test database. "
+            "The harness drops and recreates this database, so the name must end "
+            "in '_test' (optionally with a '_suffix')."
+        )
+    return name
+
+
+#: Override with ``METALMARK_TEST_DB`` to run a second suite concurrently; the
+#: default is unchanged, so CI and the compose command need no edit.
+TEST_DB = _test_db_name(os.getenv("METALMARK_TEST_DB", "metalmark_test"))
 
 
 def _recreate_external_db(host: str, port: str) -> None:
