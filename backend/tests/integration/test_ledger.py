@@ -24,8 +24,8 @@ pytestmark = pytest.mark.integration
 D = Decimal
 
 
-def _dt(y, m, d):
-    return datetime(y, m, d, tzinfo=UTC)
+def _dt(y, m, d, hour=0):
+    return datetime(y, m, d, hour, tzinfo=UTC)
 
 
 async def _make_category(session, household_id, group_type: str, name: str):
@@ -55,18 +55,23 @@ async def test_single_currency_net_worth(household_factory):
 
 
 async def test_multi_currency_conversion_and_no_rate_flag(household_factory):
+    # GBP, deliberately, and not EUR: ``fx_rates`` is global — it carries no
+    # ``household_id`` and the unique key is (base, quote, date) — so a rate any
+    # other test writes for USD/EUR is visible here, and "no rate yet" would be
+    # false depending on collection order. The pair under test is a pair no other
+    # test touches.
     hh = await household_factory(base="USD")
     async with scoped_session(household_id=hh) as s:
         await ledger.create_account(
-            s, hh, AccountCreate(name="Euro", type="depository", currency="EUR",
+            s, hh, AccountCreate(name="Sterling", type="depository", currency="GBP",
                                  current_balance=D("90"), balance_date=date(2026, 1, 1))
         )
         # No FX rate yet -> unconverted.
         nw = await ledger.net_worth(s, hh)
-        assert "EUR" in nw["unconverted_currencies"]
+        assert "GBP" in nw["unconverted_currencies"]
 
-        # 1 USD = 0.90 EUR  => 90 EUR = 100 USD
-        await ledger.upsert_fx_rate(s, hh, base_ccy="USD", quote_ccy="EUR",
+        # 1 USD = 0.90 GBP  => 90 GBP = 100 USD
+        await ledger.upsert_fx_rate(s, hh, base_ccy="USD", quote_ccy="GBP",
                                     rate_date=date(2026, 1, 1), rate=D("0.90"))
         nw = await ledger.net_worth(s, hh)
     assert nw["net_worth"] == D("100.0000")
@@ -125,6 +130,41 @@ async def test_reconciliation_with_fx_revaluation(household_factory):
     assert series["currency_revaluation"] == D("20.0000")
     # Δ net worth == cash flow + revaluation (the invariant)
     assert series["delta_net_worth"] == series["net_cash_flow"] + series["currency_revaluation"]
+
+
+async def test_report_range_covers_the_whole_end_day(household_factory):
+    """A report range is inclusive of both of its days, at timestamp precision.
+
+    ``transacted_at`` is a timestamptz but report bounds are dates, so Postgres
+    reads ``<= end`` as ``<= end 00:00`` — which silently drops everything posted
+    *later that same day*, i.e. most of a day's activity, from every report. The
+    bound is half-open instead (``< end + 1 day``), which this pins: midday on the
+    last day is in, midnight the following morning is out.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        exp = await _make_category(s, hh, "expense", "Groceries")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+
+        # Midday on the range's last day: the case that used to vanish.
+        await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-40"), transacted_at=_dt(2026, 1, 31, 12),
+            category_id=exp.id))
+        # Midnight the next morning: one instant past the range, must stay out.
+        await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-999"), transacted_at=_dt(2026, 2, 1),
+            category_id=exp.id))
+
+        _base, cf = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31))
+        _base, spend, spend_total = await reports.spending_by_category(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31))
+
+    assert cf[0]["expense"] == D("-40.0000")
+    assert spend_total == D("40.0000")
+    assert [row["category_name"] for row in spend] == ["Groceries"]
+    assert spend[0]["total"] == D("40.0000")
 
 
 async def test_split_base_allocation_no_drift(household_factory):

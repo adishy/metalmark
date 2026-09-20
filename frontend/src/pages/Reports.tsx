@@ -4,15 +4,14 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { useCashFlow, useNetWorthSeries, useOwners, useSpending } from "@/api/hooks";
+import { isoDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 
 function yearRange(): { start: string; end: string } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
-  const end = new Date(now.getFullYear(), 11, 31);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  const year = new Date().getFullYear();
+  return { start: isoDay(new Date(year, 0, 1)), end: isoDay(new Date(year, 11, 31)) };
 }
 
 const DONUT_COLORS = [

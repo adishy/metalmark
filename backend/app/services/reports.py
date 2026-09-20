@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import calendar
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -106,11 +106,16 @@ def _entries(
 async def _reporting_transactions(
     session: AsyncSession, start: date, end: date, account_ids: set[uuid.UUID] | None
 ) -> list[Transaction]:
+    # Half-open on the upper bound: ``transacted_at`` is a timestamptz and ``end``
+    # is a date, which Postgres coerces to midnight — so ``<= end`` silently drops
+    # everything posted *after* 00:00 on the range's last day, which is most of a
+    # day's activity. ``< end + 1 day`` includes that whole day and stays sargable
+    # (an expression on the bound, not on the column).
     stmt = (
         select(Transaction)
         .where(
             Transaction.transacted_at >= start,
-            Transaction.transacted_at <= end,
+            Transaction.transacted_at < end + timedelta(days=1),
             Transaction.is_hidden.is_(False),
         )
         .options(selectinload(Transaction.splits))

@@ -9,13 +9,16 @@ import {
 } from "@/api/hooks";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 import { Button, Field, Input, Select, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 
 const TYPES: AccountType[] = ["depository", "credit", "investment", "loan", "other"];
-const today = () => new Date().toISOString().slice(0, 10);
+// A balance date is a calendar day where the user is, so it comes from the local
+// clock — ``toISOString()`` would roll it back a day for anyone east of UTC.
+const today = () => todayIso();
 
 export default function Accounts() {
   const owners = useOwners();
