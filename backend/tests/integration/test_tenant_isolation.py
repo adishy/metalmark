@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 
 from app.db import scoped_session
 from app.models import Account
@@ -49,7 +50,7 @@ async def test_insert_into_foreign_household_is_blocked(household_factory):
     b = await household_factory(name="B")
 
     # Scoped to B, try to insert a row tagged for A -> RLS WITH CHECK rejects.
-    with pytest.raises(Exception):
+    with pytest.raises(DBAPIError):
         async with scoped_session(household_id=b) as s:
             s.add(_account(a, "Sneaky"))
             await s.flush()

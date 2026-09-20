@@ -5,14 +5,13 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine, pool
-
-from app.db import Base
-from app.settings import get_settings
 
 # Import all models so metadata is complete for autogenerate.
 import app.models  # noqa: F401,E402
+from alembic import context
+from app.db import Base
+from app.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None:

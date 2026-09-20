@@ -34,7 +34,7 @@ class Household(UUIDPkMixin, TimestampMixin, Base):
     base_currency: Mapped[str] = mapped_column(String(3), nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
 
-    members: Mapped[list["HouseholdMember"]] = relationship(back_populates="household")
+    members: Mapped[list[HouseholdMember]] = relationship(back_populates="household")
 
 
 class HouseholdMember(TimestampMixin, Base):
@@ -50,8 +50,8 @@ class HouseholdMember(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")  # owner|member
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    household: Mapped["Household"] = relationship(back_populates="members")
-    user: Mapped["User"] = relationship()
+    household: Mapped[Household] = relationship(back_populates="members")
+    user: Mapped[User] = relationship()
 
 
 class Invite(UUIDPkMixin, TimestampMixin, Base):

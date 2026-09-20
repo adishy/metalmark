@@ -88,8 +88,9 @@ def _configure():
     db._engine = None
     db._sessionmaker = None
 
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))

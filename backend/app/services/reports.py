@@ -57,7 +57,7 @@ async def _category_type_map(session: AsyncSession) -> dict[uuid.UUID, str]:
             )
         )
     ).all()
-    return {cid: ctype for cid, ctype in rows}
+    return dict(rows)
 
 
 async def net_worth_at(session: AsyncSession, on: date, base: str) -> Decimal:

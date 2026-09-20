@@ -49,9 +49,8 @@ jobs:
         # extra, and installs the project itself into backend/.venv.
         run: uv sync --frozen --extra dev
 
-      - name: Lint (ruff) — advisory until pre-existing debt is cleared
+      - name: Lint (ruff)
         working-directory: backend
-        continue-on-error: true
         run: uv run ruff check .
 
       - name: Run backend tests (pytest)

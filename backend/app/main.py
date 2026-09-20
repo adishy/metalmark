@@ -25,7 +25,8 @@ class NoStoreForDataMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith("/") and request.url.path not in {"/healthz", "/openapi.json", "/docs"}:
+        path = request.url.path
+        if path.startswith("/") and path not in {"/healthz", "/openapi.json", "/docs"}:
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 

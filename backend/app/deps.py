@@ -44,36 +44,35 @@ async def get_context(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            resolved = await auth_service.resolve_session(session, kestrel_session)
-            if resolved is None:
-                raise HTTPException(status_code=401, detail="Invalid or expired session")
-            sess, user = resolved
+    async with sm() as session, session.begin():
+        resolved = await auth_service.resolve_session(session, kestrel_session)
+        if resolved is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
+        sess, user = resolved
 
-            membership = await auth_service.membership_for(session, user.id)
-            if membership is None:
-                raise HTTPException(status_code=403, detail="User is not in a household")
+        membership = await auth_service.membership_for(session, user.id)
+        if membership is None:
+            raise HTTPException(status_code=403, detail="User is not in a household")
 
-            # From here on, every query is scoped to this household by RLS.
-            await session.execute(
-                text("SELECT set_config('app.household_id', :hid, true)"),
-                {"hid": str(membership.household_id)},
-            )
-            await session.execute(
-                text("SELECT set_config('app.user_id', :uid, true)"),
-                {"uid": str(user.id)},
-            )
+        # From here on, every query is scoped to this household by RLS.
+        await session.execute(
+            text("SELECT set_config('app.household_id', :hid, true)"),
+            {"hid": str(membership.household_id)},
+        )
+        await session.execute(
+            text("SELECT set_config('app.user_id', :uid, true)"),
+            {"uid": str(user.id)},
+        )
 
-            ctx = RequestContext(
-                session=session,
-                user=user,
-                household_id=membership.household_id,
-                role=membership.role,
-                csrf_token=sess.csrf_token,
-            )
-            _check_csrf(request, ctx)
-            yield ctx
+        ctx = RequestContext(
+            session=session,
+            user=user,
+            household_id=membership.household_id,
+            role=membership.role,
+            csrf_token=sess.csrf_token,
+        )
+        _check_csrf(request, ctx)
+        yield ctx
 
 
 def _check_csrf(request: Request, ctx: RequestContext) -> None:

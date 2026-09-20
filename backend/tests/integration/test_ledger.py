@@ -7,7 +7,6 @@ exclusion, provenance, and the FX "no rate" flag.
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 

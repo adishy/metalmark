@@ -85,10 +85,9 @@ async def scoped_session(
     Used by the worker (per job) and by request dependencies (per request).
     """
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            await _set_scope(session, household_id, user_id)
-            yield session
+    async with sm() as session, session.begin():
+        await _set_scope(session, household_id, user_id)
+        yield session
 
 
 @asynccontextmanager
@@ -97,6 +96,5 @@ async def unscoped_session() -> AsyncIterator[AsyncSession]:
     before a household context exists. These tables are protected at the
     application layer, not by household RLS."""
     sm = get_sessionmaker()
-    async with sm() as session:
-        async with session.begin():
-            yield session
+    async with sm() as session, session.begin():
+        yield session

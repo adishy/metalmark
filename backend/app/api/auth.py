@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from sqlalchemy import select
 
 from app.db import unscoped_session
 from app.deps import SESSION_COOKIE, RequestContext, get_context, require_owner
@@ -15,7 +16,6 @@ from app.schemas.auth import (
 )
 from app.services import auth as svc
 from app.settings import get_settings
-from sqlalchemy import select
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

@@ -18,12 +18,15 @@ router = APIRouter(tags=["categories"])
 
 @router.get("/category-groups", response_model=list[CategoryGroupOut])
 async def list_groups(ctx: RequestContext = Depends(get_context)):
-    return [CategoryGroupOut.model_validate(g) for g in await ledger.list_category_groups(ctx.session)]
+    groups = await ledger.list_category_groups(ctx.session)
+    return [CategoryGroupOut.model_validate(g) for g in groups]
 
 
 @router.post("/category-groups", response_model=CategoryGroupOut, status_code=201)
 async def create_group(data: CategoryGroupCreate, ctx: RequestContext = Depends(get_context)):
-    g = await ledger.create_category_group(ctx.session, ctx.household_id, data.name, data.type, data.sort)
+    g = await ledger.create_category_group(
+        ctx.session, ctx.household_id, data.name, data.type, data.sort
+    )
     return CategoryGroupOut.model_validate(g)
 
 

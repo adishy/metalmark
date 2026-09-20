@@ -10,10 +10,10 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

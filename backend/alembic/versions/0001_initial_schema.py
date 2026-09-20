@@ -12,13 +12,12 @@ subquery against their RLS-protected parent.
 """
 from __future__ import annotations
 
-from alembic import op
 from sqlalchemy import text
 
+import app.models  # noqa: F401  (populate metadata)
+from alembic import op
 from app.db import Base
 from app.settings import get_settings
-
-import app.models  # noqa: F401  (populate metadata)
 
 revision = "0001"
 down_revision = None
@@ -89,8 +88,12 @@ def upgrade() -> None:
             text(
                 f"""
                 CREATE POLICY {tbl}_household_isolation ON {tbl}
-                USING (household_id = NULLIF(current_setting('app.household_id', true), '')::uuid)
-                WITH CHECK (household_id = NULLIF(current_setting('app.household_id', true), '')::uuid);
+                USING (
+                    household_id = NULLIF(current_setting('app.household_id', true), '')::uuid
+                )
+                WITH CHECK (
+                    household_id = NULLIF(current_setting('app.household_id', true), '')::uuid
+                );
                 """
             )
         )

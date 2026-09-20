@@ -73,7 +73,8 @@ class Account(UUIDPkMixin, TimestampMixin, Base):
     external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    type: Mapped[str] = mapped_column(String(20), nullable=False)  # depository|credit|investment|loan|other
+    # depository|credit|investment|loan|other
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
     subtype: Mapped[str | None] = mapped_column(String(40), nullable=True)
     institution: Mapped[str | None] = mapped_column(String(200), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)  # fixed, single-currency
@@ -141,7 +142,8 @@ class TransferGroup(UUIDPkMixin, TimestampMixin, Base):
         PGUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False,
         index=True,
     )
-    matched_by: Mapped[str] = mapped_column(String(8), nullable=False, default="manual")  # auto|manual
+    # auto|manual
+    matched_by: Mapped[str] = mapped_column(String(8), nullable=False, default="manual")
     # Residual base-currency FX cost of a cross-currency transfer (ADR-0018).
     fx_cost_base: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
 
@@ -149,7 +151,10 @@ class TransferGroup(UUIDPkMixin, TimestampMixin, Base):
 class Transaction(UUIDPkMixin, TimestampMixin, Base):
     __tablename__ = "transactions"
     __table_args__ = (
-        Index("ix_transactions_household_account_posted", "household_id", "account_id", "posted_at"),
+        Index(
+            "ix_transactions_household_account_posted",
+            "household_id", "account_id", "posted_at",
+        ),
         # dedupe: provider rows by external_id; manual/import rows by import_hash.
         Index(
             "uq_transactions_account_external_id",
@@ -202,9 +207,10 @@ class Transaction(UUIDPkMixin, TimestampMixin, Base):
     # provenance: {field: user|rule|provider} — user > rule > provider (ADR-0007/0019)
     field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")  # simplefin|csv|ofx|manual
+    # simplefin|csv|ofx|manual
+    source: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")
 
-    splits: Mapped[list["TransactionSplit"]] = relationship(
+    splits: Mapped[list[TransactionSplit]] = relationship(
         back_populates="parent", cascade="all, delete-orphan"
     )
 
@@ -226,7 +232,7 @@ class TransactionSplit(UUIDPkMixin, TimestampMixin, Base):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    parent: Mapped["Transaction"] = relationship(back_populates="splits")
+    parent: Mapped[Transaction] = relationship(back_populates="splits")
 
 
 class TransactionTag(Base):

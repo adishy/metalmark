@@ -14,8 +14,8 @@ Rounding policy (single, documented, tested):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal, getcontext
-from typing import Sequence
 
 # Wide precision so intermediate products (amount × rate) never lose digits
 # before we quantize.
