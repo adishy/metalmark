@@ -1,12 +1,14 @@
 // Hovering a chart must not erase it.
 //
-// This exists because it did. Hovering the net-worth line made the series
-// disappear: ECharts re-draws a series from scratch in its emphasis state, and
-// there an `areaStyle` that names only an `opacity` does *not* inherit the
-// series colour the way the resting one does. The fill resolved to nothing
-// while the stroke stayed, so the chart came apart under the pointer. Nothing in
-// the suite could see it: `reports.spec.ts` asserts the chart's canvas is
-// visible, and a canvas that has just been emptied is still visible.
+// This exists because it did. Hovering the net-worth line made its area fill
+// disappear while the stroke and the dots stayed, so the chart came apart under
+// the pointer. The cause was the colour format in `chartTokens.ts` — zrender
+// cannot parse CSS Color 4's `rgb(71 85 105)`, so the emphasis colour ECharts
+// derives by lifting it came out `undefined` and zrender declined to paint the
+// fill at all. See the header of `theme/chartInteraction.ts` for the full trace.
+//
+// Nothing in the suite could see it: `reports.spec.ts` asserts the chart's canvas
+// is visible, and a canvas that has just been emptied is still visible.
 //
 // So this measures the ink. The canvas is transparent where nothing is drawn
 // (ECharts is given no `backgroundColor`, so the card shows through), which
