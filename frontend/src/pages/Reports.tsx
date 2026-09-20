@@ -9,6 +9,15 @@ import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import { useChartTokens } from "@/theme/chartTokens";
+import {
+  chartArea,
+  chartAxis,
+  chartLegend,
+  chartTooltip,
+  emphasisBar,
+  emphasisLine,
+  emphasisPie,
+} from "@/theme/chartInteraction";
 
 function yearRange(): { start: string; end: string } {
   const year = new Date().getFullYear();
@@ -31,26 +40,21 @@ export default function Reports() {
   const nwOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 20, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
+      tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
         data: nw.data?.points.map((p) => p.date) ?? [],
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
+        ...chartAxis(t),
       },
-      yAxis: {
-        type: "value",
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
-        splitLine: { lineStyle: { color: t.split } },
-      },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
       series: [
         {
           type: "line",
           smooth: true,
-          areaStyle: { opacity: 0.15 },
+          areaStyle: chartArea(t),
           lineStyle: { color: t.accent },
           itemStyle: { color: t.accent },
+          emphasis: emphasisLine(t, { area: true }),
           data: nw.data?.points.map((p) => Number(p.net_worth)) ?? [],
         },
       ],
@@ -61,26 +65,21 @@ export default function Reports() {
   const cashFlowOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 30, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
-      legend: { top: 0, textStyle: { color: t.label } },
+      tooltip: chartTooltip(t),
+      legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",
         data: cashFlow.data?.points.map((p) => p.month) ?? [],
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
+        ...chartAxis(t),
       },
-      yAxis: {
-        type: "value",
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
-        splitLine: { lineStyle: { color: t.split } },
-      },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
       series: [
         {
           name: "Income",
           type: "bar",
           stack: "cash-flow",
           itemStyle: { color: t.positive },
+          emphasis: emphasisBar(t, t.positive),
           data: cashFlow.data?.points.map((p) => Number(p.income)) ?? [],
         },
         {
@@ -88,6 +87,7 @@ export default function Reports() {
           type: "bar",
           stack: "cash-flow",
           itemStyle: { color: t.negative },
+          emphasis: emphasisBar(t, t.negative),
           // Expenses are summed as positive magnitudes by some backends and as
           // negatives by others; plot them downward either way.
           data: cashFlow.data?.points.map((p) => -Math.abs(Number(p.expense))) ?? [],
@@ -98,6 +98,7 @@ export default function Reports() {
           smooth: true,
           lineStyle: { color: t.accent },
           itemStyle: { color: t.accent },
+          emphasis: emphasisLine(t),
           data: cashFlow.data?.points.map((p) => Number(p.net)) ?? [],
         },
       ],
@@ -107,8 +108,8 @@ export default function Reports() {
 
   const donutOption: EChartsOption = useMemo(
     () => ({
-      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
-      legend: { bottom: 0, textStyle: { color: t.label }, type: "scroll" },
+      tooltip: chartTooltip(t, { trigger: "item", formatter: "{b}: {c} ({d}%)" }),
+      legend: chartLegend(t, { bottom: 0, type: "scroll" }),
       color: t.series,
       series: [
         {
@@ -118,6 +119,7 @@ export default function Reports() {
           // The gap between slices is the card behind them, not a fixed navy.
           itemStyle: { borderColor: t.surface, borderWidth: 2 },
           label: { color: t.label },
+          emphasis: emphasisPie(t),
           data: (spending.data?.rows ?? []).map((r) => ({
             name: r.category_name,
             value: Number(r.total),

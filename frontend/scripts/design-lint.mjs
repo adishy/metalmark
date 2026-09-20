@@ -59,7 +59,13 @@ const RULES = [
   {
     id: "5",
     why: "hardcoded hex in a chart option — read it from chartTokens()",
-    files: (f) => f.endsWith("src/pages/Reports.tsx") || f.endsWith("src/components/Chart.tsx"),
+    // Scoped to the files that build chart options. Not all of `src/pages/`:
+    // Settings.tsx holds hex legitimately, as the *default colour of a new
+    // category*, which is user data rather than a theme value.
+    files: (f) =>
+      f.endsWith("src/pages/Reports.tsx") ||
+      f.endsWith("src/pages/DesignSystem.tsx") ||
+      f.endsWith("src/components/Chart.tsx"),
     test: (line) => /#[0-9a-fA-F]{6}\b/.test(line),
   },
   {
@@ -75,6 +81,28 @@ const RULES = [
       const rounded = /\brounded\b/.test(cls);
       return !(padded && rounded);
     },
+  },
+  {
+    id: "8",
+    why: "hand-written chart interaction — build it with chartTooltip()/emphasis*()/chartAxis() (§2.10)",
+    // The shared module is the standard, so it is the one place allowed to name
+    // these keys. Everywhere else must go through it, which is what makes the
+    // interaction identical across charts instead of remembered per chart.
+    files: (f) => f !== "src/theme/chartInteraction.ts",
+    /*
+     * Keyed on the *key*, not the string: a chart option that mentions
+     * `emphasis` in a comment or a variable name is fine, whereas
+     * `emphasis: { ... }` is the thing that drifts from chart to chart.
+     *
+     * The lookaheads consume their own whitespace (`(?!\s*chartTooltip\()`).
+     * Writing `tooltip:\s*(?!chartTooltip\()` would never fire: the `\s*` and
+     * the lookahead backtrack against each other, and the check ends up
+     * inspecting the space rather than the call.
+     */
+    test: (line) =>
+      /\btooltip:(?!\s*chartTooltip\()/.test(line) ||
+      /\baxisPointer:/.test(line) ||
+      /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie)\()/.test(line),
   },
 ];
 
@@ -140,7 +168,7 @@ for (const file of await walk(SRC)) {
 }
 
 if (findings.length === 0) {
-  console.log("design-lint: clean (DESIGN.md §8 rules 1-6)");
+  console.log("design-lint: clean (DESIGN.md §8 rules 1-6, 8)");
   process.exit(0);
 }
 

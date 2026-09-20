@@ -360,7 +360,10 @@ export function token(name: string, alpha = 1): string {
   // the chart quietly paints the previous theme's palette, with no error.
   if (!raw) throw new Error(`Unknown design token: --${name}`);
   const [r, g, b] = raw.split(/\s+/).map(Number);
-  return alpha === 1 ? `rgb(${r} ${g} ${b})` : `rgb(${r} ${g} ${b} / ${alpha})`;
+  // Comma-separated, NOT the CSS Color 4 "rgb(71 85 105)" form — zrender's
+  // parser strips spaces and splits on commas, so the spaced form yields
+  // `undefined`. See the note under this block; it is load-bearing.
+  return alpha === 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${alpha})`;
 }
 
 export const chartTokens = () => ({
@@ -372,6 +375,16 @@ export const chartTokens = () => ({
   series: Array.from({ length: 10 }, (_, i) => token(`chart-${i + 1}`)),
 });
 ```
+
+**Why the output format matters.** zrender does not implement CSS Color 4: its parser
+strips spaces and splits on commas, so `"rgb(71 85 105)"` parses to `undefined`, and so
+does everything derived from it. Painting still looks right — zrender hands the string
+to the canvas and the *browser* parses it — which is what kept this quiet for so long.
+The damage lands on any path needing the numeric components, and the expensive one is
+that ECharts **lifts** a colour when building a default emphasis state: with the lift
+returning `undefined`, an emphasis that leaves a fill or stroke unspecified has
+`undefined` written into its style, and zrender then declines to paint that element at
+all. So every colour this module emits must be comma-separated.
 
 The mapping, per chart:
 
@@ -396,6 +409,55 @@ Three further chart rules:
   change. Key the chart on the resolved theme (`key={theme}`) so it re-mounts.
 - **Colour is a secondary channel in charts too** — the cash-flow chart's income and
   expense both carry a legend label, which is what makes it readable in greyscale.
+
+### 2.10 Chart interaction
+
+§2.9 covers what a chart is painted with; this covers what it does when pointed at.
+Every option is assembled from `src/theme/chartInteraction.ts` — **no page writes a
+`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the six charts cannot
+drift apart. §8 rule 8 enforces that.
+
+**Hovering never removes ink.** The rule exists because it was broken: the net-worth
+line's fill vanished under the pointer while its stroke stayed, so the chart came
+apart instead of highlighting. Two consequences worth knowing before editing an
+option:
+
+- **An emphasis `areaStyle` must name a colour.** ECharts re-draws a series from
+  scratch in the emphasis state, and there an `areaStyle` carrying only an `opacity`
+  does *not* inherit the series colour the way the resting style does — it resolves
+  to nothing. An emphasis block that looks complete and does keep the line can still
+  lose the fill. Use `chartArea()` for the resting fill and `emphasisLine()` for the
+  emphasis, which state the same colour by construction. `emphasis: {disabled: true}`
+  also hides the symptom, by removing hover feedback entirely.
+  This is belt-and-braces rather than *the* cause: the underlying fault was the colour
+  format in `token()` (§2.9), which is fixed. Stating the colour explicitly stays
+  because the auto-lift otherwise captures a *lifted* colour as the new resting colour
+  when a hovered series refreshes, so the hue walks brighter on each interaction.
+- **A donut spotlights with `focus: "self"`, not `"series"`.** A pie is one series
+  whose slices are data items, so `"series"` has nothing to blur and hovering dims
+  nothing at all. Line and bar charts use `"series"`.
+
+**Spotlight by dimming, to a legible value.** Hovering a series (or its legend entry,
+or a donut slice) dims the others to `DIM` (30%) so the one being asked about reads
+clearly. It must stay *readable*: ECharts' default blur is low enough that a dimmed
+series reads as absent, which is the same complaint as the vanishing line arriving
+from the other direction. A dimmed series is still drawn — tests that count drawn
+pixels cannot see dimming and must measure intensity.
+
+**Tooltips are confined** (`confine: true`), or a phone-width chart's tooltip
+overhangs the card it belongs to.
+
+**Motion.** Charts animate in JavaScript onto a canvas, which no CSS rule can reach —
+so, like framer-motion (§2.8), ECharts has to be told about `prefers-reduced-motion`
+explicitly. `<Chart>` does it once for every chart via `useReducedMotion()`; pages do
+not. The durations are §2.8's own vocabulary rather than new numbers: 200 ms
+(`duration-overlay`) to arrive, 120 ms (`duration-state`) to change state, `ease-out`.
+
+**Keyboard.** Charts carry one `aria-label` sentence each and that is the whole of
+their accessible content (§2.9); they are not focusable and have no keyboard
+interaction of their own. Do not add a data list under the net-worth or cash-flow
+charts — a chart is never the *only* way to read a value, but the text equivalent
+belongs to the page, and only the spending donut's `<ul>` is load-bearing.
 
 ---
 
@@ -1089,9 +1151,11 @@ Run this list before shipping. Every item is checkable.
 a ratchet rather than a thing to remember. The shell forms are kept below because the
 script is a direct transcription of them. Two are not literal greps:
 rule 6 has a documented exception (a badge carrying its own padding **and** radius),
-so the script implements the exception instead of dropping the rule; and all rules
-ignore comments, because a comment explaining why `outline-none` is absent would
-otherwise trip rule 4 — and a check that cries wolf on correct code gets switched off.
+so the script implements the exception instead of dropping the rule, and rule 8 needs
+a lookahead to tell a hand-written `tooltip:` from one that calls the shared builder.
+All rules ignore comments, because a comment explaining why `outline-none` is absent
+would otherwise trip rule 4 — and a check that cries wolf on correct code gets
+switched off.
 
 `npm run lint` is **not** this check: it is `eslint src` with no ESLint config in the
 repo, so it fails immediately. Design conformance is `lint:design`.
@@ -1111,7 +1175,10 @@ grep -rnE '(text|bg|border|ring|divide)-\[#|(p|m|gap|space-[xy])-\[[0-9.]+(px|re
 grep -rn 'outline-none' src/ | grep -v 'ring-'
 
 # 5. A hardcoded hex in a chart option.
-grep -rn '#[0-9a-fA-F]\{6\}' src/pages/Reports.tsx src/components/Chart.tsx
+#    Scoped to the files that build chart options rather than all of src/pages/:
+#    Settings.tsx holds hex legitimately, as the *default colour of a new
+#    category* — user data, not a theme value.
+grep -rn '#[0-9a-fA-F]\{6\}' src/pages/Reports.tsx src/pages/DesignSystem.tsx src/components/Chart.tsx
 
 # 6. A background token on an inline text element. A `bg-*` here is a text
 #    colour that got machine-substituted: it either paints a box where a colour
@@ -1126,6 +1193,21 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 #    A lint rule that cries wolf on correct code gets switched off, so this stays
 #    a review question instead: does the `hover:`/`focus:` name a *different*
 #    value from the base? If it names the same one, it does nothing.
+
+# 8. Hand-written chart interaction. Every tooltip, axis pointer and emphasis
+#    comes from theme/chartInteraction.ts (§2.10), which is the only file
+#    allowed to name those keys — that is what makes hover behave identically
+#    on all six charts instead of being remembered per chart.
+#
+#    Not a bare grep, for the same reason rule 6 is not: `tooltip:` appears on
+#    correct code in the form `tooltip: chartTooltip(t)`. The script keys on the
+#    key *not* being followed by the matching builder, which needs a lookahead
+#    (`grep -P`, so not portable to the BSD grep this list is otherwise written
+#    for). The shell form is therefore the intent, and the script is the check:
+#
+#      tooltip:      NOT followed by chartTooltip(
+#      axisPointer:  anywhere outside the module
+#      emphasis:     NOT followed by emphasisLine( | emphasisBar( | emphasisPie(
 ```
 
 **Viewports to look at, in this order:** 360×640 → 390×844 → 768×1024 → 1280×800.

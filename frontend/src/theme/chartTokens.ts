@@ -13,6 +13,23 @@ import { useTheme } from "@/theme/theme";
  * Resolve a `--token` to a real colour. The variables are stored as "R G B"
  * triplets so Tailwind's opacity modifiers work; ECharts has no such concept,
  * hence `alpha` here.
+ *
+ * **The output must be comma-separated**, and that is not a style preference.
+ * zrender only parses its own colour syntax: `color.parse` strips spaces and
+ * splits on commas, so `"rgb(71 85 105)"` — the CSS Color 4 form, and the
+ * obvious thing to emit from an "R G B" triplet — parses to `undefined`, as does
+ * anything built on it such as `lift()`:
+ *
+ *     parse("rgb(71 85 105)")   -> undefined
+ *     parse("rgb(71,85,105)")   -> [71, 85, 105, 1]
+ *
+ * Painting still *looks* fine, because zrender hands the string to the canvas
+ * and the browser parses it. The failure is silent and delayed: anything that
+ * needs the numeric components gets nothing. ECharts lifts colours when it
+ * builds a default emphasis state, so an emphasis that leaves a fill or stroke
+ * unspecified gets `undefined` written into it, and zrender then declines to
+ * paint that element at all — which is how the net-worth line's fill came to
+ * disappear on hover while its stroke stayed.
  */
 export function token(name: string, alpha = 1): string {
   const raw = getComputedStyle(document.documentElement)
@@ -25,7 +42,7 @@ export function token(name: string, alpha = 1): string {
   // into a stack trace.
   if (!raw) throw new Error(`Unknown design token: --${name}`);
   const [r, g, b] = raw.split(/\s+/).map(Number);
-  return alpha === 1 ? `rgb(${r} ${g} ${b})` : `rgb(${r} ${g} ${b} / ${alpha})`;
+  return alpha === 1 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${alpha})`;
 }
 
 /**

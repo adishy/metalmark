@@ -16,6 +16,15 @@ import { Button, Checkbox, Field, Input, Select, Spinner, Textarea, useFieldId }
 import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
 import { token, useChartTokens } from "@/theme/chartTokens";
+import {
+  chartArea,
+  chartAxis,
+  chartLegend,
+  chartTooltip,
+  emphasisBar,
+  emphasisLine,
+  emphasisPie,
+} from "@/theme/chartInteraction";
 import { formatMoney } from "@/lib/format";
 import type { Owner } from "@/api/types";
 
@@ -126,26 +135,21 @@ export default function DesignSystem() {
   const lineOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 20, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
+      tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
         data: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
+        ...chartAxis(t),
       },
-      yAxis: {
-        type: "value",
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
-        splitLine: { lineStyle: { color: t.split } },
-      },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
       series: [
         {
           type: "line",
           smooth: true,
-          areaStyle: { opacity: 0.15 },
+          areaStyle: chartArea(t),
           lineStyle: { color: t.accent },
           itemStyle: { color: t.accent },
+          emphasis: emphasisLine(t, { area: true }),
           data: [1200, 1480, 1310, 1720, 1650, 2040],
         },
       ],
@@ -156,23 +160,31 @@ export default function DesignSystem() {
   const barOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 30, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
-      legend: { top: 0, textStyle: { color: t.label } },
+      tooltip: chartTooltip(t),
+      legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",
         data: ["Jan", "Feb", "Mar", "Apr"],
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
+        ...chartAxis(t),
       },
-      yAxis: {
-        type: "value",
-        axisLine: { lineStyle: { color: t.axis } },
-        axisLabel: { color: t.label },
-        splitLine: { lineStyle: { color: t.split } },
-      },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
       series: [
-        { name: "Income", type: "bar", stack: "cf", itemStyle: { color: t.positive }, data: [3200, 3400, 3100, 3600] },
-        { name: "Expense", type: "bar", stack: "cf", itemStyle: { color: t.negative }, data: [-2100, -2450, -1980, -2300] },
+        {
+          name: "Income",
+          type: "bar",
+          stack: "cf",
+          itemStyle: { color: t.positive },
+          emphasis: emphasisBar(t, t.positive),
+          data: [3200, 3400, 3100, 3600],
+        },
+        {
+          name: "Expense",
+          type: "bar",
+          stack: "cf",
+          itemStyle: { color: t.negative },
+          emphasis: emphasisBar(t, t.negative),
+          data: [-2100, -2450, -1980, -2300],
+        },
       ],
     }),
     [t],
@@ -180,8 +192,8 @@ export default function DesignSystem() {
 
   const donutOption: EChartsOption = useMemo(
     () => ({
-      tooltip: { trigger: "item", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
-      legend: { bottom: 0, textStyle: { color: t.label }, type: "scroll" },
+      tooltip: chartTooltip(t, { trigger: "item" }),
+      legend: chartLegend(t, { bottom: 0, type: "scroll" }),
       color: t.series,
       series: [
         {
@@ -190,6 +202,7 @@ export default function DesignSystem() {
           center: ["50%", "45%"],
           itemStyle: { borderColor: t.surface, borderWidth: 2 },
           label: { color: t.label },
+          emphasis: emphasisPie(t),
           data: [
             { name: "Groceries", value: 820 },
             { name: "Transport", value: 410 },

@@ -59,5 +59,11 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     // Playwright specs live under e2e/ and must not be collected by vitest.
     exclude: ["e2e/**", "node_modules/**", "dist/**"],
+    // Vitest stubs CSS imports to an empty string by default, and it does so for
+    // `?raw` too. `src/test/setup.ts` imports index.css that way to seed the
+    // custom properties into jsdom, and an empty stylesheet there fails silently
+    // — the import works, the tokens are simply absent, and `token()` throws
+    // "Unknown design token" from whatever test happens to touch a chart.
+    css: true,
   },
 });
