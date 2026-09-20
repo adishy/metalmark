@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import {
   useAccounts,
@@ -31,10 +32,17 @@ import {
   type RuleConditions,
   type RuleApplyResult,
 } from "@/api/rules";
+import {
+  useClaimConnection,
+  useConnections,
+  useDeleteConnection,
+  useTriggerSync,
+} from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
+import ConnectionBadge from "@/components/ConnectionBadge";
 import { CloseIcon } from "@/components/icons";
 import type { Owner, OwnerReassignment } from "@/api/types";
-import { formatDate } from "@/lib/format";
+import { formatDate, relativeTime } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import {
   Button,
@@ -54,6 +62,7 @@ const TABS = [
   { id: "tags", label: "Tags" },
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
+  { id: "connections", label: "Connections" },
   { id: "owners", label: "Owners" },
   { id: "rules", label: "Rules" },
   { id: "profile", label: "Profile" },
@@ -125,6 +134,7 @@ export default function Settings() {
         {tab === "tags" && <TagsSection />}
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
+        {tab === "connections" && <ConnectionsTab />}
         {tab === "owners" && <OwnersSection />}
         {tab === "rules" && <RulesSection />}
         {tab === "profile" && <ProfileSection />}
@@ -139,6 +149,212 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
       <h2 className="text-sm font-semibold text-fg">{title}</h2>
       {children}
     </section>
+  );
+}
+
+// ------------------------------------------------------------- connections
+
+/**
+ * The credential lifecycle: connect, see whether it is working, disconnect.
+ * Operating the sync — pausing, retuning, cancelling, reading the logs — is the
+ * control panel at `/admin`, which this links to. That split is the Jellyfin
+ * one: library configuration lives in settings, activity and logs live in the
+ * dashboard.
+ *
+ * The owner check wraps the *section* rather than disabling controls inside it,
+ * because the reads are owner-only too (`require_owner` on every connection
+ * route, including the GETs). A member rendering this section would fire three
+ * requests that all 403 and show a screen of errors; not mounting it is the
+ * honest version of "this is not yours to see".
+ */
+function ConnectionsTab() {
+  const household = useHousehold();
+  if (household.data?.role !== "owner") {
+    return (
+      <Card title="Bank connections">
+        <p className="text-sm text-fg-muted" data-testid="connections-owner-only">
+          Only a household owner can connect a bank. A connection names the household's banks, so
+          the list is owner-only too.
+        </p>
+      </Card>
+    );
+  }
+  return <ConnectionsSection />;
+}
+
+function ConnectionsSection() {
+  const connections = useConnections();
+  const claim = useClaimConnection();
+  const del = useDeleteConnection();
+  const trigger = useTriggerSync();
+
+  const tokenId = useFieldId("setup-token");
+  const [token, setToken] = useState("");
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const missing = requiredText(token);
+    setTokenError(missing);
+    if (missing) return;
+    claim.mutate(
+      { setup_token: token.trim() },
+      {
+        // The token is single-use, so it is cleared on success and *kept* on
+        // failure: a typo should be fixable without going back to the bridge,
+        // and a failed token is spent anyway.
+        onSuccess: () => setToken(""),
+      },
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card title="Bank connections">
+        <p className="text-sm text-fg-muted">
+          Connect a bank through SimpleFIN. Once connected, accounts and transactions arrive on
+          their own and re-syncing is safe to run as often as you like — it never duplicates or
+          overwrites anything you have edited.
+        </p>
+        <p className="text-xs text-fg-muted">
+          Watching a sync run, pausing one, or changing how often it runs lives in the{" "}
+          <Link className="text-accent underline" to="/admin" data-testid="open-admin">
+            sync activity panel
+          </Link>
+          .
+        </p>
+
+        <form className="space-y-3" onSubmit={submit}>
+          <Field
+            label="Setup token"
+            htmlFor={tokenId}
+            required
+            error={tokenError}
+            hint="From your bridge's “create a connection” page. Used once and never stored — only the access URL it returns is kept, encrypted."
+          >
+            <Input
+              id={tokenId}
+              type="password"
+              value={token}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setToken(e.target.value)}
+              aria-invalid={tokenError ? true : undefined}
+              data-testid="setup-token"
+            />
+          </Field>
+          <Button
+            type="submit"
+            disabled={claim.isPending}
+            aria-busy={claim.isPending}
+            data-testid="connect-submit"
+          >
+            {claim.isPending && <Spinner />}
+            Connect
+          </Button>
+          {claim.isError && (
+            <p className="text-sm text-negative" role="alert" data-testid="connect-error">
+              {(claim.error as Error).message}
+            </p>
+          )}
+        </form>
+      </Card>
+
+      <Card title="Connected banks">
+        {connections.isPending && <Spinner />}
+        {connections.isError && (
+          <p className="text-sm text-negative" role="alert">
+            {(connections.error as Error).message}
+          </p>
+        )}
+        {connections.isSuccess && connections.data.length === 0 && (
+          <p className="text-sm text-fg-muted" data-testid="no-connections">
+            No banks connected yet.
+          </p>
+        )}
+
+        {connections.data && connections.data.length > 0 && (
+          <ul className="divide-y divide-border rounded-control bg-surface-inset/40" data-testid="connection-list">
+            {connections.data.map((c) => (
+              <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-fg">
+                    {c.org_name ?? "Unnamed connection"}
+                  </span>
+                  <ConnectionBadge connection={c} />
+                </div>
+                <p className="text-xs text-fg-muted">
+                  {c.last_synced_at
+                    ? `Last synced ${relativeTime(c.last_synced_at)}`
+                    : "Never synced"}
+                </p>
+                {c.last_error && (
+                  <p className="text-xs text-negative" data-testid={`conn-last-error-${c.id}`}>
+                    {c.last_error}
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    disabled={trigger.isPending || !c.is_enabled}
+                    onClick={() => trigger.mutate(c.id)}
+                    data-testid={`sync-now-${c.id}`}
+                  >
+                    Sync now
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setDisconnecting(disconnecting === c.id ? null : c.id)}
+                    data-testid={`disconnect-${c.id}`}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+
+                {disconnecting === c.id && (
+                  <div
+                    className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm"
+                    data-testid={`disconnect-confirm-${c.id}`}
+                  >
+                    {/* The reassuring half is the part people do not believe, so
+                        it is stated with the same weight as the warning. */}
+                    <p className="text-negative">
+                      Disconnect “{c.org_name ?? "this connection"}”? The accounts and every
+                      transaction stay, and become hand-entered ones. Nothing is deleted, and
+                      reconnecting later picks the same accounts back up rather than importing
+                      them twice.
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button variant="secondary" onClick={() => setDisconnecting(null)}>
+                        Keep it
+                      </Button>
+                      <Button
+                        variant="danger"
+                        disabled={del.isPending}
+                        onClick={() =>
+                          del.mutate(c.id, {
+                            onSuccess: () => setDisconnecting(null),
+                          })
+                        }
+                        data-testid={`disconnect-confirm-btn-${c.id}`}
+                      >
+                        Yes, disconnect
+                      </Button>
+                    </div>
+                    {del.isError && (
+                      <p className="mt-2 text-sm text-negative" role="alert">
+                        {(del.error as Error).message}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
   );
 }
 

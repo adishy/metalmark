@@ -32,8 +32,10 @@ import { login } from "./helpers";
 
 const MIN = 44;
 
-/** Routes that render their whole content on load. */
-const ROUTES = ["/accounts", "/transactions", "/review", "/reports"] as const;
+/** Routes that render their whole content on load. `/admin` is in here rather
+ *  than reached through the settings walk because it is a route of its own —
+ *  and a route nobody measures is a route nobody has measured. */
+const ROUTES = ["/accounts", "/transactions", "/review", "/reports", "/admin"] as const;
 
 /** Only one Settings tab is mounted at a time; the default is "categories". */
 const SETTINGS_TABS = [
@@ -41,6 +43,7 @@ const SETTINGS_TABS = [
   "tags",
   "currencies",
   "household",
+  "connections",
   "owners",
   "rules",
   "profile",

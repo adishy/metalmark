@@ -25,8 +25,9 @@ import {
   emphasisLine,
   emphasisPie,
 } from "@/theme/chartInteraction";
-import { formatMoney } from "@/lib/format";
-import type { Owner } from "@/api/types";
+import { formatDuration, formatMoney, relativeTime } from "@/lib/format";
+import ConnectionBadge from "@/components/ConnectionBadge";
+import type { Connection, Owner } from "@/api/types";
 
 // ---- scaffolding --------------------------------------------------------
 
@@ -115,6 +116,35 @@ const DEMO_OWNERS: Owner[] = [
   { id: "o1", name: "Alex", kind: "person", sort: 1 },
   { id: "o2", name: "Beth", kind: "person", sort: 2 },
   { id: "o3", name: "Shared", kind: "shared", sort: 99 },
+];
+
+/** One row per state the badge can be in — including the last one, which is the
+ *  combination a single status field could not express. */
+function demoConnection(
+  id: string,
+  org_name: string,
+  status: Connection["status"],
+  is_enabled = true,
+): Connection {
+  return {
+    id,
+    provider: "simplefin",
+    org_name,
+    status,
+    last_synced_at: null,
+    last_error: null,
+    is_enabled,
+    sync_interval_minutes: 360,
+    next_sync_at: null,
+    created_at: "2026-09-01T00:00:00Z",
+  };
+}
+
+const DEMO_CONNECTIONS: Connection[] = [
+  demoConnection("c1", "Everyday Bank", "ok"),
+  demoConnection("c2", "Credit Union", "error"),
+  demoConnection("c3", "Brokerage", "auth_error"),
+  demoConnection("c4", "Brokerage (switched off)", "auth_error", false),
 ];
 
 export default function DesignSystem() {
@@ -372,6 +402,59 @@ export default function DesignSystem() {
         <p className="text-xs text-fg-muted">
           A tag or badge always carries its text. The <code>categories.color</code> column is for
           charts and icons, never the only rendering of a category.
+        </p>
+      </Section>
+
+      <Section
+        title="Connection status"
+        note="Two chips, because health and pause are two different facts — the fourth row is a bank that is broken AND switched off, and one label cannot say both."
+      >
+        <div className="space-y-2">
+          {DEMO_CONNECTIONS.map((c) => (
+            <div key={c.status + String(c.is_enabled)} className="flex flex-wrap items-center gap-2">
+              <span className="w-32 text-sm text-fg-muted">{c.org_name}</span>
+              <ConnectionBadge connection={c} />
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-fg-muted">
+          The wording is the component's, not each page's: <code>auth_error</code> reads
+          “Reconnect needed”, because the credential is a bank access URL and the action a person
+          can take is to authorise again at the bridge — not to retype a password.
+        </p>
+      </Section>
+
+      <Section
+        title="Elapsed time"
+        note="Coarse on purpose, and floored rather than rounded so the label never overstates how long something has taken."
+      >
+        <ul className="divide-y divide-border">
+          {[
+            { label: "A few seconds", iso: "2026-09-20T11:59:32Z" },
+            { label: "Minutes", iso: "2026-09-20T11:22:00Z" },
+            { label: "Hours", iso: "2026-09-20T03:00:00Z" },
+            { label: "Days", iso: "2026-09-15T12:00:00Z" },
+            { label: "Older than a week", iso: "2026-07-03T12:00:00Z" },
+            { label: "In the future", iso: "2026-09-20T14:30:00Z" },
+          ].map((r) => (
+            <li key={r.label} className="flex items-center gap-3 py-2">
+              <span className="min-w-0 flex-1 text-sm text-fg-muted">{r.label}</span>
+              <span className="shrink-0 text-sm text-fg tabular-nums">
+                {relativeTime(r.iso, new Date("2026-09-20T12:00:00Z"))}
+              </span>
+            </li>
+          ))}
+          <li className="flex items-center gap-3 border-t border-border py-2">
+            <span className="min-w-0 flex-1 text-sm text-fg-muted">Durations</span>
+            <span className="shrink-0 text-sm text-fg tabular-nums">
+              {formatDuration(412)} · {formatDuration(1840)} · {formatDuration(64_000)} ·{" "}
+              {formatDuration(3_930_000)}
+            </span>
+          </li>
+        </ul>
+        <p className="text-xs text-fg-muted">
+          Past a week the phrase hands off to a date: “37 d ago” is a worse answer than the day it
+          happened.
         </p>
       </Section>
 

@@ -22,7 +22,13 @@ const NAV: NavItem[] = [
 ];
 
 // Routes that render in the shell but are not destinations in the nav.
+//
+// The nav is capped at five items (§4.13), so a page that would be a sixth has
+// to be reachable from one of the five instead. Both of these are: the sync
+// panel from Settings → Connections, the design system from nothing at all
+// (it is a development tool, typed by hand).
 const EXTRA_TITLES: Record<string, string> = {
+  "/admin": "Sync activity",
   "/debug/design-system": "Design system",
 };
 
