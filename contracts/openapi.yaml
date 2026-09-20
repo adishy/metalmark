@@ -1713,6 +1713,94 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /import/ofx/preview:
+    post:
+      tags:
+      - import
+      summary: Preview Ofx
+      description: 'What the OFX/QFX file says about itself. Writes nothing.
+
+
+        An OFX 1.x file is refused here, by name and with a way out, rather than
+
+        parsed on a guess about where its unquoted SGML values end (ADR-0030 §1). So
+
+        is XML that is malformed or that declares a DTD, and a file with no statement
+
+        in it — every reason the commit would fail is a reason it fails *before* the
+
+        user has chosen an account.'
+      operationId: preview_ofx_import_ofx_preview_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_preview_ofx_import_ofx_preview_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfxPreviewOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /import/ofx/commit:
+    post:
+      tags:
+      - import
+      summary: Commit Ofx
+      description: 'Import the file''s banking rows into one account. One transaction.
+
+
+        ``account_id`` is explicit and required, because the file''s own ``<ACCTID>``
+
+        is reported by the preview and never obeyed (ADR-0030 §4): a ledger account
+
+        belongs to the household, and a file cannot be trusted to name one.'
+      operationId: commit_ofx_import_ofx_commit_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_commit_ofx_import_ofx_commit_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfxCommitOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /household:
     get:
       tags:
@@ -2199,6 +2287,690 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /investments/securities:
+    get:
+      tags:
+      - investments
+      summary: List Securities
+      operationId: list_securities_investments_securities_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SecurityOut'
+                title: Response List Securities Investments Securities Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - investments
+      summary: Create Security
+      description: Define an instrument. Household owner role required.
+      operationId: create_security_investments_securities_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/securities/{security_id}:
+    patch:
+      tags:
+      - investments
+      summary: Update Security
+      description: Rename, re-ticker or re-type. The quote currency is not editable.
+      operationId: update_security_investments_securities__security_id__patch
+      parameters:
+      - name: security_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Security Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - investments
+      summary: Delete Security
+      description: 'Delete a security along with its prices and every position in it.
+
+
+        Owner-only, and destructive in a way the other deletes are not: it takes the
+
+        household''s recorded history in the instrument with it.'
+      operationId: delete_security_investments_securities__security_id__delete
+      parameters:
+      - name: security_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Security Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/securities/{security_id}/prices:
+    get:
+      tags:
+      - investments
+      summary: List Prices
+      operationId: list_prices_investments_securities__security_id__prices_get
+      parameters:
+      - name: security_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Security Id
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
+      - name: end
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: End
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PriceOut'
+                title: Response List Prices Investments Securities  Security Id  Prices Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - investments
+      summary: Upsert Price
+      description: 'Record (or correct) the price for one day.
+
+
+        A ``PUT`` because it is an upsert keyed by ``(security, date)`` — correcting a
+
+        price is a normal thing to do, and a second row for the same day would make
+
+        "the latest price on or before D" depend on insertion order.'
+      operationId: upsert_price_investments_securities__security_id__prices_put
+      parameters:
+      - name: security_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Security Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PriceUpsert'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/holdings:
+    get:
+      tags:
+      - investments
+      summary: List Holdings
+      description: 'Positions with their resolved quantity and cost basis (ADR-0034).
+
+
+        ``quantity`` and ``cost_basis`` are what the household actually holds — from
+
+        history when it exists. ``manual_quantity`` is what was typed in, so a UI can
+
+        show that a hand-entered number is being overridden rather than quietly
+
+        disagreeing with the database.'
+      operationId: list_holdings_investments_holdings_get
+      parameters:
+      - name: account_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HoldingOut'
+                title: Response List Holdings Investments Holdings Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - investments
+      summary: Upsert Holding
+      description: 'Record a position. One per (account, security) — a second call updates.
+
+
+        409 if the position''s number is computed from recorded trades; edit the trades
+
+        instead (ADR-0034).'
+      operationId: upsert_holding_investments_holdings_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoldingCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/holdings/{holding_id}:
+    patch:
+      tags:
+      - investments
+      summary: Update Holding
+      description: Edit a hand-entered position. 409 when history owns the column.
+      operationId: update_holding_investments_holdings__holding_id__patch
+      parameters:
+      - name: holding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Holding Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoldingUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - investments
+      summary: Delete Holding
+      operationId: delete_holding_investments_holdings__holding_id__delete
+      parameters:
+      - name: holding_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Holding Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/transactions:
+    get:
+      tags:
+      - investments
+      summary: List Investment Transactions
+      operationId: list_investment_transactions_investments_transactions_get
+      parameters:
+      - name: account_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
+      - name: end
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: End
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 5000
+          minimum: 1
+          default: 500
+          title: Limit
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvestmentTransactionOut'
+                title: Response List Investment Transactions Investments Transactions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - investments
+      summary: Create Investment Transaction
+      description: 'Record a trade, dividend, fee or split.
+
+
+        A buy or sell does not adjust the position by hand: when history exists the
+
+        position *is* the sum of its trades (ADR-0034), so this is the only write.'
+      operationId: create_investment_transaction_investments_transactions_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestmentTransactionCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/transactions/{txn_id}:
+    patch:
+      tags:
+      - investments
+      summary: Update Investment Transaction
+      operationId: update_investment_transaction_investments_transactions__txn_id__patch
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestmentTransactionUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestmentTransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - investments
+      summary: Delete Investment Transaction
+      description: Delete a trade. This can move the position it belongs to (ADR-0034).
+      operationId: delete_investment_transaction_investments_transactions__txn_id__delete
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/portfolio:
+    get:
+      tags:
+      - investments
+      summary: Portfolio
+      description: 'Every investment account valued as of a date, with the pieces that could
+
+        not be valued listed rather than counted as zero (ADR-0032 §5).'
+      operationId: portfolio_investments_portfolio_get
+      parameters:
+      - name: 'on'
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: 'On'
+      - name: account_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /investments/allocation:
+    get:
+      tags:
+      - investments
+      summary: Allocation
+      description: 'The consolidated cross-account allocation (ADR-0011).
+
+
+        Unpriced positions are counted separately and never folded into a row as zero.'
+      operationId: allocation_investments_allocation_get
+      parameters:
+      - name: 'on'
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: 'On'
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(security|type|account|currency)$
+          default: security
+          title: Group By
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocationOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AccountCreate:
@@ -2360,6 +3132,155 @@ components:
           title: Is Hidden
       type: object
       title: AccountUpdate
+    AccountValuationOut:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        name:
+          type: string
+          title: Name
+        currency:
+          type: string
+          title: Currency
+        balance_source:
+          type: string
+          title: Balance Source
+        balance_account:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Balance Account
+        market_value_account:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Market Value Account
+        market_value_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Market Value Base
+        unaccounted_cash_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Unaccounted Cash Base
+        holdings:
+          items:
+            $ref: '#/components/schemas/HoldingValueOut'
+          type: array
+          title: Holdings
+        unpriced:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Unpriced
+        no_rate:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: No Rate
+        oldest_price_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Oldest Price Date
+        max_stale_days:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Stale Days
+        is_fully_valued:
+          type: boolean
+          title: Is Fully Valued
+      type: object
+      required:
+      - account_id
+      - name
+      - currency
+      - balance_source
+      - balance_account
+      - market_value_account
+      - market_value_base
+      - unaccounted_cash_base
+      - holdings
+      - unpriced
+      - no_rate
+      - oldest_price_date
+      - max_stale_days
+      - is_fully_valued
+      title: AccountValuationOut
+    AllocationOut:
+      properties:
+        as_of:
+          type: string
+          format: date
+          title: As Of
+        base_currency:
+          type: string
+          title: Base Currency
+        group_by:
+          type: string
+          title: Group By
+        total_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Base
+        rows:
+          items:
+            $ref: '#/components/schemas/AllocationRowOut'
+          type: array
+          title: Rows
+        unpriced_positions:
+          type: integer
+          title: Unpriced Positions
+        no_rate_positions:
+          type: integer
+          title: No Rate Positions
+        max_stale_days:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Stale Days
+      type: object
+      required:
+      - as_of
+      - base_currency
+      - group_by
+      - total_base
+      - rows
+      - unpriced_positions
+      - no_rate_positions
+      - max_stale_days
+      title: AllocationOut
+    AllocationRowOut:
+      properties:
+        key:
+          type: string
+          title: Key
+        label:
+          type: string
+          title: Label
+        value_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Value Base
+        percent:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Percent
+        holdings:
+          type: integer
+          title: Holdings
+      type: object
+      required:
+      - key
+      - label
+      - value_base
+      - percent
+      - holdings
+      title: AllocationRowOut
     Body_commit_csv_import_csv_commit_post:
       properties:
         file:
@@ -2390,6 +3311,27 @@ components:
       - account_id
       - mapping
       title: Body_commit_csv_import_csv_commit_post
+    Body_commit_ofx_import_ofx_commit_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        default_category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Default Category Id
+      type: object
+      required:
+      - file
+      - account_id
+      title: Body_commit_ofx_import_ofx_commit_post
     Body_preview_csv_import_csv_preview_post:
       properties:
         file:
@@ -2400,6 +3342,16 @@ components:
       required:
       - file
       title: Body_preview_csv_import_csv_preview_post
+    Body_preview_ofx_import_ofx_preview_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_preview_ofx_import_ofx_preview_post
     CashFlowPoint:
       properties:
         month:
@@ -2878,6 +3830,227 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HoldingCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Quantity
+        cost_basis:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Cost Basis
+        as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: As Of
+      type: object
+      required:
+      - account_id
+      - security_id
+      - quantity
+      title: HoldingCreate
+    HoldingOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+        security:
+          $ref: '#/components/schemas/SecurityOut'
+        quantity:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Quantity
+        cost_basis:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Cost Basis
+        quantity_source:
+          type: string
+          title: Quantity Source
+        basis_source:
+          type: string
+          title: Basis Source
+        manual_quantity:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Manual Quantity
+        manual_cost_basis:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Manual Cost Basis
+        as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: As Of
+      type: object
+      required:
+      - id
+      - account_id
+      - security_id
+      - security
+      - quantity
+      - cost_basis
+      - quantity_source
+      - basis_source
+      - manual_quantity
+      - manual_cost_basis
+      - as_of
+      title: HoldingOut
+    HoldingUpdate:
+      properties:
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Quantity
+        cost_basis:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Cost Basis
+        as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: As Of
+      type: object
+      title: HoldingUpdate
+    HoldingValueOut:
+      properties:
+        holding_id:
+          type: string
+          format: uuid
+          title: Holding Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+        name:
+          type: string
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ticker
+        security_type:
+          type: string
+          title: Security Type
+        quantity:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Quantity
+        price:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Price
+        price_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Price Date
+        price_currency:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Price Currency
+        value_native:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Value Native
+        value_account:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Value Account
+        value_base:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Value Base
+        stale_days:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Stale Days
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      type: object
+      required:
+      - holding_id
+      - account_id
+      - security_id
+      - name
+      - ticker
+      - security_type
+      - quantity
+      - price
+      - price_date
+      - price_currency
+      - value_native
+      - value_account
+      - value_base
+      - stale_days
+      - reason
+      title: HoldingValueOut
+      description: 'One position, valued. ``value_base`` is null **iff** ``reason`` is set.
+
+
+        Unpriced is not zero: an unpriced position contributes nothing to a total but
+
+        is reported here, because "we cannot value this" and "this is worth nothing"
+
+        must not render identically (ADR-0032 §5).'
     HouseholdOut:
       properties:
         id:
@@ -2931,6 +4104,187 @@ components:
         ``base_currency`` would be accepted and silently ignored, and the caller would
 
         believe the currency had changed.'
+    InvestmentTransactionCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Security Id
+        type:
+          type: string
+          pattern: ^(buy|sell|dividend|interest|fee|split|transfer)$
+          title: Type
+        trade_date:
+          type: string
+          format: date
+          title: Trade Date
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Quantity
+        price:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Price
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+      type: object
+      required:
+      - account_id
+      - type
+      - trade_date
+      - amount
+      title: InvestmentTransactionCreate
+    InvestmentTransactionOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Security Id
+        type:
+          type: string
+          title: Type
+        trade_date:
+          type: string
+          format: date
+          title: Trade Date
+        quantity:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Quantity
+        price:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Price
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        source:
+          type: string
+          title: Source
+        transfer_group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transfer Group Id
+      type: object
+      required:
+      - id
+      - account_id
+      - security_id
+      - type
+      - trade_date
+      - quantity
+      - price
+      - amount
+      - currency
+      - description
+      - notes
+      - source
+      - transfer_group_id
+      title: InvestmentTransactionOut
+    InvestmentTransactionUpdate:
+      properties:
+        type:
+          anyOf:
+          - type: string
+            pattern: ^(buy|sell|dividend|interest|fee|split|transfer)$
+          - type: 'null'
+          title: Type
+        trade_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Trade Date
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Quantity
+        price:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Price
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+      type: object
+      title: InvestmentTransactionUpdate
     LoginRequest:
       properties:
         email:
@@ -3080,6 +4434,123 @@ components:
       - net_cash_flow
       - currency_revaluation
       title: NetWorthSeries
+    OfxCommitOut:
+      properties:
+        inserted:
+          type: integer
+          title: Inserted
+        skipped:
+          type: integer
+          title: Skipped
+        suspects:
+          type: integer
+          title: Suspects
+        investments_skipped:
+          type: integer
+          title: Investments Skipped
+        errors:
+          items:
+            $ref: '#/components/schemas/OfxRowError'
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - inserted
+      - skipped
+      - suspects
+      - investments_skipped
+      title: OfxCommitOut
+      description: 'The same three counts as the CSV path, plus what could not come in.
+
+
+        ``investments_skipped`` is its own number rather than folded into ``skipped``
+
+        (ADR-0030 §5): a skipped row is one the ledger already has, and these are rows
+
+        it cannot hold yet, so an all-investment file reads as "0 imported, 5 skipped"
+
+        instead of as a silent success.'
+    OfxPreviewOut:
+      properties:
+        org:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Org
+        acct_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Acct Id
+        acct_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Acct Type
+        currency:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Currency
+        start:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Start
+        end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: End
+        transaction_count:
+          type: integer
+          title: Transaction Count
+        investment_count:
+          type: integer
+          title: Investment Count
+      type: object
+      required:
+      - transaction_count
+      - investment_count
+      title: OfxPreviewOut
+      description: 'What the file says about itself before anything is written (ADR-0030 §4).
+
+
+        The account fields are *reported* and not obeyed: the human picks the ledger
+
+        account at commit, exactly as the CSV path does. They exist so the dialog can
+
+        show "this is the statement for 000111222333" — confirmation that the right
+
+        file was downloaded — rather than so anything can be matched on. ``acct_id``
+
+        is a string because an account number is an identifier, never an amount: it
+
+        may carry leading zeros, and it is never arithmetic.'
+    OfxRowError:
+      properties:
+        position:
+          type: integer
+          title: Position
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - position
+      - message
+      title: OfxRowError
+      description: 'One ``<STMTTRN>`` the importer refused to guess at.
+
+
+        ``position`` is 1-based within the statement, not a file line: OFX has no
+
+        line numbers to point at, and "the third transaction in the file" is what a
+
+        human can go and find.'
     OwnerCreate:
       properties:
         name:
@@ -3153,7 +4624,83 @@ components:
       type: object
       title: OwnerUpdate
       description: Send only the fields you want to change; an explicit null is rejected.
-    RuleActions:
+    PortfolioOut:
+      properties:
+        as_of:
+          type: string
+          format: date
+          title: As Of
+        base_currency:
+          type: string
+          title: Base Currency
+        total_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Base
+        accounts:
+          items:
+            $ref: '#/components/schemas/AccountValuationOut'
+          type: array
+          title: Accounts
+      type: object
+      required:
+      - as_of
+      - base_currency
+      - total_base
+      - accounts
+      title: PortfolioOut
+    PriceOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+        price_date:
+          type: string
+          format: date
+          title: Price Date
+        price:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Price
+        currency:
+          type: string
+          title: Currency
+        source:
+          type: string
+          title: Source
+      type: object
+      required:
+      - id
+      - security_id
+      - price_date
+      - price
+      - currency
+      - source
+      title: PriceOut
+    PriceUpsert:
+      properties:
+        price_date:
+          type: string
+          format: date
+          title: Price Date
+        price:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Price
+      type: object
+      required:
+      - price_date
+      - price
+      title: PriceUpsert
+    RuleActions-Input:
       properties:
         set_category_id:
           anyOf:
@@ -3192,6 +4739,65 @@ components:
           - type: boolean
           - type: 'null'
           title: Mark Reviewed
+        split:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/RuleSplitLeg-Input'
+            type: array
+          - type: 'null'
+          title: Split
+      additionalProperties: false
+      type: object
+      title: RuleActions
+      description: 'What a matching rule writes. Provenance still has the final say (ADR-0007):
+
+        the engine skips any field a human has already set on the row.'
+    RuleActions-Output:
+      properties:
+        set_category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Set Category Id
+        add_tag_ids:
+          anyOf:
+          - items:
+              type: string
+              format: uuid
+            type: array
+          - type: 'null'
+          title: Add Tag Ids
+        set_owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Set Owner Id
+        rename_merchant:
+          anyOf:
+          - type: string
+            maxLength: 300
+            minLength: 1
+          - type: 'null'
+          title: Rename Merchant
+        set_hidden:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Set Hidden
+        mark_reviewed:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Mark Reviewed
+        split:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/RuleSplitLeg-Output'
+            type: array
+          - type: 'null'
+          title: Split
       additionalProperties: false
       type: object
       title: RuleActions
@@ -3365,7 +4971,7 @@ components:
         conditions:
           $ref: '#/components/schemas/RuleConditions-Input'
         actions:
-          $ref: '#/components/schemas/RuleActions'
+          $ref: '#/components/schemas/RuleActions-Input'
       type: object
       required:
       - name
@@ -3388,7 +4994,7 @@ components:
         conditions:
           $ref: '#/components/schemas/RuleConditions-Output'
         actions:
-          $ref: '#/components/schemas/RuleActions'
+          $ref: '#/components/schemas/RuleActions-Output'
         created_at:
           type: string
           format: date-time
@@ -3418,6 +5024,156 @@ components:
         instead of ``conditions``) is refused by ``RuleBlob``, so the shape a client
 
         sees is the closed set with nulls, which is what a form is built from.'
+    RuleSplitLeg-Input:
+      properties:
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        percent:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Percent
+        remainder:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Remainder
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Notes
+      additionalProperties: false
+      type: object
+      title: RuleSplitLeg
+      description: 'One leg of a rule''s ``split`` action (ADR-0031 §1-2).
+
+
+        A leg names a **share of the parent**, never a sum of its own: exactly one leg
+
+        in a split is the ``remainder``, and it takes whatever the parent has left. A
+
+        leg that is not the remainder carries exactly one of ``amount`` or
+
+        ``percent``, and the schema is a 422 otherwise.
+
+
+        The split is balanced **by construction** rather than validated: a rule is
+
+        written once and applied to transactions whose amounts it cannot know, so
+
+        "$50 here and the rest there" is expressed as an amount leg plus the
+
+        remainder leg — never as two fixed amounts, which a bank correction would turn
+
+        into a split that does not sum to its parent. That expressiveness cost is
+
+        deliberate; the rule editor has to explain it (ADR-0031, Consequences).
+
+
+        ``amount`` is signed like every money field (ADR-0005) and its sign must match
+
+        the parent''s — a mixed-sign split is a transfer, which ADR-0018 models
+
+        properly and this does not. ``percent`` is ``0 < p < 100`` and takes that
+
+        fraction of the parent''s *magnitude*, signed to the parent: a rule splitting a
+
+        -$100 expense 25/75 writes two negative legs, never a positive one.'
+    RuleSplitLeg-Output:
+      properties:
+        amount:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        percent:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Percent
+        remainder:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Remainder
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Notes
+      additionalProperties: false
+      type: object
+      title: RuleSplitLeg
+      description: 'One leg of a rule''s ``split`` action (ADR-0031 §1-2).
+
+
+        A leg names a **share of the parent**, never a sum of its own: exactly one leg
+
+        in a split is the ``remainder``, and it takes whatever the parent has left. A
+
+        leg that is not the remainder carries exactly one of ``amount`` or
+
+        ``percent``, and the schema is a 422 otherwise.
+
+
+        The split is balanced **by construction** rather than validated: a rule is
+
+        written once and applied to transactions whose amounts it cannot know, so
+
+        "$50 here and the rest there" is expressed as an amount leg plus the
+
+        remainder leg — never as two fixed amounts, which a bank correction would turn
+
+        into a split that does not sum to its parent. That expressiveness cost is
+
+        deliberate; the rule editor has to explain it (ADR-0031, Consequences).
+
+
+        ``amount`` is signed like every money field (ADR-0005) and its sign must match
+
+        the parent''s — a mixed-sign split is a transfer, which ADR-0018 models
+
+        properly and this does not. ``percent`` is ``0 < p < 100`` and takes that
+
+        fraction of the parent''s *magnitude*, signed to the parent: a rule splitting a
+
+        -$100 expense 25/75 writes two negative legs, never a positive one.'
     RuleUpdate:
       properties:
         name:
@@ -3443,7 +5199,7 @@ components:
           - type: 'null'
         actions:
           anyOf:
-          - $ref: '#/components/schemas/RuleActions'
+          - $ref: '#/components/schemas/RuleActions-Input'
           - type: 'null'
       type: object
       title: RuleUpdate
@@ -3463,6 +5219,99 @@ components:
         the builder dialog edits a rule as one object, and a key-wise merge would make
 
         "I removed that condition" inexpressible.'
+    SecurityCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          type: string
+          pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          title: Security Type
+          default: stock
+        currency:
+          type: string
+          maxLength: 3
+          minLength: 3
+          title: Currency
+      type: object
+      required:
+      - name
+      - currency
+      title: SecurityCreate
+    SecurityOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ticker
+        security_type:
+          type: string
+          title: Security Type
+        currency:
+          type: string
+          title: Currency
+        is_manual:
+          type: boolean
+          title: Is Manual
+      type: object
+      required:
+      - id
+      - name
+      - ticker
+      - security_type
+      - currency
+      - is_manual
+      title: SecurityOut
+    SecurityUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          anyOf:
+          - type: string
+            pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          - type: 'null'
+          title: Security Type
+      type: object
+      title: SecurityUpdate
+      description: 'Send only what changes.
+
+
+        **Currency is absent deliberately.** It is half of the instrument''s identity —
+
+        the same ticker on two exchanges is two securities — so changing it would
+
+        silently restate every price already recorded against this one. A security
+
+        quoted in the wrong currency is a delete and a re-create.'
     SignupRequest:
       properties:
         email:

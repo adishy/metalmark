@@ -10,7 +10,7 @@ and no reader has to know the direction rules to compute one:
     dividend/interest  amount +        income; enters cash flow (ADR-0032 §2)
     fee                amount −        expense; enters cash flow (ADR-0032 §2)
     transfer           amount ±        a contribution (+) or withdrawal (−)
-    split              amount 0        quantity ×= ratio, no cash effect
+    split              amount 0        quantity = the share *delta*, no cash effect
 
 ``amount`` is the cash effect **on the account, in the account's currency** —
 the same convention ``transactions.amount`` uses (+ = money in). A buy is
@@ -284,6 +284,11 @@ class InvestmentTransaction(UUIDPkMixin, TimestampMixin, Base):
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     # Signed — see the module docstring. Both are nullable because a dividend or
     # a fee has cash and no shares, and a share split has shares and no cash.
+    # A `split` row carries the share *delta* (a 2-for-1 split of 10 shares is
+    # +10), not the 2:1 ratio: every other quantity in this table is a signed
+    # delta, so a ratio here would be the one row whose sign and scale both mean
+    # something different, and `Σ(quantity)` — the sum ADR-0034 derives a position
+    # from — would be wrong for it.
     quantity: Mapped[Decimal | None] = mapped_column(QTY, nullable=True)
     price: Mapped[Decimal | None] = mapped_column(QTY, nullable=True)
     amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
