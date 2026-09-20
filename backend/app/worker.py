@@ -26,7 +26,9 @@ Every ``sync_jobs``/``sync_runs``/``sync_run_events`` read and write is scoped.
 ``assert_app_role`` is what keeps that true. Bypassing RLS is a grant, not a code
 path: a worker connected as a superuser would read every household's jobs and the
 code above would look identical. It refuses to start rather than quietly losing
-the isolation the whole design rests on.
+the isolation the whole design rests on. ``wait_for_database`` reaches it: it
+waits out a database that has not been migrated yet — the ordinary state of a
+fresh ``docker compose up`` — and passes a role *verdict* through untouched.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -66,6 +69,21 @@ SYNC_TICK_MINUTES = 15
 REAP_TICK_MINUTES = 5
 
 HEARTBEAT_MINUTES = 5
+
+#: How long the worker waits for the app role to become reachable before giving
+#: up. A fresh volume is not a misconfiguration — `docker compose up` starts this
+#: container before anything has run `alembic upgrade head`, and the migration is
+#: what creates the role — so the first connection being refused is the
+#: *documented* path. Long enough to cover a slow first migration, short enough
+#: to stay a startup step rather than a hang.
+DB_WAIT_SECONDS = 120.0
+
+#: Retry delay, doubling to the cap. The first is short because the common case
+#: is a database a second or two behind; the cap is short because the uncommon
+#: case (something is actually wrong) still deserves a log line the operator can
+#: read rather than a scroll of identical failures.
+DB_WAIT_FIRST_DELAY = 1.0
+DB_WAIT_MAX_DELAY = 10.0
 
 _ROLE = text(
     """
@@ -119,6 +137,64 @@ async def assert_app_role() -> None:
         log.error("worker.role_check_failed", problem=problem, expected=expected)
         raise SystemExit(1)
     log.info("worker.role_check_ok", role=expected)
+
+
+async def wait_for_database(stop: asyncio.Event) -> None:
+    """Wait until the app role can be reached, then assert it — or give up loudly.
+
+    Two questions that look like one, and only the first is worth waiting on.
+
+    *Can the app role be reached?* On a fresh volume it cannot, and that is
+    boot ordering rather than a fault: the compose file starts this container
+    before anything runs ``alembic upgrade head``, and the migration is what
+    creates the role. ``password authentication failed for user
+    "metalmark_app"`` is what that looks like — and it used to end the process,
+    leaving a stack with no worker in it. Nothing complained: the api served,
+    the panel drew, and every "Sync now" queued a job that nobody ran. A cost
+    of one silent worker is the stale ledger this workstream exists to prevent,
+    so the worker waits.
+
+    *Is the role subject to RLS?* That is a verdict, not a wait.
+    ``assert_app_role`` delivers it by raising ``SystemExit`` — a
+    ``BaseException``, so it passes through the ``except Exception`` below
+    untouched. Retrying a superuser would only delay a refusal that is already
+    correct.
+
+    Covers the *role*, not the schema. A role without tables is a broken install
+    rather than a boot ordering, and the consumer reports it every five seconds
+    (``worker.consume.failed``) instead of passing silently.
+    """
+    deadline = time.monotonic() + DB_WAIT_SECONDS
+    delay = DB_WAIT_FIRST_DELAY
+    while True:
+        try:
+            await assert_app_role()
+            return
+        except Exception as exc:  # noqa: BLE001 — deliberately total; see above
+            left = deadline - time.monotonic()
+            if left <= 0:
+                log.error(
+                    "worker.database_unreachable",
+                    error=sanitize(str(exc)),
+                    waited_seconds=DB_WAIT_SECONDS,
+                    hint=(
+                        "the app role never became reachable — has `alembic upgrade head` "
+                        "run against this database? (`docker compose run --rm api alembic "
+                        "upgrade head`)"
+                    ),
+                )
+                raise SystemExit(1) from exc
+            log.warning("worker.database_not_ready", error=sanitize(str(exc)), retry_in_s=delay)
+
+        # Interruptible, so a worker waiting on a database that may never arrive
+        # still exits on SIGTERM instead of sitting out the deadline while
+        # `docker compose stop` waits on it.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=min(delay, left))
+        if stop.is_set():
+            log.info("worker.shutdown")
+            raise SystemExit(0)
+        delay = min(delay * 2, DB_WAIT_MAX_DELAY)
 
 
 async def household_ids() -> list[uuid.UUID]:
@@ -250,8 +326,6 @@ async def main() -> None:
     configure_logging(settings.log_level, settings.env)
     log.info("worker.startup", env=settings.env)
 
-    await assert_app_role()
-
     stop = asyncio.Event()
 
     def _handle_signal() -> None:
@@ -259,8 +333,13 @@ async def main() -> None:
         stop.set()
 
     loop = asyncio.get_running_loop()
+    # Registered *before* the database wait, not after: the wait is the one place
+    # this process can legitimately spend two minutes doing nothing, and a
+    # `docker compose stop worker` during it should land immediately.
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _handle_signal)
+
+    await wait_for_database(stop)
 
     scheduler = AsyncIOScheduler()
     # `next_run_time=now` on both: a container that has just started is a

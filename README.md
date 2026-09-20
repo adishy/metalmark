@@ -39,6 +39,10 @@ docker compose run --rm \
   api python -m app.seed --demo          # first household + owner + default categories
 ```
 
+On a first run the worker logs `worker.database_not_ready` until the migration has created the app
+role; that is the expected order of these two commands, and it waits rather than exiting. Nothing
+syncs without it, and a stack whose worker is gone looks exactly like a healthy one.
+
 Then open **http://localhost:5173** and sign in with `owner@example.com` / `devpassword123`.
 The API is at http://localhost:8000 (`/healthz`, `/docs`). The Vite dev server proxies `/api` → the API.
 

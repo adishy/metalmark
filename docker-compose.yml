@@ -61,6 +61,13 @@ services:
     # (meant for the api) would wrongly mark it unhealthy. Disable it here.
     healthcheck:
       disable: true
+    # A worker that dies is silent, which is the one thing sync must never be:
+    # the api keeps serving, the panel keeps drawing, "Sync now" keeps accepting,
+    # and no job is ever consumed again. `wait_for_database` handles the ordinary
+    # reason it would exit (a database that is not migrated yet); this covers
+    # everything else. The api deliberately does *not* get a policy — an api that
+    # is gone fails the next request, which needs no restart to be noticed.
+    restart: unless-stopped
     environment:
       METALMARK_ENV: ${METALMARK_ENV:-dev}
       METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}

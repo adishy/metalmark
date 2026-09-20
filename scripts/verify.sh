@@ -89,10 +89,19 @@ command -v docker >/dev/null || die "docker not found"
 
 # `docker compose exec` needs the service running; say so plainly rather than
 # letting every gate fail one at a time with the same message.
+#
+# The worker is checked alongside the api, and for a sharper reason than
+# tidiness: it is the one service whose absence nothing downstream reports. A
+# stack with a dead worker serves every page and accepts every "Sync now", so
+# `e2e` and `walkthrough` fail minutes later on a timeout that points at the
+# browser. One line here is the difference between that and knowing.
 require_stack() {
-  docker compose ps --status running --services 2>/dev/null | grep -qx api \
-    || die "the api container is not running. Start the stack first:
+  local running
+  running=$(docker compose ps --status running --services 2>/dev/null || true)
+  for service in api worker; do
+    grep -qx "$service" <<<"$running" || die "the ${service} container is not running. Start the stack first:
   docker compose up -d --build"
+  done
 }
 
 run_gate() {
