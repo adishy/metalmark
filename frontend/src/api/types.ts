@@ -81,6 +81,7 @@ export interface Transaction {
   description: string | null;
   merchant: string | null;
   category_id: UUID | null;
+  owner_user_id: UUID | null;
   is_pending: boolean;
   review_status: "needs_review" | "reviewed" | "ignored";
   is_hidden: boolean;
@@ -117,4 +118,95 @@ export interface SpendingReport {
   base_currency: string;
   rows: { category_id: UUID | null; category_name: string; total: Money }[];
   total: Money;
+}
+
+export interface Member {
+  user_id: UUID;
+  display_name: string;
+  email: string;
+  role: string;
+}
+
+export interface Household {
+  id: UUID;
+  name: string;
+  base_currency: string;
+  timezone: string;
+  role: string;
+}
+
+export interface FxRate {
+  id: UUID;
+  base_currency: string;
+  quote_currency: string;
+  rate_date: string;
+  rate: Money;
+  source: string;
+}
+
+export interface Invite {
+  id: UUID;
+  email: string;
+  role: string;
+  token: string | null;
+}
+
+// ---- request bodies ----
+
+export interface AccountCreate {
+  name: string;
+  type: AccountType;
+  currency: string;
+  subtype?: string | null;
+  institution?: string | null;
+  current_balance?: Money;
+  balance_date?: string | null;
+  owner_user_id?: UUID | null;
+}
+
+export interface AccountUpdate {
+  name?: string;
+  subtype?: string | null;
+  institution?: string | null;
+  current_balance?: Money | null;
+  balance_date?: string | null;
+  owner_user_id?: UUID | null;
+  is_hidden?: boolean | null;
+}
+
+export interface TransactionCreate {
+  account_id: UUID;
+  amount: Money;
+  transacted_at: string;
+  posted_at?: string | null;
+  description?: string | null;
+  merchant?: string | null;
+  category_id?: UUID | null;
+  owner_user_id?: UUID | null;
+  is_pending?: boolean;
+  notes?: string | null;
+  tag_ids?: UUID[];
+}
+
+export interface TransactionUpdate {
+  amount?: Money | null;
+  transacted_at?: string | null;
+  posted_at?: string | null;
+  description?: string | null;
+  merchant?: string | null;
+  category_id?: UUID | null;
+  owner_user_id?: UUID | null;
+  is_pending?: boolean | null;
+  is_hidden?: boolean | null;
+  review_status?: "needs_review" | "reviewed" | "ignored" | null;
+  notes?: string | null;
+  tag_ids?: UUID[] | null;
+}
+
+export interface SplitIn {
+  amount?: Money | null;
+  pct?: Money | null;
+  category_id?: UUID | null;
+  owner_user_id?: UUID | null;
+  notes?: string | null;
 }

@@ -6,6 +6,7 @@ import Accounts from "@/pages/Accounts";
 import Transactions from "@/pages/Transactions";
 import Review from "@/pages/Review";
 import Reports from "@/pages/Reports";
+import Settings from "@/pages/Settings";
 
 export default function App() {
   const { me, loading } = useAuth();
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/review" element={<Review />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/accounts" replace />} />
       </Routes>
     </AppShell>

@@ -63,6 +63,33 @@ export async function addTransaction(
   await expect(form).toBeHidden();
 }
 
+/** Open the detail sheet for the transaction whose row shows `merchant`. */
+export async function openTxn(page: Page, merchant: string): Promise<void> {
+  await page.getByTestId("txn-list").getByText(merchant).first().click();
+  await expect(page.getByTestId("txn-detail")).toBeVisible();
+}
+
+/** Advance the deck (approving) until `merchant` is the card on top.
+ *
+ * The review queue is shared and ordered by date, so any backlog — from an
+ * earlier run, another spec, or a previous session — can sit ahead of the card a
+ * test just created. Draining it is what a user would do; returning early keeps
+ * the spec about its own card. */
+export async function reviewTarget(page: Page, merchant: string, maxApprovals = 40): Promise<void> {
+  for (let i = 0; i <= maxApprovals; i++) {
+    if (await page.getByTestId("review-empty").isVisible().catch(() => false)) {
+      throw new Error(`review queue emptied before "${merchant}" was reached`);
+    }
+    const card = page.getByTestId("swipe-card");
+    const text = (await card.textContent().catch(() => null)) ?? "";
+    if (text.includes(merchant)) return;
+    await page.getByTestId("review-approve").click();
+    // The deck advances optimistically; wait for the card to actually swap.
+    await expect(card).not.toHaveText(text, { timeout: 5_000 });
+  }
+  throw new Error(`"${merchant}" never reached the top of the deck`);
+}
+
 /** Number of items in the review queue ("N to review" / "All done"). */
 export async function readRemaining(page: Page): Promise<number> {
   const text = (await page.getByTestId("review-remaining").textContent()) ?? "";

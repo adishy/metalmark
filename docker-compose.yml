@@ -47,6 +47,10 @@ services:
     build:
       context: ./backend
     command: ["python", "-m", "app.worker"]
+    # The worker serves no HTTP port, so the image's /healthz healthcheck
+    # (meant for the api) would wrongly mark it unhealthy. Disable it here.
+    healthcheck:
+      disable: true
     environment:
       KESTREL_ENV: ${KESTREL_ENV:-dev}
       KESTREL_LOG_LEVEL: ${KESTREL_LOG_LEVEL:-INFO}

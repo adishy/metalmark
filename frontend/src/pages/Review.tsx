@@ -11,10 +11,16 @@ export default function Review() {
   const queue = useTransactions({ review_status: "needs_review" });
   const categories = useCategories();
   const update = useUpdateTransaction();
-  const [index, setIndex] = useState(0);
+  // Track the cards we have decided by id, never by position: the query
+  // refetches after each decision and the decided txn drops out of the list, so
+  // an index would skip the card that slid into the vacated slot.
+  const [decided, setDecided] = useState<ReadonlySet<string>>(() => new Set());
 
-  const items = queue.data?.items ?? [];
-  const current = items[index];
+  const items = useMemo(
+    () => (queue.data?.items ?? []).filter((t) => !decided.has(t.id)),
+    [queue.data, decided],
+  );
+  const current = items[0];
 
   const catName = useMemo(() => {
     const m = new Map<string, string>();
@@ -24,11 +30,15 @@ export default function Review() {
 
   const decide = useCallback(
     (txn: Transaction, keep: boolean) => {
+      setDecided((prev) => {
+        const next = new Set(prev);
+        next.add(txn.id);
+        return next;
+      });
       update.mutate({
         id: txn.id,
         body: { review_status: keep ? "reviewed" : "ignored" },
       });
-      setIndex((i) => i + 1);
     },
     [update],
   );
@@ -43,7 +53,7 @@ export default function Review() {
     return () => window.removeEventListener("keydown", onKey);
   }, [current, decide]);
 
-  const remaining = items.length - index;
+  const remaining = items.length;
 
   return (
     <div className="space-y-4">

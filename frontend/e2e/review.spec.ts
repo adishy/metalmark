@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { addAccount, addTransaction, login, readRemaining } from "./helpers";
+import { addAccount, addTransaction, login, readRemaining, reviewTarget } from "./helpers";
 
 // Poll until the given merchant is no longer the visible review card (either the
 // deck advanced to a different card or the queue emptied).
@@ -30,7 +30,7 @@ async function queueUncategorized(page: Page, merchant: string): Promise<void> {
   await addTransaction(page, { accountName, amount: "-7.77", merchant }); // no category
   await page.getByTestId("nav-review").click();
   await expect(page.getByTestId("review-deck")).toBeVisible();
-  await expect(page.getByTestId("swipe-card")).toContainText(merchant);
+  await reviewTarget(page, merchant);
 }
 
 test("review: approving a card removes it from the queue", async ({ page }) => {
