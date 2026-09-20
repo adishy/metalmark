@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { useAuth } from "@/auth/AuthContext";
+import { MetalMark } from "@/components/MetalMark";
 import { ThemeButton } from "@/components/ThemeToggle";
 import { AdminIcon, ChartIcon, ListIcon, ReviewIcon, SettingsIcon, WalletIcon } from "@/components/icons";
 
@@ -69,7 +70,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
           bar. Focus scroll-margin for this bar is set in index.css. */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2">
         <div className="flex min-w-0 items-center gap-6">
-          <span className="text-lg font-semibold text-accent">MetalMark</span>
+          {/* Mark and wordmark as one unit, so the `gap-6` above stays the space
+              between the brand and the nav rather than creeping in between the
+              two halves of the brand. At 28 px the mark is the size of an app
+              icon on a phone's home row — the header is the one place the mark
+              has to survive next to a lot of other things. */}
+          <span className="flex min-w-0 items-center gap-2">
+            <MetalMark size={28} />
+            <span className="text-lg font-semibold text-accent">MetalMark</span>
+          </span>
           <nav className="hidden gap-1 sm:flex" aria-label="Main">
             {items.map((n) => (
               <NavLink

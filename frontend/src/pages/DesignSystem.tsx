@@ -28,6 +28,7 @@ import {
 import { formatDuration, formatMoney } from "@/lib/format";
 import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
 import AccountMark from "@/components/AccountMark";
+import { MetalMark } from "@/components/MetalMark";
 import { Day, Instant, Time } from "@/components/datetime";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import type { Connection, Owner } from "@/api/types";
@@ -574,6 +575,41 @@ export default function DesignSystem() {
           time. Getting those two the wrong way round is the entire failure mode, so the frame is
           in the component's name — <code>&lt;Day&gt;</code> or <code>&lt;Instant&gt;</code> — and
           not a prop.
+        </p>
+      </Section>
+
+      <Section
+        title="The mark"
+        note="The app's own mark — the metalmark, a Riodinidae butterfly — at the sizes it is used, down to the 16 px a tab strip gives it. It is one file: scripts/metalmark-mark.mjs draws it, `npm run icons` writes it to public/, and this component is an <img> of the SVG the tab is already using. So the picture in the tab, in the launcher, on a desktop notification and beside the wordmark are the same bytes and cannot drift apart."
+      >
+        <div className="flex flex-wrap items-end gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <span className="flex items-center gap-2">
+              <MetalMark size={28} />
+              <span className="text-lg font-semibold text-accent">MetalMark</span>
+            </span>
+            <span className="font-mono text-xs text-fg-muted">28 · header</span>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <MetalMark size={48} />
+            <span className="font-mono text-xs text-fg-muted">48 · sign-in</span>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <MetalMark size={16} />
+            <span className="font-mono text-xs text-fg-muted">16 · favicon floor</span>
+          </div>
+        </div>
+        <p className="text-xs text-fg-muted">
+          It <strong>draws its own field</strong> and is never recoloured. That is not laziness — the
+          mark has to stay legible at 16 px in a tab strip, which is why it is a filled tile with a
+          teal rim rather than a bare butterfly, and why it looks the same here as in the favicon. On
+          the dark surfaces that field sits one step up from the background and the rim carries the
+          shape; tinting it to the accent would trade the match for the mark.
+        </p>
+        <p className="text-xs text-fg-muted">
+          Always <strong>decorative</strong>: <code>alt=&quot;&quot;</code> is baked into the
+          component, because every call site already puts the word &quot;MetalMark&quot; beside it
+          and an alt text would say the name twice (§4.2).
         </p>
       </Section>
 

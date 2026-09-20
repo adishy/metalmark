@@ -78,6 +78,20 @@ describe("<AppShell /> navigation", () => {
     expect(screen.queryByTestId("tab-admin")).not.toBeInTheDocument();
   });
 
+  it("puts the mark beside the wordmark, and not in the reading order", () => {
+    // `alt=""` is the assertion, not a detail of it. A screen reader that meets
+    // an image with no alt reads the filename, and one that meets `alt="
+    // MetalMark"` says the name twice — the wordmark is right there. So the mark
+    // is decorative and the test says so, because the difference is invisible on
+    // screen and no other test would ever catch it.
+    me = who({ isAdmin: false });
+    renderShell();
+
+    const mark = screen.getByTestId("metalmark-mark");
+    expect(mark).toHaveAttribute("src", "/favicon.svg");
+    expect(mark).toHaveAttribute("alt", "");
+  });
+
   it("names the admin route in the document title", () => {
     // The string a person scans for. The panel shipped without the word "Admin"
     // anywhere in the interface, which is a large part of why it went unfound.

@@ -32,6 +32,17 @@ describe("<Login />", () => {
     expect(screen.getByTestId("password")).toHaveAttribute("type", "password");
   });
 
+  it("shows the mark above the name, decoratively", () => {
+    // The sign-in page is outside the shell, so it renders the mark itself
+    // rather than inheriting the header's. Same decorative rule as there: the
+    // h1 underneath already says the name.
+    renderLogin();
+
+    const mark = screen.getByTestId("metalmark-mark");
+    expect(mark).toHaveAttribute("src", "/favicon.svg");
+    expect(mark).toHaveAttribute("alt", "");
+  });
+
   it("does not show an error message on first render", () => {
     renderLogin();
     expect(screen.queryByTestId("login-error")).not.toBeInTheDocument();

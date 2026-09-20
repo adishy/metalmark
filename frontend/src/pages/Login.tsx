@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
 import { Button, Field, Input, Spinner } from "@/components/form";
+import { MetalMark } from "@/components/MetalMark";
 
 export default function Login() {
   const { login } = useAuth();
@@ -33,7 +34,13 @@ export default function Login() {
         className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8"
         data-testid="login-form"
       >
-        <div className="text-center">
+        {/* The one screen with room for the mark at a size that shows what it
+            is — the header runs it at 28 px, where it is a dot with a butterfly
+            in it. 48 px is §2.6's next step up from the avatar sizes, and it is
+            the first thing on the page, which is what a sign-in screen wants:
+            the brand before the form. */}
+        <div className="flex flex-col items-center gap-2 text-center">
+          <MetalMark size={48} />
           <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
           <p className="text-sm text-fg-muted">Sign in to your household</p>
         </div>
