@@ -3737,6 +3737,9 @@ components:
       title: CategoryOut
     CategorySpendRow:
       properties:
+        key:
+          type: string
+          title: Key
         category_id:
           anyOf:
           - type: string
@@ -3752,10 +3755,19 @@ components:
           title: Total
       type: object
       required:
+      - key
       - category_id
       - category_name
       - total
       title: CategorySpendRow
+      description: 'One bucket of the window''s spending.
+
+
+        ``total`` is a magnitude — spending is positive here, as it is on the graph
+
+        and unlike ``CashFlowPoint.expense``. The direction is carried by the report
+
+        being about spending, so a signed figure would be a second place to say it.'
     ConnectionClaim:
       properties:
         setup_token:
@@ -5673,6 +5685,12 @@ components:
           type: string
           title: Attribution
           default: row
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          default: []
       type: object
       required:
       - base_currency

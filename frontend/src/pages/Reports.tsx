@@ -156,10 +156,30 @@ export default function Reports() {
     [cashFlow.data, t],
   );
 
-  const donutOption: EChartsOption = useMemo(
-    () => ({
-      tooltip: chartTooltip(t, { trigger: "item", formatter: "{b}: {c} ({d}%)" }),
-      legend: chartLegend(t, { bottom: 0, type: "scroll" }),
+  const donutOption: EChartsOption = useMemo(() => {
+    const rows = spending.data?.rows ?? [];
+    const total = rows.reduce((sum, r) => sum + Number(r.total), 0);
+    // Slices are named by the row's **key**, not by the words a reader sees, for
+    // the reason the graph gives: ECharts merges data items that share a name, so
+    // two rows with the same label would become one slice with their totals added
+    // — a chart that balances against a legend that is wrong. Two categories may
+    // share a name, and a household may name a category "Investment fees" while
+    // also paying real ones. The names live in this map instead, and both the
+    // legend and the tooltip read them back out.
+    const nameOf = (key: unknown) =>
+      rows.find((r) => r.key === key)?.category_name ?? String(key);
+    return {
+      tooltip: chartTooltip(t, {
+        trigger: "item",
+        formatter: (p: TooltipPoint) => {
+          const value = Number(p.value);
+          const share = total === 0 ? 0 : (value / total) * 100;
+          // `share` replaces ECharts' `{d}`, which is only available to the
+          // template-string form — and the template cannot map a key to a name.
+          return `${nameOf(p.name)}: ${formatMoney(value, ccy)} (${share.toFixed(0)}%)`;
+        },
+      }),
+      legend: chartLegend(t, { bottom: 0, type: "scroll", formatter: nameOf }),
       color: t.series,
       series: [
         {
@@ -168,17 +188,14 @@ export default function Reports() {
           center: ["50%", "45%"],
           // The gap between slices is the card behind them, not a fixed navy.
           itemStyle: { borderColor: t.surface, borderWidth: 2 },
-          label: { color: t.label },
+          // Named everywhere the reader looks, keyed everywhere ECharts looks.
+          label: { color: t.label, formatter: (p: TooltipPoint) => nameOf(p.name) },
           emphasis: emphasisPie(t),
-          data: (spending.data?.rows ?? []).map((r) => ({
-            name: r.category_name,
-            value: Number(r.total),
-          })),
+          data: rows.map((r) => ({ name: r.key, value: Number(r.total) })),
         },
       ],
-    }),
-    [spending.data, t],
-  );
+    };
+  }, [spending.data, t, ccy]);
 
   // The graph, built here and nowhere else: the payload carries rows and this is
   // the one place the picture's shape is decided, so a layout bug and a data bug
@@ -512,12 +529,31 @@ export default function Reports() {
             )}
             <ul className="mt-3 space-y-1">
               {spending.data?.rows.map((r) => (
-                <li key={r.category_id ?? "none"} className="flex justify-between text-sm">
+                // Keyed on the row's identity, not its category: investment fees
+                // and unfiled rows both have no category, and keying on that would
+                // give two rows one key — one of them silently dropped from the
+                // list while the total still counted it.
+                <li key={r.key} className="flex justify-between text-sm">
                   <span>{r.category_name}</span>
                   <span>{formatMoney(r.total, ccy)}</span>
                 </li>
               ))}
             </ul>
+            {/* Same block as the graph's, for the same reason: this report counts
+                investment events now, so it can have dropped one, and a fee the
+                reader paid is not a footnote. */}
+            {(spending.data?.warnings.length ?? 0) > 0 && (
+              <div className="mt-3 rounded-control bg-warning/10 p-3" data-testid="spending-warnings">
+                <p className="text-xs font-medium text-warning">
+                  Some of this spending is missing data
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-fg-muted">
+                  {spending.data?.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {ownerFilter && spending.data && (
               <p className="mt-2 text-xs text-fg-muted" data-testid="spending-attribution">
                 Attribution: {spending.data.attribution} — this counts entries, not accounts, so it

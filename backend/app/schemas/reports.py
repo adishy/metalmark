@@ -108,6 +108,20 @@ class CashFlowSankey(BaseModel):
 
 
 class CategorySpendRow(BaseModel):
+    """One bucket of the window's spending.
+
+    ``total`` is a magnitude — spending is positive here, as it is on the graph
+    and unlike ``CashFlowPoint.expense``. The direction is carried by the report
+    being about spending, so a signed figure would be a second place to say it.
+    """
+
+    # The row's *identity*, and the reason it exists is that it is not the
+    # category. Investment fees are spending with no category, so their row has
+    # ``category_id: None`` like the unfiled rows do — two rows sharing a null
+    # category, which a UI keying on the category id would collapse into one. The
+    # same key the graph builds its node ids from, so a slice here and a node
+    # there are the same thing named the same way.
+    key: str
     category_id: uuid.UUID | None
     category_name: str
     total: Decimal
@@ -185,6 +199,14 @@ class SpendingReport(BaseModel):
     start: date
     end: date
     rows: list[CategorySpendRow]
+    # The sum of the rows above it, and equal to `-expense` on the cash-flow
+    # series and `total_expense` on the graph over the same window: the three are
+    # one quantity arranged three ways.
     total: Decimal
     # Always "row", for the same reason as CashFlowSeries.attribution.
     attribution: str = "row"
+    # This report now counts investment events, so it can drop one for want of an
+    # FX rate — and a dropped fee is spending the reader paid and this report does
+    # not show. Carried here rather than left to the graph above it, because the
+    # endpoint has callers that never see the graph.
+    warnings: list[str] = []

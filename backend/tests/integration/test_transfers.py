@@ -142,7 +142,7 @@ async def test_unlink_returns_both_legs_to_cash_flow_and_spending(household_fact
         async def snapshot():
             _b, _g, months = await reports.cash_flow_series(
                 s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
-            _b, _rows, spend = await reports.spending_by_category(
+            _b, _rows, spend, _w = await reports.spending_by_category(
                 s, hh, date(2026, 1, 1), date(2026, 1, 31))
             return months[0], spend
 

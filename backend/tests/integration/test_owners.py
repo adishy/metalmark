@@ -436,9 +436,9 @@ async def test_spending_report_is_row_scoped(household_factory):
             await txns.update_transaction(s, hh, txn_id,
                                           TransactionUpdate(category_id=dining.id))
 
-        _b, _rows, beth_total = await reports.spending_by_category(
+        _b, _rows, beth_total, _w = await reports.spending_by_category(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), f["beth"].id)
-        _b, _rows_all, all_total = await reports.spending_by_category(
+        _b, _rows_all, all_total, _w = await reports.spending_by_category(
             s, hh, date(2026, 1, 1), date(2026, 1, 31))
 
     # Beth: her 30 share of the split + the 20 she owns outright = 50 — not the
@@ -496,7 +496,7 @@ async def test_net_worth_report_is_account_scoped_and_still_reconciles(household
         whole = await reports.net_worth_series(s, hh, date(2026, 1, 1), date(2026, 1, 31))
         beth_series = await reports.net_worth_series(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), beth.id)
-        _b, _rows, beth_spending = await reports.spending_by_category(
+        _b, _rows, beth_spending, _w = await reports.spending_by_category(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), beth.id)
 
     assert beth_series["attribution"] == "account"

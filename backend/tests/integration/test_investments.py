@@ -617,4 +617,62 @@ async def test_a_sankey_gives_a_dividend_and_a_fee_a_node_of_their_own(household
     ]
     # The buy is nowhere, and neither is a node claiming an unfiled transaction.
     assert graph["net"] == Decimal("100.0000")
+
+
+async def test_an_investment_fee_is_spending_in_every_report_that_counts_it(household_factory):
+    """One quantity, three arrangements of it — and the fee used to be in two.
+
+    The spending report walked the ledger alone, so a fee was money the household
+    paid that no spending report counted while the bars and the graph beside it both
+    did. Three reports of what a window cost, disagreeing by the fees, is three
+    answers to one question — and the reader has no way to tell which is right.
+
+    It is also the case that made ``key`` necessary rather than tidy. A fee has no
+    category, so it arrives with ``category_id`` of ``None`` — the exact state an
+    unfiled row is in, and here the state a *reversed dividend* is in too. Two rows
+    with no category and one identity between them would show one of them twice.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh, name="Brokerage")
+        s.add_all(
+            [
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="dividend",
+                    trade_date=date(2026, 2, 5), amount=Decimal("120"), currency="USD",
+                ),
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="fee",
+                    trade_date=date(2026, 2, 6), amount=Decimal("-15"), currency="USD",
+                ),
+                # Expense-side income, so the two rows below share a null category
+                # and still have to stay two rows.
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="dividend",
+                    trade_date=date(2026, 2, 7), amount=Decimal("-5"), currency="USD",
+                ),
+            ]
+        )
+        await s.flush()
+
+        _base, rows, total, warnings = await reports.spending_by_category(
+            s, hh, date(2026, 2, 1), date(2026, 2, 28)
+        )
+        _base, _g, series = await reports.cash_flow_series(
+            s, hh, date(2026, 2, 1), date(2026, 2, 28), granularity="month"
+        )
+        graph = await reports.cash_flow_sankey(s, hh, date(2026, 2, 1), date(2026, 2, 28))
+
+    assert [(r["key"], r["category_name"], r["total"]) for r in rows] == [
+        ("investment:fee", "Investment fees", Decimal("15.0000")),
+        ("investment:dividend", "Investment income", Decimal("5.0000")),
+    ]
+    assert [r["category_id"] for r in rows] == [None, None]
+    assert total == Decimal("20.0000")
+    # The claim, stated against both neighbours rather than asserted of this
+    # report alone: the spending total, the cash-flow expense and the graph's
+    # expense side are one figure read three ways.
+    assert total == -sum((Decimal(p["expense"]) for p in series), Decimal("0"))
+    assert total == graph["total_expense"]
+    assert warnings == []
     assert all(r["category_id"] is None for r in graph["income"] + graph["expense"])

@@ -553,18 +553,30 @@ async def test_the_sankey_totals_the_same_window_the_bars_do(client):
     window = {"start": "2026-01-01", "end": "2026-03-31"}
     bars = (await client.get("/reports/cash-flow", params=window)).json()
     graph = (await client.get("/reports/cash-flow/sankey", params=window)).json()
+    donut = (await client.get("/reports/spending", params=window)).json()
 
     def bars_total(field: str) -> Decimal:
         return sum((Decimal(p[field]) for p in bars["points"]), Decimal("0"))
 
-    assert graph["attribution"] == bars["attribution"] == "row"
-    assert graph["base_currency"] == bars["base_currency"]
-    assert (graph["start"], graph["end"]) == (bars["start"], bars["end"])
+    assert graph["attribution"] == bars["attribution"] == donut["attribution"] == "row"
+    assert graph["base_currency"] == bars["base_currency"] == donut["base_currency"]
+    assert (graph["start"], graph["end"]) == (bars["start"], bars["end"]) == (
+        donut["start"],
+        donut["end"],
+    )
     assert Decimal(graph["total_income"]) == bars_total("income") == Decimal("2000")
     # The one place the two shapes part company, asserted rather than glossed: the
     # series carries expense negative, the graph carries it positive.
     assert Decimal(graph["total_expense"]) == -bars_total("expense") == Decimal("165")
     assert Decimal(graph["net"]) == bars_total("net")
+    # All three row-scoped reports over one window, and the spending total is the
+    # expense side of the others rather than a fourth opinion: they are built on
+    # one call (`_load_entries`), and this is what says so through the wire.
+    assert Decimal(donut["total"]) == Decimal(graph["total_expense"])
+    assert Decimal(donut["total"]) == -bars_total("expense")
+    # Every row carries its own identity, and here that is doing real work: the
+    # two uncategorized rows share a `category_id` of null and must stay two rows.
+    assert len({r["key"] for r in donut["rows"]}) == len(donut["rows"])
     # And the graph's own figures add up, so no reader has to reconcile a residual
     # the server could have left in it.
     assert Decimal(graph["total_income"]) - Decimal(graph["total_expense"]) == Decimal(

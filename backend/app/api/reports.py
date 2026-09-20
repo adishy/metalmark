@@ -108,7 +108,9 @@ async def spending(
     ctx: RequestContext = Depends(get_context),
 ):
     start, end = await _window(ctx, start, end)
-    base, rows, total = await reports.spending_by_category(
+    base, rows, total, warnings = await reports.spending_by_category(
         ctx.session, ctx.household_id, start, end, owner_id
     )
-    return SpendingReport(base_currency=base, start=start, end=end, rows=rows, total=total)
+    return SpendingReport(
+        base_currency=base, start=start, end=end, rows=rows, total=total, warnings=warnings
+    )

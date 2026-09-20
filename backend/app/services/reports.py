@@ -1198,33 +1198,51 @@ async def cash_flow_sankey(
 async def spending_by_category(session: AsyncSession, household_id: uuid.UUID,
                                start: date, end: date,
                                owner_id: uuid.UUID | None = None):
+    """The window's money out, bucketed — the expense half of the graph, as rows.
+
+    Built on ``_load_entries``, the same call ``/reports/cash-flow`` makes, so all
+    three row-scoped reports count one set of entries: ``total`` here is
+    ``-expense`` there and ``total_expense`` on the graph, and a test can hold all
+    three to the same figure. That is not tidiness. Three reports of one quantity
+    that disagree are three answers to "what did we spend", and the reader has no
+    way to tell which of them is right.
+
+    **Which is a change, and the visible one is investment fees.** This used to
+    walk the ledger alone, so an advisory fee was money the household paid that no
+    spending report counted — while the income-vs-expense bars and the graph beside
+    them both did. A fee has no category, so its row carries ``category_id: None``
+    and is named for what it was (``INVESTMENT_LABELS``), exactly as the graph
+    names the same node — and it is why every row carries a ``key``. Two rows can
+    share a null category and must not share an identity, or a reader comparing
+    "Investment fees" against "Uncategorized" is comparing one figure with itself.
+
+    Quantized per entry and then summed, rather than summed and then quantized:
+    that is what makes the total the sum of the rows above it exactly, with no
+    second rounding that could differ by a cent (ADR-0005).
+    """
     base = await base_currency(session, household_id)
-    ctype = await _category_type_map(session)
-    owners = await account_owner_map(session)
-    names = dict(
-        (await session.execute(select(Category.id, Category.name))).all()
-    )
-    totals: dict[uuid.UUID | None, Decimal] = {}
+    flows, warnings = await _load_entries(session, start, end, base, owner_id=owner_id)
+    names = dict((await session.execute(select(Category.id, Category.name))).all())
 
-    txns = await _reporting_transactions(session, start, end, None)
-    for t in txns:
-        if t.transfer_group_id is not None:
+    totals: dict[str, dict] = {}
+    for f in flows:
+        if f.amount >= 0:
+            # Income is not spending, and neither is a zero — the same reading
+            # `_fold` gives it, so the two reports agree about nothing happening
+            # instead of one of them growing a row with nothing behind it.
             continue
-        for cat_id, bamt, entry_owner in _entries(t, owners):
-            if bamt is None or bamt >= 0:  # spending only (money out)
-                continue
-            if owner_id is not None and entry_owner != owner_id:
-                continue
-            if cat_id and ctype.get(cat_id) == "transfer":
-                continue
-            totals[cat_id] = totals.get(cat_id, Decimal("0")) + (-bamt)
+        key, label = _flow_node(f, names)
+        row = totals.get(key)
+        if row is None:
+            row = {
+                "key": key,
+                "category_id": f.category_id,
+                "category_name": label,
+                "total": Decimal("0"),
+            }
+            totals[key] = row
+        row["total"] += quantize_storage(-f.amount)
 
-    rows = [
-        {
-            "category_id": cid,
-            "category_name": names.get(cid, "Uncategorized") if cid else "Uncategorized",
-            "total": quantize_storage(v),
-        }
-        for cid, v in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
-    ]
-    return base, rows, quantize_storage(sum(totals.values(), Decimal("0")))
+    rows = sorted(totals.values(), key=lambda r: r["total"], reverse=True)
+    total = sum((r["total"] for r in rows), Decimal("0"))
+    return base, rows, total, warnings

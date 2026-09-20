@@ -185,7 +185,7 @@ async def test_report_range_covers_the_whole_end_day(household_factory):
         # pass for a reason that has nothing to do with the end bound.
         _base, _g, cf = await reports.cash_flow_series(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
-        _base, spend, spend_total = await reports.spending_by_category(
+        _base, spend, spend_total, _warn = await reports.spending_by_category(
             s, hh, date(2026, 1, 1), date(2026, 1, 31))
 
     assert len(cf) == 1

@@ -255,12 +255,35 @@ export interface CashFlowSankey extends ReportWindow {
   warnings: string[];
 }
 
+/**
+ * One bucket of the window's spending.
+ *
+ * `total` is a **magnitude**, unlike `CashFlowPoint.expense`: spending is
+ * positive here, as it is on the graph.
+ */
+export interface CategorySpendRow {
+  /**
+   * The row's *identity*. Not the category — investment fees are spending with
+   * no category, so they carry `category_id: null` exactly as unfiled rows do.
+   * A list or a chart keying on the category id would collapse those into one
+   * row, which is why this exists and why it is the same key the Sankey builds
+   * its node ids from.
+   */
+  key: string;
+  category_id: UUID | null;
+  category_name: string;
+  total: Money;
+}
+
 export interface SpendingReport extends ReportWindow {
   base_currency: string;
-  rows: { category_id: UUID | null; category_name: string; total: Money }[];
+  rows: CategorySpendRow[];
+  /** The sum of the rows, and `-expense` on the cash-flow series over the same window. */
   total: Money;
   /** Same row-level reading as cash flow. */
   attribution: "row";
+  /** A dropped flow here is spending the reader paid and this report does not show. */
+  warnings: string[];
 }
 
 export interface Member {
