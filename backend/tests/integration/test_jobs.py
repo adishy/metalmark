@@ -31,6 +31,7 @@ from sqlalchemy import select, text
 
 from app.db import scoped_session, unscoped_session
 from app.models import Account, AccountConnection, SyncJob, SyncRun, Transaction
+from app.models.sync import JOB_STATUSES
 from app.security.crypto import SecretBox
 from app.services import jobs, sync
 from app.services.fake_simplefin import FAKE_ACCESS_URL
@@ -47,6 +48,11 @@ NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
 #: Comfortably longer than ``REAP_AFTER_SECONDS``, so "stale" is stale by any
 #: reading and the test is not balanced on the constant's exact value.
 ANCIENT = NOW - timedelta(hours=4)
+
+#: The statuses a job never leaves. Derived from the model rather than written
+#: out: a seventh status added to ``JOB_STATUSES`` and forgotten here would make
+#: the poll below wait forever and fail as a bare timeout, with nothing saying why.
+_TERMINAL = frozenset(JOB_STATUSES) - {"queued", "running"}
 
 
 # ---- fixtures --------------------------------------------------------------
@@ -743,18 +749,23 @@ async def test_the_consumer_drains_the_queue_and_stops_when_asked(household, mon
 
     monkeypatch.setattr(worker, "household_ids", lambda: _one(household))
 
-    stop = asyncio.Event()
-    consumer = asyncio.create_task(worker.consume(stop))
+    async with scoped_session(household) as session:
+        job_id = (await session.execute(select(SyncJob.id))).scalar_one()
 
     async def _settled() -> SyncJob:
+        # A *terminal* status, not merely "not queued". The claim moves the job to
+        # `running` well before the sync finishes, so polling for "not queued"
+        # returns during the run — and passes or fails depending on whether the
+        # sync happens to complete between two polls. On a fast laptop that is
+        # usually; on CI it was not.
         while True:
             row = await _job_row(household, job_id)
-            if row.status != "queued":
+            if row.status in _TERMINAL:
                 return row
             await asyncio.sleep(0.05)
 
-    async with scoped_session(household) as session:
-        job_id = (await session.execute(select(SyncJob.id))).scalar_one()
+    stop = asyncio.Event()
+    consumer = asyncio.create_task(worker.consume(stop))
 
     try:
         row = await asyncio.wait_for(_settled(), timeout=60)

@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # Defaults to the real provider; set to "fake" for a credential-free demo.
     simplefin_provider: str = Field(default="simplefin", alias="METALMARK_SIMPLEFIN_PROVIDER")
 
+    # Where a broken connection is reported. Unset — the default — means no
+    # notifications at all, which is the right default for an instance nobody is
+    # watching. See services/notifications.py.
+    notify_webhook_url: str | None = Field(default=None, alias="METALMARK_NOTIFY_WEBHOOK_URL")
+
     secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")

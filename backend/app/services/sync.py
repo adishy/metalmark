@@ -56,7 +56,7 @@ from app.models.sync import EVENT_LEVELS
 from app.schemas.ledger import is_asset_for
 from app.security.crypto import SecretBox
 from app.security.redact import sanitize
-from app.services import rules
+from app.services import notifications, rules
 from app.services import transactions as txn_service
 from app.services.aggregator import (
     AccountSet,
@@ -1168,6 +1168,7 @@ async def _finish_failed(
     broken.
     """
     safe = sanitize(message)
+    trouble: notifications.Trouble | None = None
     async with scoped_session(household_id) as session:
         log = RunLog(session, household_id, run_id)
         await log.emit("error", "run.failed", error=safe, kind=kind, http_status=http_status)
@@ -1176,15 +1177,33 @@ async def _finish_failed(
         )
         connection = await _get_connection(session, connection_id)
         connection.last_error = safe
+        broke = False
         if kind == "auth":
             connection.status = "auth_error"
+            broke = True
         elif kind == "payment":
             connection.status = "error"
+            broke = True
         # The cadence clock moves even on failure — otherwise the tick re-enqueues
         # this connection every minute against a bank that is down (see
         # AccountConnection.next_sync_at). last_synced_at deliberately does not:
         # it means "last successful sync", and a failure is not one.
         connection.next_sync_at = moment + timedelta(seconds=backoff_seconds(1))
+        if broke:
+            # A connection that has just broken is the one thing worth telling
+            # somebody about out of band. A *transient* failure is not: it is our
+            # problem, it retries on its own, and the status column was left alone
+            # precisely because the connection is not what is wrong.
+            #
+            # Decided here, delivered below — reading the connection's history
+            # belongs to this transaction; the webhook call does not, because a
+            # webhook that hangs must not hold this run's row locks.
+            trouble = await notifications.trouble_for(
+                session, connection=connection, run_id=run_id,
+                status=connection.status, message=safe, now=moment,
+            )
+    if trouble is not None:
+        await notifications.deliver(trouble)
     return SyncOutcome(status="error", run_id=run_id, error=safe)
 
 
@@ -1352,6 +1371,9 @@ async def run_connection_sync(
     cancelled = False
     counts = RunCounts()
     status = "ok"
+    # Built inside the transaction (it reads this connection's run history) and
+    # sent after it commits, so the webhook is never in the transaction's way.
+    trouble: notifications.Trouble | None = None
     try:
         async with scoped_session(household_id) as session:
             if fence is not None and not await fence(session):
@@ -1402,6 +1424,13 @@ async def run_connection_sync(
                 if connection_status is not None:
                     connection.status = connection_status
                     connection.last_error = sanitize("; ".join(account_set.errlist))
+                    # The errlist said something about the *connection*, on a 200.
+                    # Same rule as a failed fetch: news is worth a notification,
+                    # a repeat is not.
+                    trouble = await notifications.trouble_for(
+                        session, connection=connection, run_id=run_id,
+                        status=connection_status, message=connection.last_error, now=moment,
+                    )
                 else:
                     # A run that reached the bank without a connection-level
                     # complaint clears the previous one: the health column
@@ -1413,6 +1442,9 @@ async def run_connection_sync(
             household_id, run_id, connection_id, exc.message,
             moment=moment, kind=exc.kind, http_status=exc.status,
         )
+
+    if trouble is not None:
+        await notifications.deliver(trouble)
 
     if cancelled:
         return SyncOutcome(status="cancelled", run_id=run_id)
