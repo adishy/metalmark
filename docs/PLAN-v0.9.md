@@ -8,19 +8,31 @@
 
 M1a (the manual ledger) and M2's SimpleFIN vertical are done and green: ledger, FX, rules, transfers,
 CSV import, sync engine, job queue, worker, admin panel, reports (net worth, cash-flow bars, spending
-donut). Working tree clean at `7e52c2e`, CI green on all four jobs.
+donut).
 
-What is *not* built, in the order this plan addresses it:
+What is *not* built, in the order this plan addresses it. Status as of `e2578c9`:
 
 | # | Item | State today |
 |---|---|---|
-| 4 | OFX/QFX import, auto-split rules | OFX is a comment (`api/imports.py:29`); auto-split deferred at `models/ledger.py:400` |
-| 1 | Investments (M1b) | Nothing. No `securities`/`holdings`/`prices`/`investment_transactions`. Three accepted ADRs specify it |
+| 4 | OFX/QFX import, auto-split rules | **Done** (`ea80d13`) |
+| 1 | Investments (M1b) | **Models, services, API and the write path done** (`391eaf0`, `af92b83`, `cafc01e`); the allocation/portfolio read UI is written and in review |
 | 3 | Cash-flow Sankey | Nothing. Reports has the data layer it needs |
 | 2 | Portable export/import + encrypted backups | Nothing. `pg_dump` appears only in prose |
-| — | Admin panel discoverability | **Shipped but the user cannot find it.** A defect in what we just built |
-| — | Reports time filters, review deck, account marks, pretty dates, desktop layout, desktop notifications, app icon | Nothing; layout is mobile-first with no desktop section in DESIGN.md |
+| — | Admin panel discoverability | **Done** — it has a nav item, a Settings tab and a document title, all of which say "Admin" |
+| — | Reports time filters, review deck, account marks, pretty dates, desktop layout, desktop notifications, app icon | Foundation laid (`cafc01e`: date vocabulary, account monogram). The range control, review deck, desktop layout and notifications remain |
 | — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | Nothing. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
+
+**Two notes on the order, both raised rather than taken unilaterally.**
+
+- Decision M argues the Bulma shell swap should land *before* the unbuilt UI (the Sankey, the review deck,
+  the export screens) so none of it is written twice. The stated order puts Bulma last, and the stated
+  order stands — but the investments read UI was the first casualty and has already been written in
+  Tailwind. The question is worth answering again before the review deck, which is the next unbuilt
+  surface of any size.
+- The identity in decision A is **superseded in one respect by ADR-0032**: `market appreciation` is now
+  computed from positions and prices rather than taken as the residual, and the residual became a fourth
+  term, `unexplained`, which is *reported* rather than absorbed. Decision A's reasoning about why
+  investments break the two-term identity still holds; only "computed as the residual" is stale.
 
 ## Appended after this plan was written
 
@@ -45,7 +57,9 @@ We will extend the identity to
 ```
 
 where `market appreciation` is computed as the residual (the same honest-decomposition trick ADR-0017
-already uses for revaluation), **and** investment `buy`/`sell` are excluded from cash flow exactly as
+already uses for revaluation — **superseded: ADR-0032 made it a computed term and added `unexplained` as
+the reported residual, because a term defined as the remainder can never disagree with the others**),
+**and** investment `buy`/`sell` are excluded from cash flow exactly as
 transfers are (ADR-0008) — they are a movement between asset classes, not income or expense. Only
 `dividend` and `interest` count as income. This is the single most important correctness decision in the
 investments workstream; without it the reports quietly stop reconciling and the failure looks like a
