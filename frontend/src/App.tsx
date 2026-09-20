@@ -8,6 +8,7 @@ import Transactions from "@/pages/Transactions";
 import Review from "@/pages/Review";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import DesignSystem from "@/pages/DesignSystem";
 
 export default function App() {
   const { me, loading } = useAuth();
@@ -39,6 +40,9 @@ export default function App() {
         <Route path="/review" element={<Review />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
+        {/* Reference page for the design system (docs/DESIGN.md). Deliberately
+            absent from the nav — it is a development tool, not a destination. */}
+        <Route path="/debug/design-system" element={<DesignSystem />} />
         <Route path="*" element={<Navigate to="/accounts" replace />} />
       </Routes>
     </AppShell>

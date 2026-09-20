@@ -17,14 +17,17 @@ export default function OwnerFilterChips({
   label?: string;
   testid?: string;
 }) {
+  // `min-h-11` (44px) and `text-sm`, not the `px-3 py-1 text-xs` this was: that
+  // computed to 24px, and chips are thumb targets (§4.5). Selection is carried
+  // by `aria-pressed` as well as the fill, so it is never colour alone.
   const chip = (on: boolean) =>
-    `rounded-full border px-3 py-1 text-xs ${
-      on ? "border-accent bg-accent/20 text-accent" : "border-border-strong text-fg-muted hover:text-fg"
+    `inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
+      on ? "border-accent bg-accent/20 font-medium text-accent" : "border-border-strong text-fg-muted hover:text-fg"
     }`;
 
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-fg-muted">{label}</p>
+      <p className="mb-2 text-xs font-medium text-fg-muted">{label}</p>
       <div className="flex flex-wrap gap-2" data-testid={testid}>
         <button
           type="button"

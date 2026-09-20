@@ -18,8 +18,15 @@ export async function login(page: Page): Promise<void> {
   await page.getByTestId("email").fill(OWNER_EMAIL);
   await page.getByTestId("password").fill(OWNER_PASSWORD);
   await page.getByTestId("login-submit").click();
-  // The app shell nav only exists once authenticated.
-  await expect(page.getByTestId("nav-accounts")).toBeVisible();
+  // The app shell nav only exists once authenticated. There are two of them —
+  // a desktop tab bar above 640px and a bottom tab bar below — and both are
+  // always in the DOM, each hidden by CSS at the other width. So assert on
+  // whichever this viewport actually shows: `nav-accounts` is `hidden sm:flex`
+  // and can never be visible at phone width. The `:visible` filter narrows the
+  // pair to exactly one, which is also what keeps strict mode happy.
+  await expect(
+    page.locator('[data-testid="nav-accounts"]:visible, [data-testid="tab-accounts"]:visible'),
+  ).toBeVisible();
 }
 
 /** Read the big net-worth figure from the Accounts header as a number. */

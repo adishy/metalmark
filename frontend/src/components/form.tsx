@@ -13,6 +13,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
+import { CheckIcon } from "@/components/icons";
 
 /*
  * `min-h-11` (44 px) is the target floor, not the text box's natural height:
@@ -119,6 +120,43 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
     return <textarea ref={ref} className={`${CONTROL} ${className ?? ""}`} {...props} />;
   },
 );
+
+/**
+ * A checkbox with its label, as one component.
+ *
+ * The label *is* the target: a native checkbox's own box is ~13 px, and the
+ * whole row is what a thumb actually hits, so the row carries `min-h-11` and the
+ * box is a 20 px visual inside it. The input stays a real `<input
+ * type="checkbox">` — `appearance-none` restyles it, it does not replace it, so
+ * the checked state, the keyboard behaviour and the accessible name all still
+ * come from the platform. The tick is a sibling `<svg>` revealed by
+ * `peer-checked:`, because a background-image would need a data URI in a class.
+ */
+export function Checkbox({
+  label,
+  hint,
+  className,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { label: ReactNode; hint?: ReactNode }) {
+  return (
+    <label
+      className={`flex min-h-11 cursor-pointer items-start gap-3 text-sm text-fg ${className ?? ""}`}
+    >
+      <span className="relative mt-2 grid size-5 shrink-0 place-items-center">
+        <input
+          type="checkbox"
+          className="peer size-5 appearance-none rounded border border-border-strong bg-surface-inset checked:border-accent checked:bg-accent disabled:opacity-50"
+          {...props}
+        />
+        <CheckIcon className="pointer-events-none absolute size-3.5 text-accent-fg opacity-0 peer-checked:opacity-100" />
+      </span>
+      <span className="min-w-0 py-2">
+        {label}
+        {hint && <span className="block text-xs text-fg-muted">{hint}</span>}
+      </span>
+    </label>
+  );
+}
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
