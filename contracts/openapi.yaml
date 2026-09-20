@@ -84,7 +84,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
@@ -108,7 +108,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -116,40 +116,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MeResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /auth/invites:
-    post:
-      tags:
-      - auth
-      summary: Create Invite
-      operationId: create_invite_auth_invites_post
-      parameters:
-      - name: metalmark_session
-        in: cookie
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: MetalMark Session
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InviteCreateRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InviteResponse'
         '422':
           description: Validation Error
           content:
@@ -170,7 +136,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -196,6 +162,15 @@ paths:
       summary: List Accounts
       operationId: list_accounts_accounts_get
       parameters:
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: metalmark_session
         in: cookie
         required: false
@@ -203,7 +178,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -227,6 +202,15 @@ paths:
       summary: Net Worth
       operationId: net_worth_accounts_net_worth_get
       parameters:
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: metalmark_session
         in: cookie
         required: false
@@ -234,7 +218,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -269,7 +253,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -303,7 +287,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -343,7 +327,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
@@ -367,7 +351,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -397,7 +381,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -431,7 +415,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -461,7 +445,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -495,7 +479,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -525,7 +509,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -566,7 +550,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
@@ -597,7 +581,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
@@ -628,10 +612,164 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /owners:
+    get:
+      tags:
+      - owners
+      summary: List Owners
+      operationId: list_owners_owners_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OwnerOut'
+                title: Response List Owners Owners Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - owners
+      summary: Create Owner
+      operationId: create_owner_owners_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /owners/{owner_id}:
+    patch:
+      tags:
+      - owners
+      summary: Update Owner
+      operationId: update_owner_owners__owner_id__patch
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - owners
+      summary: Delete Owner
+      description: 'Delete an owner, moving its rows to ``reassign_to`` (default: Shared).
+
+
+        Owner-only: the operation silently re-attributes existing ledger history, which
+
+        is a household-shape decision, not an everyday edit.'
+      operationId: delete_owner_owners__owner_id__delete
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: reassign_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Reassign To
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerDeleteResult'
         '422':
           description: Validation Error
           content:
@@ -652,7 +790,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -700,6 +838,15 @@ paths:
               format: uuid
           - type: 'null'
           title: Category Id
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: start
         in: query
         required: false
@@ -764,7 +911,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -799,7 +946,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -833,7 +980,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -873,7 +1020,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '204':
           description: Successful Response
@@ -904,7 +1051,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -941,7 +1088,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -975,7 +1122,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -1005,7 +1152,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       requestBody:
         required: true
         content:
@@ -1046,6 +1193,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: metalmark_session
         in: cookie
         required: false
@@ -1053,7 +1209,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -1088,6 +1244,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: metalmark_session
         in: cookie
         required: false
@@ -1095,7 +1260,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -1133,6 +1298,15 @@ paths:
           type: string
           format: date
           title: End
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
       - name: metalmark_session
         in: cookie
         required: false
@@ -1140,7 +1314,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -1168,7 +1342,41 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - household
+      summary: Update Household
+      description: 'Owner-only: the household name is what every member sees as their account.'
+      operationId: update_household_household_patch
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdUpdate'
       responses:
         '200':
           description: Successful Response
@@ -1196,7 +1404,7 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          title: MetalMark Session
+          title: Metalmark Session
       responses:
         '200':
           description: Successful Response
@@ -1254,12 +1462,12 @@ components:
             format: date
           - type: 'null'
           title: Balance Date
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
       type: object
       required:
       - name
@@ -1304,12 +1512,10 @@ components:
         is_asset:
           type: boolean
           title: Is Asset
-        owner_user_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: Owner User Id
+        owner_id:
+          type: string
+          format: uuid
+          title: Owner Id
         is_manual:
           type: boolean
           title: Is Manual
@@ -1327,7 +1533,7 @@ components:
       - current_balance
       - balance_date
       - is_asset
-      - owner_user_id
+      - owner_id
       - is_manual
       - is_hidden
       title: AccountOut
@@ -1363,12 +1569,12 @@ components:
             format: date
           - type: 'null'
           title: Balance Date
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
         is_hidden:
           anyOf:
           - type: boolean
@@ -1625,45 +1831,33 @@ components:
       - timezone
       - role
       title: HouseholdOut
-    InviteCreateRequest:
+    HouseholdUpdate:
       properties:
-        email:
-          type: string
-          format: email
-          title: Email
-        role:
-          type: string
-          pattern: ^(owner|member)$
-          title: Role
-          default: member
-      type: object
-      required:
-      - email
-      title: InviteCreateRequest
-    InviteResponse:
-      properties:
-        id:
-          type: string
-          format: uuid
-          title: Id
-        email:
-          type: string
-          format: email
-          title: Email
-        role:
-          type: string
-          title: Role
-        token:
+        name:
           anyOf:
           - type: string
+            maxLength: 200
+            minLength: 1
           - type: 'null'
-          title: Token
+          title: Name
+        timezone:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Timezone
+      additionalProperties: false
       type: object
-      required:
-      - id
-      - email
-      - role
-      title: InviteResponse
+      title: HouseholdUpdate
+      description: '``base_currency`` is absent on purpose: it is immutable once set (ADR-0017).
+
+
+        ``extra="forbid"`` makes that absence enforceable: without it a PATCH carrying
+
+        ``base_currency`` would be accepted and silently ignored, and the caller would
+
+        believe the currency had changed.'
     LoginRequest:
       properties:
         email:
@@ -1753,6 +1947,10 @@ components:
           type: array
           title: Unconverted Currencies
           default: []
+        attribution:
+          type: string
+          title: Attribution
+          default: account
       type: object
       required:
       - base_currency
@@ -1797,6 +1995,10 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Currency Revaluation
+        attribution:
+          type: string
+          title: Attribution
+          default: account
       type: object
       required:
       - base_currency
@@ -1805,11 +2007,82 @@ components:
       - net_cash_flow
       - currency_revaluation
       title: NetWorthSeries
+    OwnerCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Name
+        sort:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sort
+      type: object
+      required:
+      - name
+      title: OwnerCreate
+    OwnerDeleteResult:
+      properties:
+        reassigned_accounts:
+          type: integer
+          title: Reassigned Accounts
+        reassigned_transactions:
+          type: integer
+          title: Reassigned Transactions
+        reassigned_splits:
+          type: integer
+          title: Reassigned Splits
+      type: object
+      required:
+      - reassigned_accounts
+      - reassigned_transactions
+      - reassigned_splits
+      title: OwnerDeleteResult
+      description: 'What the delete actually moved — the UI tells the user, rather than
+
+        implying that deleting an owner was free.'
+    OwnerOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        kind:
+          type: string
+          title: Kind
+        sort:
+          type: integer
+          title: Sort
+      type: object
+      required:
+      - id
+      - name
+      - kind
+      - sort
+      title: OwnerOut
+    OwnerUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 80
+            minLength: 1
+          - type: 'null'
+          title: Name
+        sort:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sort
+      type: object
+      title: OwnerUpdate
     SignupRequest:
       properties:
-        invite_token:
-          type: string
-          title: Invite Token
         email:
           type: string
           format: email
@@ -1824,9 +2097,15 @@ components:
           maxLength: 256
           minLength: 8
           title: Password
+        household_name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Household Name
       type: object
       required:
-      - invite_token
       - email
       - display_name
       - password
@@ -1873,12 +2152,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
         notes:
           anyOf:
           - type: string
@@ -1908,12 +2187,16 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
+        effective_owner_id:
+          type: string
+          format: uuid
+          title: Effective Owner Id
         notes:
           anyOf:
           - type: string
@@ -1925,7 +2208,8 @@ components:
       - amount
       - base_amount
       - category_id
-      - owner_user_id
+      - owner_id
+      - effective_owner_id
       - notes
       title: SplitOut
     TagCreate:
@@ -2002,12 +2286,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
         is_pending:
           type: boolean
           title: Is Pending
@@ -2085,12 +2369,16 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
+        effective_owner_id:
+          type: string
+          format: uuid
+          title: Effective Owner Id
         is_pending:
           type: boolean
           title: Is Pending
@@ -2147,7 +2435,8 @@ components:
       - description
       - merchant
       - category_id
-      - owner_user_id
+      - owner_id
+      - effective_owner_id
       - is_pending
       - review_status
       - is_hidden
@@ -2210,12 +2499,12 @@ components:
             format: uuid
           - type: 'null'
           title: Category Id
-        owner_user_id:
+        owner_id:
           anyOf:
           - type: string
             format: uuid
           - type: 'null'
-          title: Owner User Id
+          title: Owner Id
         is_pending:
           anyOf:
           - type: boolean
@@ -2247,6 +2536,12 @@ components:
           title: Tag Ids
       type: object
       title: TransactionUpdate
+      description: 'Absent means "no change"; explicit null means "clear" for the nullable fields.
+
+
+        For the rest null is a client bug, and saying so beats ignoring it — silently
+
+        dropping a null is how a PATCH appears to succeed while changing nothing.'
     TransferLink:
       properties:
         from_txn_id:

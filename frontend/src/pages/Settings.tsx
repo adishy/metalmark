@@ -5,18 +5,22 @@ import {
   useCategoryGroups,
   useCreateCategory,
   useCreateCategoryGroup,
-  useCreateInvite,
+  useCreateOwner,
   useCreateTag,
   useDeleteCategory,
   useDeleteCategoryGroup,
+  useDeleteOwner,
   useDeleteTag,
   useFxRates,
   useHousehold,
   useMembers,
+  useOwners,
   useTags,
+  useUpdateHousehold,
+  useUpdateOwner,
   useUpsertFxRate,
 } from "@/api/hooks";
-import type { Invite } from "@/api/types";
+import type { Owner, OwnerReassignment } from "@/api/types";
 import { formatDate } from "@/lib/format";
 import {
   Button,
@@ -34,6 +38,7 @@ const TABS = [
   { id: "tags", label: "Tags" },
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
+  { id: "owners", label: "Owners" },
   { id: "profile", label: "Profile" },
 ] as const;
 
@@ -66,6 +71,7 @@ export default function Settings() {
         {tab === "tags" && <TagsSection />}
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
+        {tab === "owners" && <OwnersSection />}
         {tab === "profile" && <ProfileSection />}
       </div>
     </div>
@@ -382,15 +388,15 @@ function HouseholdSection() {
   const { me } = useAuth();
   const household = useHousehold();
   const members = useMembers();
-  const invite = useCreateInvite();
+  const update = useUpdateHousehold();
   const isOwner = (household.data?.role ?? me?.role) === "owner";
 
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("member");
-  const [result, setResult] = useState<Invite | null>(null);
+  // null = untouched, so the field follows the server until the user types.
+  const [draftName, setDraftName] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const emailId = useFieldId("invite-email");
-  const roleId = useFieldId("invite-role");
+  const nameId = useFieldId("household-name");
+  const name = draftName ?? household.data?.name ?? "";
+  const dirty = draftName !== null && draftName !== household.data?.name;
 
   return (
     <div className="space-y-4">
@@ -404,9 +410,42 @@ function HouseholdSection() {
           <div><dt className="text-slate-500">Timezone</dt><dd>{household.data?.timezone ?? "—"}</dd></div>
           <div><dt className="text-slate-500">Your role</dt><dd>{household.data?.role ?? me?.role}</dd></div>
         </dl>
+
+        {isOwner && (
+          <form
+            className="flex items-end gap-2"
+            data-testid="household-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const v = requiredText(name);
+              setErr(v);
+              if (v) return;
+              update.mutate({ name: name.trim() }, { onSuccess: () => setDraftName(null) });
+            }}
+          >
+            <Field label="Household name" htmlFor={nameId} required error={err} className="flex-1">
+              <Input
+                id={nameId}
+                value={name}
+                onChange={(e) => setDraftName(e.target.value)}
+                data-testid="household-name"
+              />
+            </Field>
+            <Button type="submit" disabled={update.isPending || !dirty} data-testid="household-name-save">
+              Save
+            </Button>
+          </form>
+        )}
+        {update.isError && <p className="text-sm text-red-400">{(update.error as Error).message}</p>}
       </Card>
 
       <Card title="Members">
+        {/* Signup is open, so there is nothing to invite: a new person creates
+            their own account and lands in this household. */}
+        <p className="text-xs text-slate-500">
+          Anyone can create an account from the sign-up page and will join this household as a
+          member. Members are managed here, not on the ledger: what owns money are the owners below.
+        </p>
         <table className="w-full text-sm" data-testid="members-table">
           <thead>
             <tr className="text-left text-xs text-slate-500">
@@ -424,53 +463,200 @@ function HouseholdSection() {
           </tbody>
         </table>
       </Card>
+    </div>
+  );
+}
 
-      {isOwner && (
-        <Card title="Invite a member">
-          <form
-            className="grid grid-cols-1 gap-3 sm:grid-cols-3"
-            data-testid="invite-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const v = requiredText(email);
-              setErr(v);
-              if (v) return;
-              invite.mutate(
-                { email, role },
-                {
-                  onSuccess: (inv) => {
-                    setResult(inv);
-                    setEmail("");
-                  },
-                },
-              );
-            }}
+// ------------------------------------------------------------------- owners
+
+function OwnersSection() {
+  const owners = useOwners();
+  const household = useHousehold();
+  const create = useCreateOwner();
+  // Deleting an owner re-attributes ledger history, which the API restricts to
+  // household owners — so only offer the control to them.
+  const canDelete = household.data?.role === "owner";
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState<{ name: string; counts: OwnerReassignment } | null>(null);
+  const nameId = useFieldId("owner-name");
+
+  return (
+    <div className="space-y-4">
+      <Card title="Add owner">
+        <form
+          className="flex items-end gap-2"
+          data-testid="add-owner-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const v = requiredText(name);
+            setErr(v);
+            if (v) return;
+            create.mutate({ name }, { onSuccess: () => setName("") });
+          }}
+        >
+          <Field label="Name" htmlFor={nameId} required error={err} className="flex-1">
+            <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} data-testid="owner-name" />
+          </Field>
+          <Button type="submit" disabled={create.isPending} data-testid="owner-save">Add owner</Button>
+        </form>
+        {create.isError && (
+          <p className="text-sm text-red-400" data-testid="owner-error">
+            {(create.error as Error).message}
+          </p>
+        )}
+      </Card>
+
+      <Card title="Owners">
+        <p className="text-xs text-slate-500">
+          Owners are what accounts, transactions and splits are assigned to. Shared is the default
+          and the fallback when an owner is deleted.
+        </p>
+        <ul className="space-y-2" data-testid="owner-list">
+          {owners.data?.map((o) => (
+            <OwnerRow
+              key={o.id}
+              owner={o}
+              owners={owners.data ?? []}
+              canDelete={canDelete}
+              onDeleted={(counts) => setDeleted({ name: o.name, counts })}
+            />
+          ))}
+        </ul>
+        {deleted && (
+          <p className="text-xs text-slate-400" data-testid="owner-delete-result">
+            Deleted “{deleted.name}” and moved {deleted.counts.reassigned_accounts} accounts,{" "}
+            {deleted.counts.reassigned_transactions} transactions and{" "}
+            {deleted.counts.reassigned_splits} splits.
+          </p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function OwnerRow({
+  owner,
+  owners,
+  canDelete,
+  onDeleted,
+}: {
+  owner: Owner;
+  owners: Owner[];
+  canDelete: boolean;
+  onDeleted: (counts: OwnerReassignment) => void;
+}) {
+  const update = useUpdateOwner();
+  const del = useDeleteOwner();
+  const [name, setName] = useState(owner.name);
+  const [confirming, setConfirming] = useState(false);
+  const [reassignTo, setReassignTo] = useState<string | null>(null);
+  const reassignId = useFieldId("owner-reassign");
+
+  const shared = owners.find((o) => o.kind === "shared");
+  const isShared = owner.kind === "shared";
+  const trimmed = name.trim();
+  const dirty = trimmed !== owner.name && trimmed !== "";
+
+  return (
+    <li className="space-y-2 rounded-lg bg-slate-800/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
+      <div className="flex items-center gap-2">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-label={`Name of ${owner.name}`}
+          className="max-w-xs"
+          data-testid={`owner-rename-input-${owner.id}`}
+        />
+        <span
+          className={`rounded px-1.5 py-0.5 text-xs ${
+            isShared ? "bg-slate-700 text-slate-300" : "bg-brand/15 text-brand"
+          }`}
+          data-testid={`owner-kind-${owner.id}`}
+        >
+          {owner.kind}
+        </span>
+        <div className="flex-1" />
+        <Button
+          variant="secondary"
+          className="px-2 py-1 text-xs"
+          disabled={!dirty || update.isPending}
+          onClick={() => update.mutate({ id: owner.id, body: { name: trimmed } })}
+          data-testid={`owner-rename-${owner.id}`}
+        >
+          Rename
+        </Button>
+        {!isShared && canDelete && (
+          <Button
+            variant="ghost"
+            className="px-2 py-1 text-xs"
+            onClick={() => setConfirming(true)}
+            data-testid={`owner-delete-${owner.id}`}
           >
-            <Field label="Email" htmlFor={emailId} required error={err}>
-              <Input id={emailId} type="email" value={email} onChange={(e) => setEmail(e.target.value)} data-testid="invite-email" />
-            </Field>
-            <Field label="Role" htmlFor={roleId}>
-              <Select id={roleId} value={role} onChange={(e) => setRole(e.target.value)} data-testid="invite-role">
-                <option value="member">member</option>
-                <option value="owner">owner</option>
+            Delete
+          </Button>
+        )}
+      </div>
+
+      {isShared && (
+        <p className="text-xs text-slate-500">Shared is permanent — it cannot be deleted.</p>
+      )}
+      {update.isError && (
+        <p className="text-xs text-red-400" data-testid={`owner-rename-error-${owner.id}`}>
+          {(update.error as Error).message}
+        </p>
+      )}
+
+      {confirming && (
+        <div
+          className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm"
+          data-testid={`owner-delete-confirm-${owner.id}`}
+        >
+          <p className="text-red-200">
+            Delete “{owner.name}”? Everything assigned to it moves to the owner below.
+          </p>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <Field label="Reassign to" htmlFor={reassignId} className="w-48">
+              <Select
+                id={reassignId}
+                value={reassignTo ?? shared?.id ?? ""}
+                onChange={(e) => setReassignTo(e.target.value)}
+                data-testid={`owner-reassign-${owner.id}`}
+              >
+                {owners
+                  .filter((o) => o.id !== owner.id)
+                  .map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
               </Select>
             </Field>
-            <div className="flex items-end">
-              <Button type="submit" disabled={invite.isPending} data-testid="invite-save">Create invite</Button>
-            </div>
-          </form>
-          {invite.isError && <p className="mt-2 text-sm text-red-400">{(invite.error as Error).message}</p>}
-          {result && (
-            <div className="mt-3 rounded-lg border border-brand/40 bg-brand/10 p-3 text-sm" data-testid="invite-result">
-              <p className="text-slate-300">Invite created for {result.email}. Share this token once:</p>
-              <code className="mt-1 block break-all rounded bg-slate-950 px-2 py-1 text-brand" data-testid="invite-token">
-                {result.token ?? "(token hidden)"}
-              </code>
-            </div>
-          )}
-        </Card>
+            <Button variant="secondary" className="px-2 py-1 text-xs" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              className="px-2 py-1 text-xs"
+              disabled={del.isPending}
+              onClick={() =>
+                del.mutate(
+                  { id: owner.id, reassignTo: reassignTo ?? shared?.id },
+                  {
+                    onSuccess: (counts) => {
+                      setConfirming(false);
+                      onDeleted(counts);
+                    },
+                  },
+                )
+              }
+              data-testid={`owner-delete-confirm-btn-${owner.id}`}
+            >
+              Yes, delete
+            </Button>
+          </div>
+          {del.isError && <p className="mt-2 text-sm text-red-400">{(del.error as Error).message}</p>}
+        </div>
       )}
-    </div>
+    </li>
   );
 }
 

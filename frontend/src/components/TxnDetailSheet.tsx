@@ -4,19 +4,20 @@
 import { useMemo, useState } from "react";
 import {
   useDeleteTransaction,
+  useOwners,
   useReplaceSplits,
   useUpdateTransaction,
 } from "@/api/hooks";
-import type { Account, Category, Member, SplitIn, Tag, Transaction } from "@/api/types";
+import type { Account, Category, SplitIn, Tag, Transaction } from "@/api/types";
 import { formatMoney } from "@/lib/format";
 import Dialog from "@/components/Dialog";
+import OwnerSelect from "@/components/OwnerSelect";
 import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
 
 export default function TxnDetailSheet({
   txn,
   accounts,
   categories,
-  members,
   tags,
   onClose,
   onReplaced,
@@ -24,13 +25,13 @@ export default function TxnDetailSheet({
   txn: Transaction;
   accounts: Account[];
   categories: Category[];
-  members: Member[];
   tags: Tag[];
   onClose: () => void;
   onReplaced: (updated: Transaction) => void;
 }) {
   const update = useUpdateTransaction();
   const del = useDeleteTransaction();
+  const owners = useOwners();
 
   const account = accounts.find((a) => a.id === txn.account_id);
   const [amount, setAmount] = useState(txn.amount);
@@ -38,12 +39,18 @@ export default function TxnDetailSheet({
   const [merchant, setMerchant] = useState(txn.merchant ?? "");
   const [description, setDescription] = useState(txn.description ?? "");
   const [categoryId, setCategoryId] = useState(txn.category_id ?? "");
-  const [owner, setOwner] = useState(txn.owner_user_id ?? "");
+  const [owner, setOwner] = useState(txn.owner_id);
   const [tagIds, setTagIds] = useState<string[]>(txn.tag_ids);
   const [notes, setNotes] = useState(txn.notes ?? "");
   const [reviewStatus, setReviewStatus] = useState(txn.review_status);
   const [confirmDel, setConfirmDel] = useState(false);
   const [amountErr, setAmountErr] = useState<string | null>(null);
+
+  const ownerName = useMemo(() => {
+    const m = new Map<string, string>();
+    owners.data?.forEach((o) => m.set(o.id, o.name));
+    return m;
+  }, [owners.data]);
 
   const ids = {
     amount: useFieldId("detail-amount"),
@@ -51,7 +58,6 @@ export default function TxnDetailSheet({
     merchant: useFieldId("detail-merchant"),
     description: useFieldId("detail-description"),
     category: useFieldId("detail-category"),
-    owner: useFieldId("detail-owner"),
     notes: useFieldId("detail-notes"),
     review: useFieldId("detail-review"),
   };
@@ -72,7 +78,7 @@ export default function TxnDetailSheet({
           merchant: merchant || null,
           description: description || null,
           category_id: categoryId || null,
-          owner_user_id: owner || null,
+          owner_id: owner,
           tag_ids: tagIds,
           notes: notes || null,
           review_status: reviewStatus,
@@ -124,15 +130,25 @@ export default function TxnDetailSheet({
               ))}
             </Select>
           </Field>
-          <Field label="Owner" htmlFor={ids.owner}>
-            <Select id={ids.owner} value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="detail-owner">
-              <option value="">Unassigned</option>
-              {members.map((m) => (
-                <option key={m.user_id} value={m.user_id}>{m.display_name}</option>
-              ))}
-            </Select>
-          </Field>
+          <OwnerSelect
+            value={owner}
+            onChange={setOwner}
+            nullable
+            inheritFrom={
+              account ? (ownerName.get(account.owner_id) ?? "account owner") : undefined
+            }
+            testid="detail-owner"
+          />
         </div>
+
+        {/* An inheriting row's owner comes from its account, so name the owner
+            the user is actually looking at rather than leaving it implied. */}
+        {!owner && (
+          <p className="text-xs text-slate-500" data-testid="detail-owner-effective">
+            Effective owner: {ownerName.get(account?.owner_id ?? "") ?? "—"}
+            {account && ` (from ${account.name})`}
+          </p>
+        )}
 
         <div>
           <p className="mb-1 text-xs font-medium text-slate-400">Tags</p>
@@ -176,7 +192,7 @@ export default function TxnDetailSheet({
           txn={txn}
           currency={account?.currency ?? txn.currency}
           categories={categories}
-          members={members}
+          inheritFrom={ownerName.get(txn.effective_owner_id) ?? "transaction"}
           onReplaced={onReplaced}
         />
 
@@ -204,25 +220,26 @@ export default function TxnDetailSheet({
 interface SplitRow {
   amount: string;
   category_id: string;
-  owner_user_id: string;
+  owner_id: string | null;
   notes: string;
 }
 
 function blankRow(): SplitRow {
-  return { amount: "", category_id: "", owner_user_id: "", notes: "" };
+  return { amount: "", category_id: "", owner_id: null, notes: "" };
 }
 
 function SplitEditor({
   txn,
   currency,
   categories,
-  members,
+  inheritFrom,
   onReplaced,
 }: {
   txn: Transaction;
   currency: string;
   categories: Category[];
-  members: Member[];
+  /** Owner a split with no owner of its own resolves to. */
+  inheritFrom: string;
   onReplaced: (updated: Transaction) => void;
 }) {
   const replace = useReplaceSplits();
@@ -232,7 +249,7 @@ function SplitEditor({
       ? txn.splits.map((s) => ({
           amount: s.amount,
           category_id: s.category_id ?? "",
-          owner_user_id: s.owner_user_id ?? "",
+          owner_id: s.owner_id,
           notes: s.notes ?? "",
         }))
       : [blankRow(), blankRow()],
@@ -256,7 +273,7 @@ function SplitEditor({
     const body: SplitIn[] = rows.map((r) => ({
       amount: r.amount,
       category_id: r.category_id || null,
-      owner_user_id: r.owner_user_id || null,
+      owner_id: r.owner_id,
       notes: r.notes || null,
     }));
     replace.mutate({ id: txn.id, splits: body }, { onSuccess: onReplaced });
@@ -314,23 +331,19 @@ function SplitEditor({
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  aria-label={`Split ${i + 1} owner`}
-                  value={r.owner_user_id}
-                  onChange={(e) => setRow(i, { owner_user_id: e.target.value })}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-                  data-testid={`split-owner-${i}`}
-                >
-                  <option value="">Unassigned</option>
-                  {members.map((m) => (
-                    <option key={m.user_id} value={m.user_id}>{m.display_name}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 items-start gap-2">
+                <OwnerSelect
+                  value={r.owner_id}
+                  onChange={(id) => setRow(i, { owner_id: id })}
+                  nullable
+                  inheritFrom={inheritFrom}
+                  allowCreate={false}
+                  testid={`split-owner-${i}`}
+                />
                 <button
                   type="button"
                   onClick={() => removeRow(i)}
-                  className="rounded-lg border border-slate-700 px-2 py-1.5 text-sm text-slate-400 hover:text-red-300"
+                  className="mt-5 rounded-lg border border-slate-700 px-2 py-1.5 text-sm text-slate-400 hover:text-red-300"
                   data-testid={`split-remove-${i}`}
                 >
                   Remove

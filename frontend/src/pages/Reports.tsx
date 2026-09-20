@@ -1,10 +1,12 @@
-// Reporting: net-worth line (with the currency-revaluation figure surfaced)
-// and a spending-by-category donut (ECharts). Cash-flow Sankey is Phase 1b.
-import { useMemo } from "react";
+// Reporting: net-worth line (with the currency-revaluation figure surfaced),
+// income-vs-expense cash flow and a spending-by-category donut (ECharts). Every
+// chart is scoped by the same owner filter.
+import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
-import { useNetWorthSeries, useSpending } from "@/api/hooks";
+import { useCashFlow, useNetWorthSeries, useOwners, useSpending } from "@/api/hooks";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
+import OwnerFilterChips from "@/components/OwnerFilterChips";
 
 function yearRange(): { start: string; end: string } {
   const now = new Date();
@@ -18,10 +20,16 @@ const DONUT_COLORS = [
   "#34d399", "#f87171", "#a78bfa", "#60a5fa", "#fb923c",
 ];
 
+const INCOME_COLOR = "#34d399";
+const EXPENSE_COLOR = "#f87171";
+
 export default function Reports() {
   const { start, end } = useMemo(yearRange, []);
-  const nw = useNetWorthSeries(start, end);
-  const spending = useSpending(start, end);
+  const owners = useOwners();
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const nw = useNetWorthSeries(start, end, ownerFilter);
+  const cashFlow = useCashFlow(start, end, ownerFilter);
+  const spending = useSpending(start, end, ownerFilter);
   const ccy = nw.data?.base_currency ?? "USD";
 
   const nwOption: EChartsOption = useMemo(
@@ -48,6 +56,47 @@ export default function Reports() {
     [nw.data],
   );
 
+  const cashFlowOption: EChartsOption = useMemo(
+    () => ({
+      grid: { top: 30, right: 16, bottom: 30, left: 60 },
+      tooltip: { trigger: "axis" },
+      legend: { top: 0, textStyle: { color: "#94a3b8" } },
+      xAxis: {
+        type: "category",
+        data: cashFlow.data?.map((p) => p.month) ?? [],
+        axisLine: { lineStyle: { color: "#475569" } },
+      },
+      yAxis: { type: "value", axisLine: { lineStyle: { color: "#475569" } }, splitLine: { lineStyle: { color: "#1e293b" } } },
+      series: [
+        {
+          name: "Income",
+          type: "bar",
+          stack: "cash-flow",
+          itemStyle: { color: INCOME_COLOR },
+          data: cashFlow.data?.map((p) => Number(p.income)) ?? [],
+        },
+        {
+          name: "Expense",
+          type: "bar",
+          stack: "cash-flow",
+          itemStyle: { color: EXPENSE_COLOR },
+          // Expenses are summed as positive magnitudes by some backends and as
+          // negatives by others; plot them downward either way.
+          data: cashFlow.data?.map((p) => -Math.abs(Number(p.expense))) ?? [],
+        },
+        {
+          name: "Net",
+          type: "line",
+          smooth: true,
+          lineStyle: { color: "#14b8a6" },
+          itemStyle: { color: "#14b8a6" },
+          data: cashFlow.data?.map((p) => Number(p.net)) ?? [],
+        },
+      ],
+    }),
+    [cashFlow.data],
+  );
+
   const donutOption: EChartsOption = useMemo(
     () => ({
       tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
@@ -72,10 +121,19 @@ export default function Reports() {
 
   const hasSpending = (spending.data?.rows.length ?? 0) > 0;
   const hasSeries = (nw.data?.points.length ?? 0) > 0;
+  const hasCashFlow = (cashFlow.data?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-medium">Reports</h2>
+
+      <div className="rounded-2xl bg-slate-900 p-4">
+        <OwnerFilterChips
+          owners={owners.data ?? []}
+          value={ownerFilter}
+          onChange={setOwnerFilter}
+        />
+      </div>
 
       <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-net-worth">
         <p className="text-sm text-slate-400">Net worth change (YTD)</p>
@@ -91,6 +149,21 @@ export default function Reports() {
           </>
         )}
         {hasSeries && <Chart option={nwOption} testid="net-worth-chart" />}
+        {ownerFilter && nw.data && (
+          <p className="mt-2 text-xs text-slate-500" data-testid="net-worth-attribution">
+            Attribution: {nw.data.attribution} — ownership is held by whole accounts, so this series
+            sums the accounts assigned to this owner rather than the transactions posted to them.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-cash-flow">
+        <p className="mb-2 text-sm text-slate-400">Income vs expense (YTD)</p>
+        {hasCashFlow ? (
+          <Chart option={cashFlowOption} testid="cash-flow-chart" />
+        ) : (
+          <p className="text-sm text-slate-500">No cash flow in range.</p>
+        )}
       </section>
 
       <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-spending">

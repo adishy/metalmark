@@ -4,7 +4,9 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.patch import is_set
 
 ACCOUNT_TYPES = {"depository", "credit", "investment", "loan", "other"}
 ASSET_TYPES = {"depository", "investment", "other"}  # liabilities: credit, loan
@@ -23,7 +25,8 @@ class AccountCreate(BaseModel):
     # Signed magnitude; liabilities entered as a positive amount owed.
     current_balance: Decimal = Decimal("0")
     balance_date: date | None = None
-    owner_user_id: uuid.UUID | None = None
+    # Omitted or null both land on the household's Shared owner (ADR-0026).
+    owner_id: uuid.UUID | None = None
 
 
 class AccountUpdate(BaseModel):
@@ -32,8 +35,19 @@ class AccountUpdate(BaseModel):
     institution: str | None = None
     current_balance: Decimal | None = None
     balance_date: date | None = None
-    owner_user_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
     is_hidden: bool | None = None
+
+    @model_validator(mode="after")
+    def _required_fields_not_clearable(self) -> AccountUpdate:
+        # There is no "unowned account" state — unset resolves to Shared, which is a
+        # real owner the client can name. Rejecting null here is better than letting
+        # the NOT NULL constraint answer with a 500, and the same goes for the other
+        # required fields: an explicit null is a client bug, not a request to clear.
+        for field in ("name", "is_hidden", "owner_id", "current_balance"):
+            if is_set(self, field) and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class AccountOut(BaseModel):
@@ -47,7 +61,7 @@ class AccountOut(BaseModel):
     current_balance: Decimal
     balance_date: date | None
     is_asset: bool
-    owner_user_id: uuid.UUID | None
+    owner_id: uuid.UUID
     is_manual: bool
     is_hidden: bool
 
@@ -59,6 +73,9 @@ class NetWorthOut(BaseModel):
     net_worth: Decimal
     # currencies with balances we could not convert (no rate) — surfaced, not hidden
     unconverted_currencies: list[str] = []
+    # "account": an owner filter here selects whole accounts, not individual rows —
+    # see the attribution note on NetWorthSeries and ADR-0026.
+    attribution: str = "account"
 
 
 class CategoryGroupCreate(BaseModel):

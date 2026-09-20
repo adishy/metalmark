@@ -44,8 +44,10 @@ single-threaded critical path, so it holds only what parallel work genuinely nee
   validate the DTO→ledger mapping + provenance + reconnect-remap assumptions against **real** data. Derive the
   test fixtures from these captures (ADR-0022). Manual-first proves the model is self-consistent, not that it's
   SimpleFIN-compatible — this spike closes that gap before the schema locks.
-- **Auth + tenancy**: users, households, members, invites, **server-side sessions**; argon2id; httpOnly cookie
-  + CSRF; invite-only signup; the **mandatory scoping layer / RLS** (tenant isolation lives here, not in each
+- **Auth + tenancy**: users, households, members, **server-side sessions**; argon2id; httpOnly cookie
+  + CSRF; **open signup** (first signer creates the household, later ones join the oldest; a concurrent
+  first-signup race is serialized by a Postgres advisory lock; `METALMARK_OPEN_SIGNUP=false` closes it —
+  ADR-0027, no invites); the **mandatory scoping layer / RLS** (tenant isolation lives here, not in each
   handler); `require_household` dependency.
 - Encryption helper (`METALMARK_SECRET_KEY` from docker secret) for connection URLs.
 - **`contracts/openapi.yaml` v0** covering auth + resource stubs **and the shared transaction filter/query +
@@ -57,10 +59,10 @@ single-threaded critical path, so it holds only what parallel work genuinely nee
 - **Security review is a Phase-0 gate, not a Sprint-3 task** — session model, encryption, CSRF, and tenant
   isolation are all decided here.
 
-**Exit criteria:** a user can be invited, sign up, log in, see an empty authenticated app shell; the write-path
-**and currency** contracts are documented (ADR-0017/0019) + migrated; the SimpleFIN spike has validated the
-mapping against real payloads; tenant isolation has a test proving household B can't read household A (API
-**and** worker); CI (incl. contract check) green; mock API server runs.
+**Exit criteria:** a user can sign up (the first signer creates the household), log in, see an empty
+authenticated app shell; the write-path **and currency** contracts are documented (ADR-0017/0019) + migrated;
+the SimpleFIN spike has validated the mapping against real payloads; tenant isolation has a test proving
+household B can't read household A (API **and** worker); CI (incl. contract check) green; mock API server runs.
 
 ## Parallel workstreams (after Phase 0)
 
@@ -76,16 +78,16 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
 |---|---|---|---|---|
 | **T** | Test harness & CI (cross-cutting, built first) | 1a→3 | P0 | `testcontainers` Postgres; **mock SimpleFIN server** (fixtures derived from real payloads, ADR-0022); golden/adversarial fixtures (incl. multi-currency, cross-currency transfer, known-allocation portfolio); property-test setup; Playwright scaffold; coverage + schemathesis gates; perf smoke (~50k txns). Red-green default. |
 | **FX** | Currency & FX conversion service (BE) | 1a | P0 | The one **dated-conversion service** everyone calls (no ad-hoc conversion); `fx_rates` model + high-precision rates + triangulation; dated lookup + "no rate" flag; daily fetch + manual entry; **cache/rollup invalidation** on rate change. Own module (highest correctness risk; kept out of the L bottleneck). |
-| **L** | Ledger core (BE) — the canonical manual model | 1a | P0, FX | Accounts + transactions CRUD; **`field_sources` provenance + manual-origin boundary**; splits (+base allocation/rounding); tags; categories/groups; **manual transfers** (incl. cross-currency w/ `fx_cost_base`); `base_amount` cache; the shared **filter/query + `/reports` contract**; review_status. |
+| **L** | Ledger core (BE) — the canonical manual model | 1a | P0, FX | Accounts + transactions CRUD; **household `owners`** (attribution labels incl. Shared — a label, not a user, ADR-0026) + the one effective-owner helper + owner filters; **`field_sources` provenance + manual-origin boundary**; splits (+base allocation/rounding); tags; categories/groups; **manual transfers** (incl. cross-currency w/ `fx_cost_base`); `base_amount` cache; the shared **filter/query + `/reports` contract**; review_status. |
 | **R** | Rules engine (BE) | 1a (basic) → 2 (auto-split) | L | Conditions/actions evaluator; provenance-aware apply hook; **idempotent** "apply to existing"; priority order; fixtures. **Auto-split deferred to Phase 2**; basic categorization rules in 1a. |
 | **INV** | Investments (BE) | **1b** | L, FX | Securities, holdings (derived market value), `security_prices` (manual + optional fetch, staleness flag), **investment_transactions**; **average-cost basis** (ADR-0020); `balance_source` + "unaccounted cash" plug (ADR-0021); **consolidated allocation API** reconciling to net-worth investment total. |
 | **IMP** | Import & export (BE) | 1a (CSV) → 2 (OFX) | L, INV | CSV import (mapping + `import_hash` w/ ordinal + "possible duplicate" review + commit); OFX/QFX via **defused XML** (P2); **full data export**. |
-| **SYNC** | Aggregation & sync + observability (BE) | **2** | L, INV, T | `AggregatorProvider` + `SimpleFinProvider`; claim + **reconnect remap**; worker + `sync_jobs` (SKIP LOCKED + reaper + 1/conn; worker sets `app.household_id` for RLS); sync algorithm (provenance-aware, low-water mark, pending reconcile, transfer auto-match) as "just another writer"; `sync_runs`/`sync_run_events`; errlist→status + **failure notifications**. A thin vertical slice (claim→fetch→insert→remap) is spiked in late Phase 1 (ADR-0022). |
+| **SYNC** | Aggregation & sync + observability (BE) | **2** | L, INV, T | `AggregatorProvider` + `SimpleFinProvider`; claim + **reconnect remap**; worker + `sync_jobs` (SKIP LOCKED + reaper + 1/conn; worker sets `app.household_id` for RLS); sync algorithm (provenance-aware, **owner resolved to Shared explicitly on insert and never overwriting a `user` owner**, low-water mark, pending reconcile, transfer auto-match) as "just another writer"; `sync_runs`/`sync_run_events`; errlist→status + **failure notifications**. A thin vertical slice (claim→fetch→insert→remap) is spiked in late Phase 1 (ADR-0022). |
 | **UA** | Accounts UI (FE) | 1a (manual) → 2 (connect) | L / SYNC | Manual account CRUD + net-worth header (P1a); connect-via-token, status badges, reconnect, "Sync now" (P2). |
 | **UT** | Transactions UI + swipe review (FE) | 1a | L | List (filter/search, **virtualized**); detail/edit sheet; splits; tags; **swipe deck** + desktop keyboard review; **optimistic updates**; PWA shell. |
 | **UINV** | Investments UI (FE) | **1b** | INV | Holdings/securities/prices/investment-txn entry; **consolidated holdings & % allocation view** (group by security/type/account/currency; staleness flags). |
 | **UR** | Reporting & dashboards (FE) | 1a (net worth + category + revaluation) → 1b (Sankey, investment) | L, FX, INV | ECharts: net worth over time **+ currency-revaluation line**; category donut + drill-down; income/expense trend (**1a**); **cash-flow Sankey** + investment reporting (**1b**); shared filter model. |
-| **UH** | Household, sharing, rules UI, settings, **admin sync dashboard** (FE) | 1a → 2 | L, R, SYNC | Invite/household mgmt; ownership ("Shared Views" filters); category manager; **rule builder**; currency settings; **admin sync-observability dashboard** (P2). |
+| **UH** | Household, owners, rules UI, settings, **admin sync dashboard** (FE) | 1a → 2 | L, R, SYNC | Household + member + settings mgmt (signup is self-serve, ADR-0027); **owner management** (add/rename/reassign-on-delete) + "Shared Views" owner filters; category manager; **rule builder**; currency settings; **admin sync-observability dashboard** (P2). |
 | **OPS** | Ops, security, perf, docs (cross-cutting) | rolling (security gate in P0) | rolling | docker-compose hardening; Caddy + Tailscale; nightly **encrypted** `pg_dump` (key separate) + restore drill; failure alerting; **precomputed report rollups + FX-change invalidation**; security review at P0 + each milestone; user + admin docs. |
 
 ### Coupling caveats (read before assigning)
@@ -103,10 +105,12 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
 
 ## Milestones / demos (manual-first)
 
-1. **M1a "Correct single-currency-account ledger" (Phase 1a):** hand-enter accounts (incl. a foreign-currency
-   one), transactions, splits, transfers (incl. cross-currency); categorize/tag/own; basic rules; swipe-review;
-   see net worth over time (with the **currency-revaluation line**), category donut + drill-down, income/
-   expense trend — **all reconciling** under a green test suite, CSV import working. No sync, already usable.
+1. **M1a "Correct single-currency-account ledger" (Phase 1a):** sign up (open, no invites — the first signer
+   creates the household, ADR-0027); hand-enter accounts (incl. a foreign-currency one), transactions, splits,
+   transfers (incl. cross-currency); categorize/tag/**assign owners** (household labels incl. Shared,
+   ADR-0026); basic rules; swipe-review; see net worth over time (with the **currency-revaluation line**),
+   category donut + drill-down, income/expense trend — **all reconciling** under a green test suite, CSV import
+   working. No sync, already usable.
 2. **M1b "Investments & the full picture" (Phase 1b):** securities/holdings/prices/investment-txns by hand;
    dividends in income; the **consolidated cross-account allocation view** reconciling to the net-worth
    investment total; the **cash-flow Sankey**.
@@ -114,7 +118,8 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
    clobber human/rule edits or manual rows; OFX import; auto-split rules; **reconnect keeps all history**; the
    admin sync dashboard shows per-run logs/counts/timings. Sync output is indistinguishable from manual.
 4. **M3 "Household-ready" (Phase 3):** perf budgets met on 50k txns; PWA polish; encrypted backups + a passed
-   restore drill; security review; invite the household; deployed behind Tailscale.
+   restore drill; security review; the household signs itself up (open signup — ADR-0027); deployed behind
+   Tailscale.
 
 ## Per-workstream acceptance bars (examples)
 
@@ -124,6 +129,9 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
 - **L:** money & FX math use `Decimal` end to end (property tests over currencies); a EUR txn in a EUR account
   rolls up to correct base-currency net worth at that date's rate; split children sum to parent in **both**
   native and base (no convert-then-round drift); provenance precedence + manual-origin boundary enforced;
+  owner resolution is total (`split → transaction → account → Shared`, one helper) and an owner delete with
+  references fails unless given a reassign target; report owner filters keep their documented per-endpoint
+  meaning (account-scoped for net-worth, row-scoped for cash-flow/spending — ADR-0026);
   filter API paginates deterministically.
 - **INV:** the consolidated allocation view sums the same security across accounts into one row; its market
   values **reconcile to the net-worth investment total** (a known-fixture portfolio → known allocations golden
@@ -155,6 +163,9 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
 - Second aggregator (Plaid adapter) — only if SimpleFIN coverage gaps bite; interface already supports it.
 - **Truly private accounts** (member-hidden, not just view-filtered) — v1 ownership drives views, not access
   (confirmed acceptable). Would need a real access-control model to add later.
+- **Fractional ownership** (`share_pct` — "half the mortgage is mine") — deferred; without it the account-scoped
+  net-worth filter and the row-scoped spending/cash-flow filters are **not additive**, which is documented and
+  surfaced in the UI rather than hidden (ADR-0026).
 - Attachments/receipts, bulk-edit, manual reconciliation screen, automatic security-price fetch — deferrable.
 
 _In scope for v1: **multi-currency** (single-currency accounts + dated FX conversion + a currency-revaluation

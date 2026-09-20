@@ -4,11 +4,9 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from sqlalchemy import select
 
 from app.db import unscoped_session
-from app.deps import SESSION_COOKIE, RequestContext, get_context, require_owner
+from app.deps import SESSION_COOKIE, RequestContext, get_context
 from app.models import Household
 from app.schemas.auth import (
-    InviteCreateRequest,
-    InviteResponse,
     LoginRequest,
     MeResponse,
     SignupRequest,
@@ -54,10 +52,10 @@ async def signup(req: SignupRequest, response: Response) -> MeResponse:
         try:
             user = await svc.signup(
                 session,
-                invite_token=req.invite_token,
                 email=req.email,
                 display_name=req.display_name,
                 password=req.password,
+                household_name=req.household_name,
             )
             token, sess, _ = await svc.login(session, email=req.email, password=req.password)
             membership = await svc.membership_for(session, user.id)
@@ -104,13 +102,3 @@ async def me(ctx: RequestContext = Depends(get_context)) -> MeResponse:
     payload = await _me_payload(ctx.session, ctx.user, membership)
     payload.csrf_token = ctx.csrf_token
     return payload
-
-
-@router.post("/invites", response_model=InviteResponse, status_code=201)
-async def create_invite(
-    req: InviteCreateRequest, ctx: RequestContext = Depends(require_owner)
-) -> InviteResponse:
-    invite, raw = await svc.create_invite(
-        ctx.session, household_id=ctx.household_id, email=req.email, role=req.role
-    )
-    return InviteResponse(id=invite.id, email=invite.email, role=invite.role, token=raw)

@@ -4,7 +4,6 @@ from app.models.fx import FxRate  # noqa: F401
 from app.models.identity import (  # noqa: F401
     Household,
     HouseholdMember,
-    Invite,
     Session,
     User,
 )
@@ -14,6 +13,7 @@ from app.models.ledger import (  # noqa: F401
     BalanceSnapshot,
     Category,
     CategoryGroup,
+    Owner,
     Tag,
     Transaction,
     TransactionSplit,
@@ -25,7 +25,6 @@ __all__ = [
     "FxRate",
     "Household",
     "HouseholdMember",
-    "Invite",
     "Session",
     "User",
     "Account",
@@ -33,6 +32,7 @@ __all__ = [
     "BalanceSnapshot",
     "Category",
     "CategoryGroup",
+    "Owner",
     "Tag",
     "Transaction",
     "TransactionSplit",

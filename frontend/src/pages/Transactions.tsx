@@ -4,11 +4,11 @@ import {
   useCategories,
   useCreateTransaction,
   useInfiniteTransactions,
-  useMembers,
+  useOwners,
   useTags,
   type TxnFilter,
 } from "@/api/hooks";
-import type { Account, Category, Member, Transaction } from "@/api/types";
+import type { Account, Category, Owner, Transaction, TransactionCreate } from "@/api/types";
 import { formatDate, formatMoney } from "@/lib/format";
 import {
   Button,
@@ -19,13 +19,15 @@ import {
   useFieldId,
   validAmount,
 } from "@/components/form";
+import OwnerSelect from "@/components/OwnerSelect";
+import OwnerFilterChips from "@/components/OwnerFilterChips";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 
 export default function Transactions() {
   const accounts = useAccounts();
   const categories = useCategories();
   const tags = useTags();
-  const members = useMembers();
+  const owners = useOwners();
   const [filter, setFilter] = useState<TxnFilter>({});
   const txns = useInfiniteTransactions(filter);
   const create = useCreateTransaction();
@@ -40,9 +42,15 @@ export default function Transactions() {
 
   const ownerName = useMemo(() => {
     const m = new Map<string, string>();
-    members.data?.forEach((x) => m.set(x.user_id, x.display_name));
+    owners.data?.forEach((o) => m.set(o.id, o.name));
     return m;
-  }, [members.data]);
+  }, [owners.data]);
+
+  const acctName = useMemo(() => {
+    const m = new Map<string, string>();
+    accounts.data?.forEach((a) => m.set(a.id, a.name));
+    return m;
+  }, [accounts.data]);
 
   const tagName = useMemo(() => {
     const m = new Map<string, string>();
@@ -65,7 +73,7 @@ export default function Transactions() {
         <AddTxnForm
           accounts={accounts.data ?? []}
           categories={categories.data ?? []}
-          members={members.data ?? []}
+          owners={owners.data ?? []}
           pending={create.isPending}
           error={create.isError ? (create.error as Error).message : null}
           onSubmit={(b) => create.mutate(b, { onSuccess: () => setOpen(false) })}
@@ -75,6 +83,7 @@ export default function Transactions() {
       <FilterBar
         accounts={accounts.data ?? []}
         categories={categories.data ?? []}
+        owners={owners.data ?? []}
         filter={filter}
         onChange={setFilter}
       />
@@ -100,7 +109,20 @@ export default function Transactions() {
                 <p className="truncate text-xs text-slate-500">
                   {formatDate(t.transacted_at)}
                   {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
-                  {t.owner_user_id && ` · ${ownerName.get(t.owner_user_id) ?? ""}`}
+                  {/* The effective owner is what reports actually bucket by, so
+                      that is what the row shows; a muted style marks the ones
+                      that only inherit it from their account. */}
+                  <span
+                    className={t.owner_id ? "text-slate-300" : "italic text-slate-600"}
+                    title={
+                      t.owner_id
+                        ? "Owner set on this transaction"
+                        : `Inherited from ${acctName.get(t.account_id) ?? "the account"}`
+                    }
+                    data-testid={`txn-owner-${t.id}`}
+                  >
+                    {` · ${ownerName.get(t.effective_owner_id) ?? "Shared"}`}
+                  </span>
                   {t.review_status === "needs_review" && " · needs review"}
                 </p>
                 {t.tag_ids.length > 0 && (
@@ -142,7 +164,6 @@ export default function Transactions() {
           txn={selected}
           accounts={accounts.data ?? []}
           categories={categories.data ?? []}
-          members={members.data ?? []}
           tags={tags.data ?? []}
           onClose={() => setSelected(null)}
           onReplaced={(updated) => setSelected(updated)}
@@ -155,11 +176,13 @@ export default function Transactions() {
 function FilterBar({
   accounts,
   categories,
+  owners,
   filter,
   onChange,
 }: {
   accounts: Account[];
   categories: Category[];
+  owners: Owner[];
   filter: TxnFilter;
   onChange: (f: TxnFilter) => void;
 }) {
@@ -178,6 +201,12 @@ function FilterBar({
 
   return (
     <div className="space-y-3 rounded-2xl bg-slate-900 p-4" data-testid="txn-filter-bar">
+      <OwnerFilterChips
+        owners={owners}
+        value={filter.owner_id ?? null}
+        onChange={(id) => onChange({ ...filter, owner_id: id ?? undefined })}
+      />
+
       <div>
         <p className="mb-1 text-xs font-medium text-slate-400">Accounts</p>
         <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
@@ -260,7 +289,12 @@ function FilterBar({
         </Field>
       </div>
 
-      {(filter.account_id || filter.category_id || filter.start || filter.end || filter.search) && (
+      {(filter.account_id ||
+        filter.category_id ||
+        filter.owner_id ||
+        filter.start ||
+        filter.end ||
+        filter.search) && (
         <button
           type="button"
           className="text-xs text-slate-400 underline hover:text-slate-200"
@@ -277,32 +311,29 @@ function FilterBar({
 function AddTxnForm({
   accounts,
   categories,
-  members,
+  owners,
   pending,
   error,
   onSubmit,
 }: {
   accounts: Account[];
   categories: Category[];
-  members: Member[];
+  owners: Owner[];
   pending: boolean;
   error: string | null;
-  onSubmit: (b: {
-    account_id: string;
-    amount: string;
-    merchant: string | null;
-    category_id: string | null;
-    owner_user_id: string | null;
-    transacted_at: string;
-  }) => void;
+  onSubmit: (b: TransactionCreate) => void;
 }) {
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [amount, setAmount] = useState("-0.00");
   const [merchant, setMerchant] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [owner, setOwner] = useState("");
+  const [owner, setOwner] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [errs, setErrs] = useState<Record<string, string | null>>({});
+
+  // What an unset owner inherits: the owning account's own owner.
+  const accountOwnerId = accounts.find((a) => a.id === accountId)?.owner_id;
+  const inheritFrom = owners.find((o) => o.id === accountOwnerId)?.name;
 
   const ids = {
     account: useFieldId("txn-account"),
@@ -310,7 +341,6 @@ function AddTxnForm({
     merchant: useFieldId("txn-merchant"),
     amount: useFieldId("txn-amount"),
     category: useFieldId("txn-category"),
-    owner: useFieldId("txn-owner"),
   };
 
   const validate = () => {
@@ -331,7 +361,7 @@ function AddTxnForm({
           amount,
           merchant: merchant || null,
           category_id: categoryId || null,
-          owner_user_id: owner || null,
+          owner_id: owner,
           transacted_at: new Date(date + "T12:00:00Z").toISOString(),
         });
       }}
@@ -360,14 +390,13 @@ function AddTxnForm({
           ))}
         </Select>
       </Field>
-      <Field label="Owner" htmlFor={ids.owner}>
-        <Select id={ids.owner} value={owner} onChange={(e) => setOwner(e.target.value)} data-testid="txn-owner">
-          <option value="">Unassigned</option>
-          {members.map((m) => (
-            <option key={m.user_id} value={m.user_id}>{m.display_name}</option>
-          ))}
-        </Select>
-      </Field>
+      <OwnerSelect
+        value={owner}
+        onChange={setOwner}
+        nullable
+        inheritFrom={inheritFrom}
+        testid="txn-owner"
+      />
       {error && <p className="text-sm text-red-400 sm:col-span-2">{error}</p>}
       <Button type="submit" disabled={pending} className="sm:col-span-2" data-testid="txn-save">
         Save

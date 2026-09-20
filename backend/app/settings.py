@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     session_idle_minutes: int = Field(default=1440, alias="METALMARK_SESSION_IDLE_MINUTES")
     session_absolute_hours: int = Field(default=720, alias="METALMARK_SESSION_ABSOLUTE_HOURS")
 
+    # Signup is open by default (ADR-0027): the first signup creates the household,
+    # later ones join it. Turn this off to close the door — the app is LAN/VPN-only
+    # (ADR-0002), but "anyone who can reach the instance can join the household" is
+    # a real property worth being able to switch off.
+    open_signup: bool = Field(default=True, alias="METALMARK_OPEN_SIGNUP")
+
     secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")

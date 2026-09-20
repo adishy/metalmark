@@ -1,6 +1,6 @@
 # ADR 0012: Household + view-filtering sharing (no per-account access control in v1)
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0026
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
 - **Related:** ADR-0013, ADR-0014, ARCHITECTURE.md §2, §4, §5

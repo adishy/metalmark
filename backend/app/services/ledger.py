@@ -25,14 +25,10 @@ from app.models import (
     Transaction,
 )
 from app.schemas.ledger import AccountCreate, AccountUpdate, is_asset_for
+from app.schemas.patch import is_set
 from app.services import fx
-
-
-class LedgerError(Exception):
-    def __init__(self, message: str, status: int = 400) -> None:
-        super().__init__(message)
-        self.message = message
-        self.status = status
+from app.services.errors import LedgerError
+from app.services.owners import ensure_shared_owner, get_owner
 
 
 def _today() -> date:
@@ -76,6 +72,15 @@ async def _snapshot_balance(session: AsyncSession, account: Account) -> None:
 
 async def create_account(session: AsyncSession, household_id: uuid.UUID,
                           data: AccountCreate) -> Account:
+    # An account always has an owner: unset means the household's Shared owner, so
+    # the attribution chain terminates instead of needing a null case (ADR-0026).
+    # A supplied id is fetched under RLS, which turns a foreign id into a 404 rather
+    # than a 500 from the foreign key.
+    owner_id = (
+        (await get_owner(session, data.owner_id)).id
+        if data.owner_id is not None
+        else (await ensure_shared_owner(session, household_id)).id
+    )
     acct = Account(
         household_id=household_id,
         name=data.name,
@@ -87,7 +92,7 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
         balance_date=data.balance_date or _today(),
         is_asset=is_asset_for(data.type),
         balance_source="derived" if data.type == "investment" else None,
-        owner_user_id=data.owner_user_id,
+        owner_id=owner_id,
         is_manual=True,
     )
     session.add(acct)
@@ -97,10 +102,14 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
     return acct
 
 
-async def list_accounts(session: AsyncSession) -> list[Account]:
-    return list(
-        (await session.execute(select(Account).order_by(Account.name))).scalars().all()
-    )
+async def list_accounts(session: AsyncSession,
+                        owner_id: uuid.UUID | None = None) -> list[Account]:
+    stmt = select(Account).order_by(Account.name)
+    if owner_id is not None:
+        # Plain equality: the column is NOT NULL, so there is no "unowned" case to
+        # fold in and no inheritance to resolve (ADR-0026).
+        stmt = stmt.where(Account.owner_id == owner_id)
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def get_account(session: AsyncSession, account_id: uuid.UUID) -> Account:
@@ -116,14 +125,18 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
                          data: AccountUpdate) -> Account:
     acct = await get_account(session, account_id)
     changed_balance = False
-    for field in ("name", "subtype", "institution", "owner_user_id", "is_hidden"):
-        val = getattr(data, field)
-        if val is not None:
-            setattr(acct, field, val)
-    if data.current_balance is not None:
+    # is_set, not "is not None": an explicit null clears subtype/institution, and
+    # the required fields are guarded by AccountUpdate's validator.
+    for field in ("name", "subtype", "institution", "is_hidden"):
+        if is_set(data, field):
+            setattr(acct, field, getattr(data, field))
+    if is_set(data, "owner_id"):
+        # Resolved under RLS so a foreign id is a 404, not a foreign-key 500.
+        acct.owner_id = (await get_owner(session, data.owner_id)).id
+    if is_set(data, "current_balance"):
         acct.current_balance = data.current_balance
         changed_balance = True
-    if data.balance_date is not None:
+    if is_set(data, "balance_date"):
         acct.balance_date = data.balance_date
         changed_balance = True
     await session.flush()
@@ -139,9 +152,10 @@ async def delete_account(session: AsyncSession, account_id: uuid.UUID) -> None:
     await session.flush()
 
 
-async def net_worth(session: AsyncSession, household_id: uuid.UUID):
+async def net_worth(session: AsyncSession, household_id: uuid.UUID,
+                    owner_id: uuid.UUID | None = None):
     base = await base_currency(session, household_id)
-    accounts = await list_accounts(session)
+    accounts = await list_accounts(session, owner_id)
     assets = Decimal("0")
     liabilities = Decimal("0")
     unconverted: set[str] = set()

@@ -177,18 +177,18 @@ async def test_transfer_excluded_from_cash_flow(household_factory):
 
 
 async def test_transaction_owner_and_provenance(household_factory):
-    from app.services import auth as authsvc
+    """Owner is a label row, and setting it is a user-sourced decision."""
+    from app.services import owners as owner_svc
 
     hh = await household_factory(base="USD")
     async with scoped_session(household_id=hh) as s:
-        members = await authsvc.list_members(s, hh)
-        owner = members[0]["user_id"]
+        alex = await owner_svc.create_owner(s, hh, name="Alex")
         acct = await ledger.create_account(
             s, hh, AccountCreate(name="Chk", type="depository", currency="USD"))
         txn = await txns.create_transaction(s, hh, TransactionCreate(
             account_id=acct.id, amount=D("-10"), transacted_at=_dt(2026, 1, 5),
-            owner_user_id=owner))
-    assert txn.owner_user_id == owner
+            owner_id=alex.id))
+    assert txn.owner_id == alex.id
     assert txn.field_sources.get("owner") == "user"
 
 

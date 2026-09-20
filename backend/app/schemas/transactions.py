@@ -4,7 +4,9 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.patch import is_set
 
 
 class SplitIn(BaseModel):
@@ -12,7 +14,8 @@ class SplitIn(BaseModel):
     amount: Decimal | None = None
     pct: Decimal | None = None
     category_id: uuid.UUID | None = None
-    owner_user_id: uuid.UUID | None = None
+    # Null = inherit the parent transaction's owner (ADR-0026).
+    owner_id: uuid.UUID | None = None
     notes: str | None = None
 
 
@@ -22,7 +25,10 @@ class SplitOut(BaseModel):
     amount: Decimal
     base_amount: Decimal | None
     category_id: uuid.UUID | None
-    owner_user_id: uuid.UUID | None
+    owner_id: uuid.UUID | None
+    # Resolved split → transaction → account owner. Attached by the API layer, which
+    # holds the account-owner map; it is not a column (ADR-0026).
+    effective_owner_id: uuid.UUID
     notes: str | None
 
 
@@ -34,25 +40,38 @@ class TransactionCreate(BaseModel):
     description: str | None = None
     merchant: str | None = None
     category_id: uuid.UUID | None = None
-    owner_user_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
     is_pending: bool = False
     notes: str | None = None
     tag_ids: list[uuid.UUID] = []
 
 
 class TransactionUpdate(BaseModel):
+    """Absent means "no change"; explicit null means "clear" for the nullable fields.
+
+    For the rest null is a client bug, and saying so beats ignoring it — silently
+    dropping a null is how a PATCH appears to succeed while changing nothing.
+    """
+
     amount: Decimal | None = None
     transacted_at: datetime | None = None
     posted_at: datetime | None = None
     description: str | None = None
     merchant: str | None = None
     category_id: uuid.UUID | None = None
-    owner_user_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
     is_pending: bool | None = None
     is_hidden: bool | None = None
     review_status: str | None = Field(default=None, pattern="^(needs_review|reviewed|ignored)$")
     notes: str | None = None
     tag_ids: list[uuid.UUID] | None = None
+
+    @model_validator(mode="after")
+    def _required_fields_not_clearable(self) -> TransactionUpdate:
+        for field in ("amount", "transacted_at", "is_pending", "is_hidden", "review_status"):
+            if is_set(self, field) and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class TransactionOut(BaseModel):
@@ -68,7 +87,9 @@ class TransactionOut(BaseModel):
     description: str | None
     merchant: str | None
     category_id: uuid.UUID | None
-    owner_user_id: uuid.UUID | None
+    owner_id: uuid.UUID | None
+    # Resolved split → transaction → account owner; attached by the API layer.
+    effective_owner_id: uuid.UUID
     is_pending: bool
     review_status: str
     is_hidden: bool

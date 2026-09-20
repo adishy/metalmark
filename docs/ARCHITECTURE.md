@@ -81,9 +81,18 @@ there is no backfill (set that expectation in the UI). A manual investment accou
 - **users** — `id, email (unique), password_hash (argon2), display_name, created_at, is_admin`.
 - **households** — `id, name, created_at`. (Also called a "space". A user belongs to exactly one for v1.)
 - **household_members** — `household_id, user_id, role (owner|member), joined_at`.
-- **invites** — `id, household_id, email, token_hash, role, expires_at, accepted_at`. Signup requires a valid invite.
+- **owners** — `id, household_id, name varchar(80), kind ('person'|'shared'), sort`. **Attribution labels, not
+  logins** (ADR-0026): a child, a "House" pot, a partner who never opens the app. RLS-protected like every other
+  household table; exactly one `kind='shared'` owner per household; name case-insensitively unique per household.
 - **sessions** — **server-side** session table (decided, not "or cookie") so we get revocation /
   logout-everywhere and idle + absolute expiry. `id, user_id, csrf_token, created_at, last_seen_at, expires_at`.
+
+**Signup is open (ADR-0027).** `POST /auth/signup` on a database with **no users** creates the household (that
+signer becomes its `owner` member and `is_admin`); every later signup joins the **oldest** household as a
+`member`. There are no invites — `POST /auth/invites` and the `invites` table are gone. Concurrent first
+signups are serialized with a Postgres advisory transaction lock so exactly one household is created.
+`METALMARK_OPEN_SIGNUP=false` closes signup; anyone who can reach the instance can otherwise join the household
+(see §5).
 
 ### Accounts & connections
 - **account_connections** — one per SimpleFIN claim.
@@ -96,14 +105,18 @@ there is no backfill (set that expectation in the UI). A manual investment accou
    type (depository|credit|investment|loan|other), subtype, institution, currency (fixed; single-currency
    account per ADR-0017), current_balance, available_balance, balance_date, balance_source
    (stated|derived — investment accounts only; see Investments), is_asset (derived from type:
-   depository/investment=asset, credit/loan=liability), owner_user_id (nullable → joint/shared),
+   depository/investment=asset, credit/loan=liability), owner_id (**NOT NULL** → `owners.id`; unset resolves to
+   the household's Shared owner, server-side),
    is_manual (bool), is_hidden, created_at, updated_at`.
   - **Unique `(household_id, external_key)`** — the stable identity used by reconnect remap (§3); without it
     remap can't be correct.
-  - **Ownership is simplified for v1** to a single `owner_user_id` per account (null = joint/shared) plus a
-    per-split owner. Fractional per-transaction ownership (`share_pct`) is deferred — it was over-modeled for
-    a few users and created three overlapping ownership mechanisms. **Attribution precedence:**
-    split.owner_user_id → account.owner_user_id → joint.
+  - **Ownership is a household label, not a user** (ADR-0026): a single `owner_id` per account plus a
+    per-transaction and per-split owner. Fractional per-transaction ownership (`share_pct`) is deferred — it was
+    over-modeled for a few users and created three overlapping ownership mechanisms. **Attribution precedence:
+    `split.owner_id` → `transaction.owner_id` → `account.owner_id` → Shared**, computed by **one** authoritative
+    helper (the chain is total: `account.owner_id` is never null, "Shared" is a real row). Deleting an owner
+    requires a reassign target (default Shared); the FK is `NO ACTION` so a delete can neither silently rewrite
+    attribution nor deadlock household deletion.
 - **securities** — a reusable instrument. `id, household_id, name, ticker, security_type
   (stock|etf|mutual_fund|bond|option|crypto|cash|other), currency, is_manual`.
 - **holdings** — a position in an account (SimpleFIN has no holdings object → always manual/imported).
@@ -135,7 +148,8 @@ there is no backfill (set that expectation in the UI). A manual investment accou
    base_amount (Decimal; **cache** of amount converted to base at the txn's household-local date; recomputed
    on FX-rate change — never the source of truth), fx_rate_date,
    description (raw), merchant (cleaned),
-   category_id, is_pending, review_status (needs_review|reviewed|ignored), is_hidden, is_split_parent,
+   category_id, owner_id (**nullable = inherit** → account → Shared; effective owner via the one resolution
+   helper, ADR-0026), is_pending, review_status (needs_review|reviewed|ignored), is_hidden, is_split_parent,
    transfer_group_id (nullable → part of a transfer), field_sources (jsonb), notes,
    source (simplefin|csv|ofx|manual), created_at, updated_at`.
   - Unique index `(account_id, external_id)` where `external_id` not null; unique `(account_id, import_hash)`
@@ -143,9 +157,11 @@ there is no backfill (set that expectation in the UI). A manual investment accou
     identical same-day rows (two $5 coffees) so they aren't silently collapsed; a re-import of an
     already-seen row is routed to a **"possible duplicate — review"** step, never hard-dropped.
   - **`field_sources` = the provenance model (critical).** A per-transaction map
-    `{category: provider|rule|user, merchant: …, is_hidden: …, review_status: …, splits: …}`. It is the
+    `{category: provider|rule|user, merchant: …, owner: …, is_hidden: …, review_status: …, splits: …}`. It is the
     *only* way to distinguish a human edit from a rule- or provider-set value. **Write precedence:**
-    `user` always wins; a `rule` may overwrite `provider` or an earlier `rule`, never `user`.
+    `user` always wins; a `rule` may overwrite `provider` or an earlier `rule`, never `user`. Sync **resolves
+    Shared explicitly** for `owner` on insert (never a NULL left for readers to resolve) and never overwrites a
+    `user`-set owner.
   - **Manual-origin boundary (ADR-0019):** "provider-owned fields" is *not* static — it applies only to
     **provider-origin rows**. Sync merges **only into rows it owns**, matched by `external_id`; a manual/import
     row has no `external_id`, so **sync never overwrites a hand-entered amount**. If sync later brings what
@@ -160,7 +176,8 @@ there is no backfill (set that expectation in the UI). A manual investment accou
     matching is on **`base_amount` within a tolerance**, or explicit user linking. The residual
     (Σ base_amount of the legs ≠ 0) is the real FX spread/fee — stored as `fx_cost_base` and surfaced (as a
     fee/revaluation), **never hidden** by the transfer exclusion.
-- **transaction_splits** — `id, parent_txn_id, amount, base_amount, category_id, owner_user_id, notes`.
+- **transaction_splits** — `id, parent_txn_id, amount, base_amount, category_id, owner_id, notes`; `owner_id`
+  is nullable = inherit (ADR-0026).
   A split parent keeps `is_split_parent=true`; children carry the category/owner breakdown. Children **inherit
   the parent's currency and `fx_rate_date`**. Rounding policy: split the **native** amount to the cent
   (remainder to the largest child), then convert each child, allocating so **Σ(child `base_amount`) ==
@@ -182,8 +199,8 @@ there is no backfill (set that expectation in the UI). A manual investment accou
 - **rules** — `id, household_id, priority (int), name, enabled, conditions (jsonb), actions (jsonb), created_at`.
   - `conditions`: `{ merchant_contains?, description_regex?, amount_min?, amount_max?, direction? (in|out),
      account_ids?, category_id?, is_pending? }` (all AND-ed).
-  - `actions`: `{ set_category_id?, add_tag_ids?, set_owner_user_id?, rename_merchant?, set_hidden?,
-     mark_reviewed?, split?: [{amount|pct, category_id, owner_user_id}] }`.
+  - `actions`: `{ set_category_id?, add_tag_ids?, set_owner_id?, rename_merchant?, set_hidden?,
+     mark_reviewed?, split?: [{amount|pct, category_id, owner_id}] }`.
 
 ### History & audit
 - **balance_snapshots** — `account_id, balance_date, balance, currency`. Unique `(account_id, balance_date)`.
@@ -288,8 +305,20 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   when present, else the parent.
 - **Rules**: applied on ingest and via "apply to existing" (batch). Ordered by `priority`. Includes
   Monarch-style auto-split. Deterministic + unit-tested against a fixture set.
-- **Sharing / Shared Views**: account- or transaction-level ownership; filters ("mine", "partner's",
-  "joint"). Authorization = household membership; ownership drives *views*, not access.
+- **Owners / Shared Views**: attribution lives in the household's `owners` table — a **label, not a login**
+  (ADR-0026) — referenced by `accounts.owner_id` (NOT NULL), `transactions.owner_id` and
+  `transaction_splits.owner_id` (nullable = inherit). Effective owner = split → transaction → account →
+  Shared, from the one resolution helper. Filters exist on `GET /accounts`, `GET /transactions` and the report
+  endpoints, and the transaction filter derives the parent/child split from `EXISTS (child)` rather than
+  trusting the denormalized `is_split_parent` flag. Authorization = household membership; ownership drives
+  *views*, not access.
+- **Owner filters do not mean the same thing in every report** (read this before building a UI that adds them
+  up): `/reports/net-worth` filters **the accounts owned by X** — account-scoped end to end, including the
+  cash-flow term of its `Δ net worth = cash flow + revaluation` decomposition, so that identity still holds —
+  while `/reports/cash-flow` and `/reports/spending` filter **the rows attributed to X**, per split child, so
+  Alex's report never totals Beth's share of a split charge. The two views are therefore **not additive**; the
+  net-worth series carries `attribution: "account"` so the UI can label it honestly. Fractional ownership is
+  the real fix and is deferred (ADR-0026).
 - **Reporting** (ECharts, all reading the same `/reports` query API; **everything converted to base currency**
   at the correct-date rate, transfers excluded from cash-flow):
   - Net worth over time (area/line from `balance_snapshots`), with the **currency-revaluation** contribution
@@ -328,10 +357,14 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   run `BYPASSRLS` (that removes the backstop) — each sync job sets `SET LOCAL app.household_id` for its
   connection's household inside the job transaction, so RLS applies to the worker exactly as to the API.
 - **Auth**: argon2id password hashing; httpOnly + SameSite session cookies; CSRF token for mutations;
-  login rate-limit + lockout. Invite-only signup. (Verify SameSite=Strict doesn't break the invite-link
-  landing; use Lax there if needed.) No 2FA is an accepted risk given Tailscale + invite-only — logged as such.
+  login rate-limit + lockout. **Signup is open (ADR-0027)** — the first signer creates the household (as its
+  `owner` + `is_admin`), later signers join the oldest one as members; `METALMARK_OPEN_SIGNUP=false` closes it.
+  No 2FA is an accepted risk given Tailscale only. (No invite landing page any more, so no `Lax` carve-out.)
 - **Privacy caveat**: v1 ownership drives *views*, not *access* — any household member can read a partner's
   accounts. The UI must not imply privacy it can't enforce; truly private accounts are out of scope for v1.
+  Open signup sharpens this: **anyone who can reach the instance can join the household and read all of it**,
+  so the LAN/Tailscale boundary (§1, ADR-0002) is the only thing gating access — there is no app-layer invite
+  step left to hide behind, and widening that boundary means setting `METALMARK_OPEN_SIGNUP=false` first.
 - **Untrusted files**: OFX/QFX/CSV are user-supplied. Parse OFX/QFX with a **defused XML parser** (XXE /
   billion-laughs). Validate/limit CSV size and columns.
 - **Transport**: Caddy TLS; reachable only over Tailscale/LAN. No public ingress.
@@ -344,7 +377,8 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   data for days. Fire a notification (email/ntfy/Slack webhook) on `auth_error`, repeated sync failure, or
   backup failure — badges only help if someone looks.
 - **Observability**: structured logs, `/healthz`, sync run history, Sentry optional.
-- **Audit**: sensitive actions (connect/remove account, invite, rule change) written to `audit_log`.
+- **Audit**: sensitive actions (connect/remove account, signup, owner rename/reassign/delete, rule change)
+  written to `audit_log`.
 
 ---
 
@@ -363,6 +397,8 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 | **Reconnect creates duplicate accounts/history** | Remap by `external_key`; ledger decoupled from connection (transactions survive removal) | SYNC |
 | **Re-importing CSV/OFX duplicates rows** | `import_hash` unique index for manual/imported txns | IMP |
 | **Cross-household (IDOR) data leak** | RLS or one mandatory scoping layer, not per-handler filters | P0, OPS |
+| **Open signup: anyone who can reach the instance joins the household** | LAN/VPN-only posture (ADR-0002) is the only gate; `METALMARK_OPEN_SIGNUP=false` before that boundary weakens (ADR-0027) | P0, OPS |
+| **Owner filter read as if it meant one thing across all reports** | Documented asymmetry (account-scoped net worth vs row-scoped cash-flow/spending) + `attribution: "account"` on the series; fractional ownership deferred (ADR-0026) | L, UR |
 | Silent stale data (no webhooks, 6h poll) | Notification on `auth_error` / sync / backup failure | SYNC, OPS |
 | **Multi-currency mis-conversion / wrong net worth** | Single-currency accounts (ADR-0017); dated FX (latest ≤ date, else "no rate"); high-precision rates; `Decimal` + rounding policy; property tests over currencies | FX, L, UR, T |
 | **Stale/corrected FX rate leaves stale reports** | `base_amount` is a cache; rollups + caches invalidated on `(currency, rate_date)` change; base_currency immutable | FX, OPS |

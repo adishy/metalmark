@@ -43,8 +43,8 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0009](0009-ledger-decoupled-from-connections.md) | The ledger is decoupled from connections | Accepted |
 | [0010](0010-manual-first-and-parity.md) | Manual-first build order and manual-parity principle | Accepted |
 | [0011](0011-first-class-investments.md) | First-class investments + consolidated allocation view | Accepted |
-| [0012](0012-sharing-view-filtering.md) | Household + view-filtering sharing (no per-account access control in v1) | Accepted |
-| [0013](0013-auth-sessions-invite-only.md) | Auth: server-side sessions, argon2id, invite-only | Accepted |
+| [0012](0012-sharing-view-filtering.md) | Household + view-filtering sharing (no per-account access control in v1) | Superseded by 0026 (ownership half) |
+| [0013](0013-auth-sessions-invite-only.md) | Auth: server-side sessions, argon2id, invite-only | Superseded by 0027 (invite half) |
 | [0014](0014-tenant-isolation-scoping-layer.md) | Tenant isolation via one mandatory scoping layer / RLS | Accepted |
 | [0015](0015-test-harness-first-class.md) | Test harness is a first-class workstream (red-green) | Accepted |
 | [0016](0016-admin-sync-observability.md) | Admin-grade sync observability | Accepted |
@@ -57,3 +57,5 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0023](0023-phase1-split-1a-1b.md) | Split Phase 1 into 1a/1b; carve FX into its own module | Accepted |
 | [0024](0024-uv-for-python-deps.md) | uv for Python dependency management | Accepted |
 | [0025](0025-rls-implementation-mechanism.md) | RLS mechanism: per-transaction GUC, fail-closed, child policies | Accepted |
+| [0026](0026-owners-are-household-data.md) | Owners are household data, not users (ownership half of 0012) | Accepted |
+| [0027](0027-open-signup-replaces-invite-only.md) | Open signup replaces invite-only (invite half of 0013) | Accepted |

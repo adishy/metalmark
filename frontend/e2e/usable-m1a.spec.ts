@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { addAccount, addTransaction, login, openTxn } from "./helpers";
+import { addAccount, addOwner, addTransaction, login, openTxn } from "./helpers";
 
 // Covers the "usable M1a" flows layered on top of the thin ledger: editing a
 // transaction (incl. setting an owner), splitting it, managing categories in
@@ -9,8 +9,16 @@ import { addAccount, addTransaction, login, openTxn } from "./helpers";
 test("edit a transaction and set an owner", async ({ page }) => {
   const run = Date.now();
   const accountName = `Edit Acct ${run}`;
+  const ownerName = `Owner ${run}`;
   await login(page);
+  await addOwner(page, ownerName);
+  await page.getByTestId("nav-accounts").click();
   await addAccount(page, { name: accountName, balance: "500", currency: "USD" });
+
+  // Accounts are owned by default, and the row names the owner they got.
+  await expect(
+    page.getByTestId("account-list").locator("li", { hasText: accountName }),
+  ).toContainText(/Shared/);
 
   await page.getByTestId("nav-transactions").click();
   const merchant = `Coffee ${run}`;
@@ -19,20 +27,41 @@ test("edit a transaction and set an owner", async ({ page }) => {
   await addTransaction(page, { accountName, amount: "-9.99", merchant, category: "Dining" });
   await expect(page.getByTestId("txn-list")).toContainText(merchant);
 
+  // Scoped to this run's row: the ledger is shared, so a bare "first owner
+  // badge" could belong to a transaction an earlier run left behind.
+  const rowBadge = page
+    .getByTestId("txn-list")
+    .locator("li", { hasText: merchant })
+    .locator('[data-testid^="txn-owner-"]');
+
+  // Nothing was set on this transaction, so it shows the owner it inherits,
+  // marked as inherited.
+  await expect(rowBadge).toHaveAttribute("title", /Inherited from/);
+
   await openTxn(page, merchant);
   const edited = `${merchant} EDITED`;
   await page.getByTestId("detail-merchant").fill(edited);
-  await page.getByTestId("detail-owner").selectOption({ label: "Owner" });
+  await page.getByTestId("detail-owner").selectOption({ label: ownerName });
   await page.getByTestId("txn-detail-save").click();
   await expect(page.getByTestId("txn-detail")).toBeHidden();
 
-  // The row reflects the new merchant and the assigned owner name.
+  // The row reflects the new merchant and the owner now set on the transaction
+  // itself rather than inherited.
   await expect(page.getByTestId("txn-list")).toContainText(edited);
-  await expect(page.getByTestId("txn-list")).toContainText("Owner");
+  await expect(rowBadge).toContainText(ownerName);
+  await expect(rowBadge).toHaveAttribute("title", "Owner set on this transaction");
 
-  // Owner persisted on the server: reopening shows a non-empty owner select.
+  // Owner persisted on the server: reopening shows it selected, and the ledger
+  // filter for that owner still finds the transaction.
   await openTxn(page, edited);
   await expect(page.getByTestId("detail-owner")).not.toHaveValue("");
+  await expect(page.getByTestId("detail-owner").locator("option:checked")).toHaveText(ownerName);
+  await page.getByTestId("txn-detail-close").click();
+
+  await page.getByTestId("owner-filter").getByRole("button", { name: ownerName, exact: true }).click();
+  await expect(page.getByTestId("txn-list")).toContainText(edited);
+  await page.getByTestId("owner-filter-all").click();
+  await expect(page.getByTestId("owner-filter-all")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("split a transaction by amount", async ({ page }) => {

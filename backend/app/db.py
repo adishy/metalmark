@@ -62,9 +62,15 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
-async def _set_scope(session: AsyncSession, household_id: uuid.UUID | None,
-                     user_id: uuid.UUID | None) -> None:
-    """Set transaction-local GUCs that RLS policies read (fail-closed)."""
+async def set_scope(session: AsyncSession, *, household_id: uuid.UUID | None = None,
+                    user_id: uuid.UUID | None = None) -> None:
+    """Set the transaction-local GUCs that RLS policies read (fail-closed).
+
+    Exposed because the identity layer needs it too: creating a household means
+    creating its Shared owner, and that insert is subject to the ``owners`` policy
+    like any other. A session that only ever touched ``users``/``households`` can
+    scope itself to the household it just made, in the same transaction.
+    """
     await session.execute(
         text("SELECT set_config('app.household_id', :hid, true)"),
         {"hid": str(household_id) if household_id else ""},
@@ -86,13 +92,13 @@ async def scoped_session(
     """
     sm = get_sessionmaker()
     async with sm() as session, session.begin():
-        await _set_scope(session, household_id, user_id)
+        await set_scope(session, household_id=household_id, user_id=user_id)
         yield session
 
 
 @asynccontextmanager
 async def unscoped_session() -> AsyncIterator[AsyncSession]:
-    """Session for identity/auth flows (users, sessions, invites) that run
+    """Session for identity/auth flows (users, households, sessions) that run
     before a household context exists. These tables are protected at the
     application layer, not by household RLS."""
     sm = get_sessionmaker()

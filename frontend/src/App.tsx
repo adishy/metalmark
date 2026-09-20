@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import Login from "@/pages/Login";
+import Signup from "@/pages/Signup";
 import AppShell from "@/components/AppShell";
 import Accounts from "@/pages/Accounts";
 import Transactions from "@/pages/Transactions";
@@ -23,6 +24,7 @@ export default function App() {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
 
@@ -71,6 +71,12 @@ export default function Login() {
         >
           {busy ? "Signing in…" : "Sign in"}
         </button>
+        <p className="text-center text-xs text-slate-400">
+          No account yet?{" "}
+          <Link to="/signup" className="text-brand underline" data-testid="login-to-signup">
+            Create an account
+          </Link>
+        </p>
       </form>
     </div>
   );

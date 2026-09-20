@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.deps import RequestContext, get_context
 from app.schemas.ledger import (
@@ -23,13 +23,24 @@ async def create_account(data: AccountCreate, ctx: RequestContext = Depends(get_
 
 
 @router.get("", response_model=list[AccountOut])
-async def list_accounts(ctx: RequestContext = Depends(get_context)):
-    return [AccountOut.model_validate(a) for a in await ledger.list_accounts(ctx.session)]
+async def list_accounts(
+    ctx: RequestContext = Depends(get_context),
+    owner_id: uuid.UUID | None = Query(default=None),
+):
+    return [
+        AccountOut.model_validate(a)
+        for a in await ledger.list_accounts(ctx.session, owner_id)
+    ]
 
 
 @router.get("/net-worth", response_model=NetWorthOut)
-async def net_worth(ctx: RequestContext = Depends(get_context)):
-    return NetWorthOut(**await ledger.net_worth(ctx.session, ctx.household_id))
+async def net_worth(
+    ctx: RequestContext = Depends(get_context),
+    owner_id: uuid.UUID | None = Query(default=None),
+):
+    # Account-scoped to match the net-worth report: an owner filter here means the
+    # accounts that owner holds, never a subset of rows inside an account.
+    return NetWorthOut(**await ledger.net_worth(ctx.session, ctx.household_id, owner_id))
 
 
 @router.get("/{account_id}", response_model=AccountOut)

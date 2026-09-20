@@ -14,3 +14,5 @@ capturing the *process*: what was asked, what was researched, what the reviews f
 | Date | Session | Topic |
 |---|---|---|
 | 2026-09-19 | 01 | Architecture + multi-agent plan; two design-review passes; ADR strategy |
+| 2026-09-19 | 02 | Implementation (M1a build): P0 foundations + test/CI workstream |
+| 2026-09-20 | 03 | Kestrel → MetalMark rename; ownership reshape (ADR-0026); open signup (ADR-0027) |

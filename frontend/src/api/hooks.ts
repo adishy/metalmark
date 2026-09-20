@@ -4,14 +4,21 @@ import type {
   Account,
   AccountCreate,
   AccountUpdate,
+  CashFlowPoint,
   Category,
   CategoryGroup,
   FxRate,
   Household,
-  Invite,
+  HouseholdUpdate,
+  Me,
   Member,
   NetWorth,
   NetWorthSeries,
+  Owner,
+  OwnerCreate,
+  OwnerReassignment,
+  OwnerUpdate,
+  SignupCreate,
   SpendingReport,
   SplitIn,
   Tag,
@@ -21,12 +28,41 @@ import type {
   TransactionUpdate,
 } from "@/api/types";
 
-export function useAccounts() {
-  return useQuery({ queryKey: ["accounts"], queryFn: () => api.get<Account[]>("/accounts") });
+/** `?owner_id=…` for the owner-filterable GETs; unfiltered leaves the path bare. */
+export function accountsUrl(path: string, ownerId?: string | null): string {
+  return ownerId ? `${path}?owner_id=${encodeURIComponent(ownerId)}` : path;
 }
 
-export function useNetWorth() {
-  return useQuery({ queryKey: ["net-worth"], queryFn: () => api.get<NetWorth>("/accounts/net-worth") });
+/** Same owner scope, but for the report GETs that already carry start/end. */
+export function reportUrl(
+  path: string,
+  start: string,
+  end: string,
+  ownerId?: string | null,
+): string {
+  const q = new URLSearchParams({ start, end });
+  if (ownerId) q.set("owner_id", ownerId);
+  return `${path}?${q}`;
+}
+
+// The owner filter belongs in the key: an owner-scoped net worth is a different
+// series from the household total, and both must stay cached side by side.
+export function useAccounts(ownerId?: string | null) {
+  return useQuery({
+    queryKey: ["accounts", ownerId ?? null],
+    queryFn: () => api.get<Account[]>(accountsUrl("/accounts", ownerId)),
+  });
+}
+
+export function useNetWorth(ownerId?: string | null) {
+  return useQuery({
+    queryKey: ["net-worth", ownerId ?? null],
+    queryFn: () => api.get<NetWorth>(accountsUrl("/accounts/net-worth", ownerId)),
+  });
+}
+
+export function useOwners() {
+  return useQuery({ queryKey: ["owners"], queryFn: () => api.get<Owner[]>("/owners") });
 }
 
 export function useCategories() {
@@ -59,6 +95,8 @@ export function useFxRates() {
 export interface TxnFilter {
   account_id?: string[];
   category_id?: string[];
+  /** Matches the effective owner, so inherited transactions are included. */
+  owner_id?: string;
   start?: string;
   end?: string;
   review_status?: string;
@@ -71,6 +109,7 @@ export function txnQuery(f: TxnFilter, cursor?: string): string {
   const q = new URLSearchParams();
   f.account_id?.forEach((a) => q.append("account_id", a));
   f.category_id?.forEach((c) => q.append("category_id", c));
+  if (f.owner_id) q.set("owner_id", f.owner_id);
   if (f.start) q.set("start", f.start);
   if (f.end) q.set("end", f.end);
   if (f.review_status) q.set("review_status", f.review_status);
@@ -99,17 +138,24 @@ export function useInfiniteTransactions(filter: TxnFilter = {}) {
   });
 }
 
-export function useNetWorthSeries(start: string, end: string) {
+export function useNetWorthSeries(start: string, end: string, ownerId?: string | null) {
   return useQuery({
-    queryKey: ["report-net-worth", start, end],
-    queryFn: () => api.get<NetWorthSeries>(`/reports/net-worth?start=${start}&end=${end}`),
+    queryKey: ["report-net-worth", start, end, ownerId ?? null],
+    queryFn: () => api.get<NetWorthSeries>(reportUrl("/reports/net-worth", start, end, ownerId)),
   });
 }
 
-export function useSpending(start: string, end: string) {
+export function useCashFlow(start: string, end: string, ownerId?: string | null) {
   return useQuery({
-    queryKey: ["report-spending", start, end],
-    queryFn: () => api.get<SpendingReport>(`/reports/spending?start=${start}&end=${end}`),
+    queryKey: ["report-cash-flow", start, end, ownerId ?? null],
+    queryFn: () => api.get<CashFlowPoint[]>(reportUrl("/reports/cash-flow", start, end, ownerId)),
+  });
+}
+
+export function useSpending(start: string, end: string, ownerId?: string | null) {
+  return useQuery({
+    queryKey: ["report-spending", start, end, ownerId ?? null],
+    queryFn: () => api.get<SpendingReport>(reportUrl("/reports/spending", start, end, ownerId)),
   });
 }
 
@@ -122,8 +168,61 @@ export function useInvalidateLedger() {
     qc.invalidateQueries({ queryKey: ["accounts"] });
     qc.invalidateQueries({ queryKey: ["net-worth"] });
     qc.invalidateQueries({ queryKey: ["report-net-worth"] });
+    qc.invalidateQueries({ queryKey: ["report-cash-flow"] });
     qc.invalidateQueries({ queryKey: ["report-spending"] });
   };
+}
+
+// -- owners --
+
+export function useCreateOwner() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: OwnerCreate) => api.post<Owner>("/owners", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owners"] }),
+  });
+}
+
+export function useUpdateOwner() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: OwnerUpdate }) => api.patch<Owner>(`/owners/${v.id}`, v.body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["owners"] }),
+  });
+}
+
+/** Deleting an owner reassigns its accounts, transactions and splits, so every
+ * owner-scoped view (ledger + reports, filtered or not) is stale afterwards. */
+export function useDeleteOwner() {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateLedger();
+  return useMutation({
+    mutationFn: (v: { id: string; reassignTo?: string }) =>
+      api.del<OwnerReassignment>(
+        `/owners/${v.id}${v.reassignTo ? `?reassign_to=${encodeURIComponent(v.reassignTo)}` : ""}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["owners"] });
+      invalidate();
+    },
+  });
+}
+
+// -- household / auth --
+
+export function useUpdateHousehold() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: HouseholdUpdate) => api.patch<Household>("/household", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["household"] }),
+  });
+}
+
+/** Open signup. Returns the new session; the auth context adopts it. */
+export function useSignup() {
+  return useMutation({
+    mutationFn: (body: SignupCreate) => api.post<Me>("/auth/signup", body),
+  });
 }
 
 // -- accounts --
@@ -269,11 +368,3 @@ export function useUpsertFxRate() {
   });
 }
 
-// -- invites --
-
-export function useCreateInvite() {
-  return useMutation({
-    mutationFn: (body: { email: string; role: string }) =>
-      api.post<Invite>("/auth/invites", body),
-  });
-}

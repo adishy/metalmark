@@ -27,12 +27,12 @@ def needs_rehash(hashed: str) -> bool:
 
 
 def new_token(nbytes: int = 32) -> str:
-    """A URL-safe random token (session ids, invite tokens, CSRF tokens)."""
+    """A URL-safe random token (session ids, CSRF tokens)."""
     return secrets.token_urlsafe(nbytes)
 
 
 def hash_token(token: str) -> str:
-    """Hash a bearer token (invite/session lookup) with SHA-256.
+    """Hash a bearer token (session lookup) with SHA-256.
 
     Tokens are high-entropy random values, so a fast hash is appropriate and
     lets us index the digest for lookup without storing the raw token.

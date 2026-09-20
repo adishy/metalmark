@@ -1,4 +1,4 @@
-"""Identity, household, membership, invites, sessions (ARCHITECTURE §2).
+"""Identity, household, membership, sessions (ARCHITECTURE §2).
 
 These tables are NOT under household RLS — they bootstrap the session before a
 household context exists and are protected at the application layer.
@@ -52,19 +52,6 @@ class HouseholdMember(TimestampMixin, Base):
 
     household: Mapped[Household] = relationship(back_populates="members")
     user: Mapped[User] = relationship()
-
-
-class Invite(UUIDPkMixin, TimestampMixin, Base):
-    __tablename__ = "invites"
-
-    household_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False
-    )
-    email: Mapped[str] = mapped_column(String(320), nullable=False)
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    role: Mapped[str] = mapped_column(String(16), nullable=False, default="member")
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Session(UUIDPkMixin, TimestampMixin, Base):

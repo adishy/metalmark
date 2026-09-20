@@ -15,6 +15,17 @@ export interface Me {
 
 export type AccountType = "depository" | "credit" | "investment" | "loan" | "other";
 
+export type OwnerKind = "person" | "shared";
+
+/** A household data row, not a user. Exactly one kind="shared" owner exists per
+ * household ("Shared") and is created with it; it cannot be deleted. */
+export interface Owner {
+  id: UUID;
+  name: string;
+  kind: OwnerKind;
+  sort: number;
+}
+
 export interface Account {
   id: UUID;
   name: string;
@@ -25,7 +36,8 @@ export interface Account {
   current_balance: Money;
   balance_date: string | null;
   is_asset: boolean;
-  owner_user_id: UUID | null;
+  /** Always set — an account is the bottom of the ownership chain. */
+  owner_id: UUID;
   is_manual: boolean;
   is_hidden: boolean;
 }
@@ -65,7 +77,10 @@ export interface Split {
   amount: Money;
   base_amount: Money | null;
   category_id: UUID | null;
-  owner_user_id: UUID | null;
+  /** null = inherit from the transaction. */
+  owner_id: UUID | null;
+  /** Resolved server-side: split -> transaction -> account -> Shared. */
+  effective_owner_id: UUID;
   notes: string | null;
 }
 
@@ -81,7 +96,10 @@ export interface Transaction {
   description: string | null;
   merchant: string | null;
   category_id: UUID | null;
-  owner_user_id: UUID | null;
+  /** null = inherit from the account. */
+  owner_id: UUID | null;
+  /** Resolved server-side: transaction -> account -> Shared. */
+  effective_owner_id: UUID;
   is_pending: boolean;
   review_status: "needs_review" | "reviewed" | "ignored";
   is_hidden: boolean;
@@ -105,6 +123,8 @@ export interface NetWorthSeries {
   delta_net_worth: Money;
   net_cash_flow: Money;
   currency_revaluation: Money;
+  /** Ownership only ever moves whole accounts, never individual postings. */
+  attribution: "account";
 }
 
 export interface CashFlowPoint {
@@ -144,14 +164,36 @@ export interface FxRate {
   source: string;
 }
 
-export interface Invite {
-  id: UUID;
-  email: string;
-  role: string;
-  token: string | null;
+export interface OwnerReassignment {
+  reassigned_accounts: number;
+  reassigned_transactions: number;
+  reassigned_splits: number;
 }
 
 // ---- request bodies ----
+
+export interface SignupCreate {
+  email: string;
+  display_name: string;
+  password: string;
+  /** Ignored when the household already exists (later signups just join it). */
+  household_name?: string;
+}
+
+export interface HouseholdUpdate {
+  name?: string;
+  timezone?: string;
+}
+
+export interface OwnerCreate {
+  name: string;
+  sort?: number;
+}
+
+export interface OwnerUpdate {
+  name?: string;
+  sort?: number;
+}
 
 export interface AccountCreate {
   name: string;
@@ -161,7 +203,8 @@ export interface AccountCreate {
   institution?: string | null;
   current_balance?: Money;
   balance_date?: string | null;
-  owner_user_id?: UUID | null;
+  /** Omit to let the server assign the Shared owner. */
+  owner_id?: UUID;
 }
 
 export interface AccountUpdate {
@@ -170,7 +213,7 @@ export interface AccountUpdate {
   institution?: string | null;
   current_balance?: Money | null;
   balance_date?: string | null;
-  owner_user_id?: UUID | null;
+  owner_id?: UUID;
   is_hidden?: boolean | null;
 }
 
@@ -182,7 +225,7 @@ export interface TransactionCreate {
   description?: string | null;
   merchant?: string | null;
   category_id?: UUID | null;
-  owner_user_id?: UUID | null;
+  owner_id?: UUID | null;
   is_pending?: boolean;
   notes?: string | null;
   tag_ids?: UUID[];
@@ -195,7 +238,7 @@ export interface TransactionUpdate {
   description?: string | null;
   merchant?: string | null;
   category_id?: UUID | null;
-  owner_user_id?: UUID | null;
+  owner_id?: UUID | null;
   is_pending?: boolean | null;
   is_hidden?: boolean | null;
   review_status?: "needs_review" | "reviewed" | "ignored" | null;
@@ -207,6 +250,6 @@ export interface SplitIn {
   amount?: Money | null;
   pct?: Money | null;
   category_id?: UUID | null;
-  owner_user_id?: UUID | null;
+  owner_id?: UUID | null;
   notes?: string | null;
 }

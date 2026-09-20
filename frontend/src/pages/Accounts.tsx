@@ -3,36 +3,45 @@ import {
   useAccounts,
   useCreateAccount,
   useDeleteAccount,
-  useMembers,
   useNetWorth,
+  useOwners,
   useUpdateAccount,
 } from "@/api/hooks";
-import type { Account, AccountType, Member } from "@/api/types";
+import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney } from "@/lib/format";
 import { Button, Field, Input, Select, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
+import OwnerSelect from "@/components/OwnerSelect";
+import OwnerFilterChips from "@/components/OwnerFilterChips";
 
 const TYPES: AccountType[] = ["depository", "credit", "investment", "loan", "other"];
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Accounts() {
-  const netWorth = useNetWorth();
-  const accounts = useAccounts();
-  const members = useMembers();
+  const owners = useOwners();
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  // The filter scopes the list and the header together: an owner's net worth is
+  // the sum of that owner's accounts, so a filtered list with an unfiltered
+  // total would read as a bug.
+  const netWorth = useNetWorth(ownerFilter);
+  const accounts = useAccounts(ownerFilter);
   const create = useCreateAccount();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
 
   const ownerName = useMemo(() => {
     const m = new Map<string, string>();
-    members.data?.forEach((x) => m.set(x.user_id, x.display_name));
+    owners.data?.forEach((o) => m.set(o.id, o.name));
     return m;
-  }, [members.data]);
+  }, [owners.data]);
 
   return (
     <div className="space-y-6">
       <section className="rounded-2xl bg-slate-900 p-6" data-testid="net-worth">
-        <p className="text-sm text-slate-400">Net worth</p>
+        <p className="text-sm text-slate-400">
+          Net worth
+          {ownerFilter && ` · ${ownerName.get(ownerFilter) ?? "owner"}`}
+        </p>
         <p className="text-3xl font-semibold">
           {netWorth.data
             ? formatMoney(netWorth.data.net_worth, netWorth.data.base_currency)
@@ -61,9 +70,15 @@ export default function Accounts() {
           </Button>
         </div>
 
+        <OwnerFilterChips
+          owners={owners.data ?? []}
+          value={ownerFilter}
+          onChange={setOwnerFilter}
+        />
+
         {open && (
           <AddAccountForm
-            members={members.data ?? []}
+            owners={owners.data ?? []}
             pending={create.isPending}
             error={create.isError ? (create.error as Error).message : null}
             onSubmit={(b) => create.mutate(b, { onSuccess: () => setOpen(false) })}
@@ -81,7 +96,9 @@ export default function Accounts() {
                 <p className="text-xs text-slate-500">
                   {a.type} · {a.currency}
                   {a.institution && ` · ${a.institution}`}
-                  {a.owner_user_id && ` · ${ownerName.get(a.owner_user_id) ?? "owner"}`}
+                  <span data-testid={`account-owner-${a.id}`}>
+                    {` · ${ownerName.get(a.owner_id) ?? "owner"}`}
+                  </span>
                   {!a.is_asset && (
                     <span className="ml-1 rounded bg-red-500/20 px-1.5 py-0.5 text-red-300">
                       liability
@@ -110,60 +127,21 @@ export default function Accounts() {
         </ul>
       </section>
 
-      {editing && (
-        <EditAccountDialog
-          account={editing}
-          members={members.data ?? []}
-          onClose={() => setEditing(null)}
-        />
-      )}
+      {editing && <EditAccountDialog account={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function OwnerSelect({
-  id,
-  members,
-  value,
-  onChange,
-  testid,
-}: {
-  id: string;
-  members: Member[];
-  value: string;
-  onChange: (v: string) => void;
-  testid: string;
-}) {
-  return (
-    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid}>
-      <option value="">Unassigned</option>
-      {members.map((m) => (
-        <option key={m.user_id} value={m.user_id}>
-          {m.display_name}
-        </option>
-      ))}
-    </Select>
-  );
-}
-
 function AddAccountForm({
-  members,
+  owners,
   pending,
   error,
   onSubmit,
 }: {
-  members: Member[];
+  owners: Owner[];
   pending: boolean;
   error: string | null;
-  onSubmit: (b: {
-    name: string;
-    type: AccountType;
-    currency: string;
-    current_balance: string;
-    balance_date: string;
-    owner_user_id: string | null;
-    institution: string | null;
-  }) => void;
+  onSubmit: (b: AccountCreate) => void;
 }) {
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("depository");
@@ -171,8 +149,10 @@ function AddAccountForm({
   const [balance, setBalance] = useState("0");
   const [balanceDate, setBalanceDate] = useState(today);
   const [institution, setInstitution] = useState("");
-  const [owner, setOwner] = useState("");
+  const [owner, setOwner] = useState<string | null>(null);
   const [errs, setErrs] = useState<Record<string, string | null>>({});
+
+  const sharedId = owners.find((o) => o.kind === "shared")?.id;
 
   const ids = {
     name: useFieldId("account-name"),
@@ -181,7 +161,6 @@ function AddAccountForm({
     balance: useFieldId("account-balance"),
     balanceDate: useFieldId("account-balance-date"),
     institution: useFieldId("account-institution"),
-    owner: useFieldId("account-owner"),
   };
 
   const validate = () => {
@@ -207,7 +186,9 @@ function AddAccountForm({
           currency: currency.toUpperCase(),
           current_balance: balance,
           balance_date: balanceDate,
-          owner_user_id: owner || null,
+          // Shared is the server's default too, so an unset picker (owners still
+          // loading) can just be left off the body.
+          owner_id: owner || sharedId || undefined,
           institution: institution || null,
         });
       }}
@@ -231,9 +212,7 @@ function AddAccountForm({
       <Field label="Balance date" htmlFor={ids.balanceDate}>
         <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="account-balance-date" />
       </Field>
-      <Field label="Owner" htmlFor={ids.owner}>
-        <OwnerSelect id={ids.owner} members={members} value={owner} onChange={setOwner} testid="account-owner" />
-      </Field>
+      <OwnerSelect value={owner} onChange={setOwner} testid="account-owner" />
       <Field label="Institution" htmlFor={ids.institution}>
         <Input id={ids.institution} value={institution} onChange={(e) => setInstitution(e.target.value)} data-testid="account-institution" />
       </Field>
@@ -245,22 +224,14 @@ function AddAccountForm({
   );
 }
 
-function EditAccountDialog({
-  account,
-  members,
-  onClose,
-}: {
-  account: Account;
-  members: Member[];
-  onClose: () => void;
-}) {
+function EditAccountDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const update = useUpdateAccount();
   const del = useDeleteAccount();
   const [name, setName] = useState(account.name);
   const [institution, setInstitution] = useState(account.institution ?? "");
   const [balance, setBalance] = useState(account.current_balance);
   const [balanceDate, setBalanceDate] = useState(account.balance_date ?? today());
-  const [owner, setOwner] = useState(account.owner_user_id ?? "");
+  const [owner, setOwner] = useState<string | null>(account.owner_id);
   const [hidden, setHidden] = useState(account.is_hidden);
   const [confirmDel, setConfirmDel] = useState(false);
   const [errs, setErrs] = useState<Record<string, string | null>>({});
@@ -270,7 +241,6 @@ function EditAccountDialog({
     institution: useFieldId("edit-account-institution"),
     balance: useFieldId("edit-account-balance"),
     balanceDate: useFieldId("edit-account-balance-date"),
-    owner: useFieldId("edit-account-owner"),
   };
 
   const save = () => {
@@ -285,7 +255,9 @@ function EditAccountDialog({
           institution: institution || null,
           current_balance: balance,
           balance_date: balanceDate,
-          owner_user_id: owner || null,
+          // Required server-side: keep the account's own owner if the picker is
+          // somehow empty rather than sending null.
+          owner_id: owner || account.owner_id,
           is_hidden: hidden,
         },
       },
@@ -327,9 +299,7 @@ function EditAccountDialog({
         <Field label="Balance date" htmlFor={ids.balanceDate}>
           <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="edit-account-balance-date" />
         </Field>
-        <Field label="Owner" htmlFor={ids.owner}>
-          <OwnerSelect id={ids.owner} members={members} value={owner} onChange={setOwner} testid="edit-account-owner" />
-        </Field>
+        <OwnerSelect value={owner} onChange={setOwner} testid="edit-account-owner" />
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} data-testid="edit-account-hidden" />
           Hidden (exclude from net worth views)

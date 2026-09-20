@@ -32,6 +32,10 @@ class NetWorthSeries(BaseModel):
     delta_net_worth: Decimal
     net_cash_flow: Decimal
     currency_revaluation: Decimal
+    # Always "account": an owner filter on this report selects accounts, not rows
+    # (ADR-0026). Carried in the payload so the UI can say so instead of implying
+    # the figures here add up with the row-scoped reports.
+    attribution: str = "account"
 
 
 class SpendingReport(BaseModel):

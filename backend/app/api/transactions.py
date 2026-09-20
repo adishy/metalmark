@@ -17,15 +17,44 @@ from app.schemas.transactions import (
     TransferOut,
 )
 from app.services import transactions as svc
+from app.services.ownership import account_owner_map, effective_owner_id
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+async def _serialize(session, rows: list[Transaction]) -> list[TransactionOut]:
+    """Fill the response fields that are computed rather than stored.
+
+    ``effective_owner_id`` is resolved through one account-owner map for the whole
+    page, never a query per row. It is attached to the ORM objects as a transient
+    attribute (there is no such column — the value would fan out across every
+    transaction whenever an account changed hands, ADR-0026) so the response schema
+    can declare it non-nullable.
+    """
+    owners = await account_owner_map(session, {r.account_id for r in rows})
+    tag_map = await svc._tag_ids_for(session, [r.id for r in rows])
+    items = []
+    for r in rows:
+        account_owner_id = owners[r.account_id]
+        r.effective_owner_id = effective_owner_id(
+            split_owner_id=None,
+            transaction_owner_id=r.owner_id,
+            account_owner_id=account_owner_id,
+        )
+        for split in r.splits:
+            split.effective_owner_id = effective_owner_id(
+                split_owner_id=split.owner_id,
+                transaction_owner_id=r.owner_id,
+                account_owner_id=account_owner_id,
+            )
+        model = TransactionOut.model_validate(r)
+        model.tag_ids = tag_map.get(r.id, [])
+        items.append(model)
+    return items
+
+
 async def _out(ctx: RequestContext, txn: Transaction) -> TransactionOut:
-    tag_map = await svc._tag_ids_for(ctx.session, [txn.id])
-    model = TransactionOut.model_validate(txn)
-    model.tag_ids = tag_map.get(txn.id, [])
-    return model
+    return (await _serialize(ctx.session, [txn]))[0]
 
 
 @router.post("", response_model=TransactionOut, status_code=201)
@@ -39,6 +68,7 @@ async def list_transactions(
     ctx: RequestContext = Depends(get_context),
     account_id: list[uuid.UUID] | None = Query(default=None),
     category_id: list[uuid.UUID] | None = Query(default=None),
+    owner_id: uuid.UUID | None = Query(default=None),
     start: datetime | None = None,
     end: datetime | None = None,
     review_status: str | None = None,
@@ -51,6 +81,7 @@ async def list_transactions(
         ctx.session,
         account_ids=account_id,
         category_ids=category_id,
+        owner_id=owner_id,
         start=start,
         end=end,
         review_status=review_status,
@@ -59,13 +90,9 @@ async def list_transactions(
         limit=limit,
         cursor=cursor,
     )
-    tag_map = await svc._tag_ids_for(ctx.session, [r.id for r in rows])
-    items = []
-    for r in rows:
-        m = TransactionOut.model_validate(r)
-        m.tag_ids = tag_map.get(r.id, [])
-        items.append(m)
-    return TransactionPage(items=items, next_cursor=next_cursor)
+    return TransactionPage(
+        items=await _serialize(ctx.session, rows), next_cursor=next_cursor
+    )
 
 
 @router.get("/{txn_id}", response_model=TransactionOut)

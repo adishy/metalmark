@@ -17,12 +17,13 @@ from app.api import (
     fx,
     health,
     household,
+    owners,
     reports,
     transactions,
 )
 from app.logging import configure_logging, get_logger
 from app.services.auth import AuthError
-from app.services.ledger import LedgerError
+from app.services.errors import LedgerError
 from app.settings import get_settings
 
 log = get_logger("app")
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(accounts.router)
     app.include_router(categories.router)
+    app.include_router(owners.router)
     app.include_router(transactions.router)
     app.include_router(fx.router)
     app.include_router(reports.router)

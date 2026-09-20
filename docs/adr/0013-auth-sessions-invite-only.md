@@ -1,6 +1,6 @@
 # ADR 0013: Auth — server-side sessions, argon2id, invite-only
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0027
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
 - **Related:** ADR-0012, ADR-0014, ARCHITECTURE.md §2, §5

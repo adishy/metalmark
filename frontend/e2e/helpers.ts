@@ -29,6 +29,16 @@ export async function readNetWorth(page: Page): Promise<number> {
   return parseMoney((await value.textContent()) ?? "0");
 }
 
+/** Create an owner row (Settings -> Owners); returns the name used. */
+export async function addOwner(page: Page, name: string): Promise<void> {
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("settings-tab-owners").click();
+  await expect(page.getByTestId("settings-panel-owners")).toBeVisible();
+  await page.getByTestId("owner-name").fill(name);
+  await page.getByTestId("owner-save").click();
+  await expect(page.getByTestId("owner-list")).toContainText(name);
+}
+
 /** Create a manual account; returns the unique name used. */
 export async function addAccount(
   page: Page,

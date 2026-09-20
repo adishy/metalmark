@@ -1,11 +1,14 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, setCsrfToken } from "@/api/client";
-import type { Me } from "@/api/types";
+import { useSignup } from "@/api/hooks";
+import type { Me, SignupCreate } from "@/api/types";
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Open signup: creates the household on the first signup, joins it after. */
+  signup: (input: SignupCreate) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -14,6 +17,7 @@ const AuthCtx = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const signupMutation = useSignup();
 
   const applyMe = (m: Me | null) => {
     setMe(m);
@@ -36,12 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyMe(m);
   };
 
+  const signup = async (input: SignupCreate) => {
+    applyMe(await signupMutation.mutateAsync(input));
+  };
+
   const logout = async () => {
     await api.post("/auth/logout");
     applyMe(null);
   };
 
-  return <AuthCtx.Provider value={{ me, loading, login, logout }}>{children}</AuthCtx.Provider>;
+  return (
+    <AuthCtx.Provider value={{ me, loading, login, signup, logout }}>{children}</AuthCtx.Provider>
+  );
 }
 
 export function useAuth(): AuthState {

@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,9 +25,12 @@ from app.models import (
     TransactionTag,
     TransferGroup,
 )
+from app.schemas.patch import is_set
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import fx
-from app.services.ledger import LedgerError, base_currency
+from app.services.errors import LedgerError
+from app.services.ledger import base_currency
+from app.services.ownership import require_owners
 
 
 def _mark(field_sources: dict, fields: list[str], origin: str = "user") -> None:
@@ -69,6 +72,7 @@ async def _tag_ids_for(session: AsyncSession, txn_ids: list[uuid.UUID]) -> dict:
 async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
                              data: TransactionCreate) -> Transaction:
     acct = await _account(session, data.account_id)
+    await require_owners(session, [data.owner_id])
     base = await base_currency(session, household_id)
     conv, rate_date = await fx.to_base(
         session, amount=data.amount, currency=acct.currency,
@@ -80,7 +84,9 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
         _mark(field_sources, ["category"], "user")
     if data.merchant is not None:
         _mark(field_sources, ["merchant"], "user")
-    if data.owner_user_id is not None:
+    if data.owner_id is not None:
+        # The key stays "owner" — provenance is keyed by field, and the field is
+        # still the owner, whatever column backs it (ADR-0007/0026).
         _mark(field_sources, ["owner"], "user")
 
     txn = Transaction(
@@ -95,7 +101,7 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
         description=data.description,
         merchant=data.merchant,
         category_id=data.category_id,
-        owner_user_id=data.owner_user_id,
+        owner_id=data.owner_id,
         is_pending=data.is_pending,
         # a human entering a categorized txn has effectively reviewed it
         review_status="reviewed" if data.category_id else "needs_review",
@@ -130,35 +136,42 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
     fs = dict(txn.field_sources or {})
     recompute = False
 
-    if data.amount is not None:
+    # ``is_set`` rather than ``is not None``: for the nullable fields an explicit
+    # null is how a client clears a value, and treating it as "absent" made a PATCH
+    # that unset an owner silently do nothing. The required fields are guarded by
+    # TransactionUpdate's validator, so arriving here they are non-null.
+    if is_set(data, "amount"):
         txn.amount = data.amount
         _mark(fs, ["amount"], "user")
         recompute = True
-    if data.transacted_at is not None:
+    if is_set(data, "transacted_at"):
         txn.transacted_at = data.transacted_at
         recompute = True
-    if data.posted_at is not None:
+    if is_set(data, "posted_at"):
         txn.posted_at = data.posted_at
-    if data.description is not None:
+    if is_set(data, "description"):
         txn.description = data.description
-    if data.merchant is not None:
+    if is_set(data, "merchant"):
         txn.merchant = data.merchant
         _mark(fs, ["merchant"], "user")
-    if data.category_id is not None:
+    if is_set(data, "category_id"):
         txn.category_id = data.category_id
         _mark(fs, ["category"], "user")
-    if data.owner_user_id is not None:
-        txn.owner_user_id = data.owner_user_id
+    if is_set(data, "owner_id"):
+        # null = inherit the account's owner; "owner" is still user-sourced either
+        # way, so a rule or the sync writer cannot reattribute it later.
+        await require_owners(session, [data.owner_id])
+        txn.owner_id = data.owner_id
         _mark(fs, ["owner"], "user")
-    if data.is_pending is not None:
+    if is_set(data, "is_pending"):
         txn.is_pending = data.is_pending
-    if data.is_hidden is not None:
+    if is_set(data, "is_hidden"):
         txn.is_hidden = data.is_hidden
         _mark(fs, ["is_hidden"], "user")
-    if data.review_status is not None:
+    if is_set(data, "review_status"):
         txn.review_status = data.review_status
         _mark(fs, ["review_status"], "user")
-    if data.notes is not None:
+    if is_set(data, "notes"):
         txn.notes = data.notes
 
     txn.field_sources = fs
@@ -191,6 +204,7 @@ async def delete_transaction(session: AsyncSession, txn_id: uuid.UUID) -> None:
 async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
                          splits: list[SplitIn]) -> Transaction:
     txn = await get_transaction(session, txn_id)
+    await require_owners(session, [s.owner_id for s in splits])
     if not splits:
         # un-split (delete-orphan cascade removes children)
         txn.splits.clear()
@@ -222,7 +236,7 @@ async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
         txn.splits.append(
             TransactionSplit(
                 amount=amt, base_amount=bamt,
-                category_id=s.category_id, owner_user_id=s.owner_user_id, notes=s.notes,
+                category_id=s.category_id, owner_id=s.owner_id, notes=s.notes,
             )
         )
     txn.is_split_parent = True
@@ -261,6 +275,44 @@ async def link_transfer(session: AsyncSession, household_id: uuid.UUID,
 
 # ---- Listing (keyset pagination) ------------------------------------------
 
+def _owner_predicate(owner_id: uuid.UUID):
+    """Transactions this owner is effectively attributed to, for a query that has
+    already joined ``accounts``.
+
+    Two branches, because a split parent and a plain transaction answer the
+    question differently — and the ``NOT has_children`` guard is load-bearing:
+    without it, the plain branch matches every split parent whose *account* the
+    owner holds, so filtering by one person would return a shared card's charges
+    that were split entirely to somebody else.
+
+    Parent/child is decided by ``EXISTS (child)`` rather than the denormalized
+    ``is_split_parent`` flag, which a bad writer could leave stale — a flag saying
+    "parent" with no children rows would make the transaction invisible to every
+    owner filter.
+    """
+    # coalesce, not a nullable compare: accounts.owner_id is NOT NULL, so an
+    # unset transaction owner always resolves to something.
+    inherited = func.coalesce(Transaction.owner_id, Account.owner_id)
+    has_children = (
+        select(TransactionSplit.id)
+        .where(TransactionSplit.parent_txn_id == Transaction.id)
+        .exists()
+    )
+    child_matches = (
+        select(TransactionSplit.id)
+        .where(
+            TransactionSplit.parent_txn_id == Transaction.id,
+            # A child with no owner of its own inherits through the parent.
+            func.coalesce(TransactionSplit.owner_id, inherited) == owner_id,
+        )
+        .exists()
+    )
+    return or_(
+        and_(~has_children, inherited == owner_id),
+        and_(has_children, child_matches),
+    )
+
+
 def _encode_cursor(transacted_at: datetime, txn_id: uuid.UUID) -> str:
     raw = json.dumps({"t": transacted_at.isoformat(), "id": str(txn_id)})
     return base64.urlsafe_b64encode(raw.encode()).decode()
@@ -276,6 +328,7 @@ async def list_transactions(
     *,
     account_ids: list[uuid.UUID] | None = None,
     category_ids: list[uuid.UUID] | None = None,
+    owner_id: uuid.UUID | None = None,
     start: datetime | None = None,
     end: datetime | None = None,
     review_status: str | None = None,
@@ -285,9 +338,14 @@ async def list_transactions(
     cursor: str | None = None,
 ) -> tuple[list[Transaction], str | None]:
     stmt = select(Transaction).options(selectinload(Transaction.splits))
+    if owner_id is not None:
+        # Many-to-one on a NOT NULL FK, so this join cannot duplicate rows.
+        stmt = stmt.join(Account, Account.id == Transaction.account_id)
     conds = []
     if account_ids:
         conds.append(Transaction.account_id.in_(account_ids))
+    if owner_id is not None:
+        conds.append(_owner_predicate(owner_id))
     if category_ids:
         conds.append(Transaction.category_id.in_(category_ids))
     if start:
