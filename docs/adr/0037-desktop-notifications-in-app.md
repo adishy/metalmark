@@ -1,0 +1,96 @@
+# ADR 0037: Desktop notifications are in-app, not Web Push; the decision to notify is recorded server-side
+
+- **Status:** Proposed
+- **Date:** 2026-09-20
+- **Deciders:** Aditya Shylesh
+- **Related:** ADR-0002 (poll-based, LAN/VPN only), ADR-0016 (admin sync observability),
+  ADR-0028 (provider seam, notification transitions), ARCHITECTURE.md §5
+
+## Context
+
+A bank connection that breaks should reach the person who can fix it. Today it reaches them only if
+they configured `METALMARK_NOTIFY_WEBHOOK_URL` (ADR-0028) *and* are looking at wherever that webhook
+lands. The app itself is silent: a connection can sit in `auth_error` for a week and nothing on screen
+says so until the user opens Admin.
+
+The obvious answer is Web Push. It is the wrong one here. Web Push requires a push service — FCM, APNs,
+Mozilla — which means **internet egress** and handing a third party the timing and existence of this
+household's bank activity. ADR-0002 puts the app on a LAN/VPN with no public ingress precisely so that
+no such dependency exists. Web Push is also the one feature that cannot be self-hosted: there is no
+"point it at your own box" option in any browser.
+
+The remaining question is not *whether* to notify but **which of the two sinks decides**. The worker
+already knows: `services/notifications.py::should_notify(previous, now)` is a pure function that says a
+failure is news when there is no history, when the previous run did not fail, or when a long outage is
+due a reminder (`REPEAT_AFTER`, 24 h). A second sink that re-derives that rule in TypeScript would
+drift from it — and drift in the direction of notifying too often, which is the exact failure the rule
+exists to prevent.
+
+## Decision
+
+**We will notify through the Notification API, driven by polling an authenticated endpoint, and we will
+record the decision to notify on the server rather than deciding in the browser.**
+
+1. **No Web Push.** No push service, no internet egress, no third-party metadata. The cost, stated
+   plainly: notifications arrive **only while the app is open in a tab**. A closed browser gets nothing,
+   and the webhook (ADR-0028) remains the route for reaching someone who is not looking.
+
+2. **The server records each notice it decides to send.** When `should_notify` returns true, the worker
+   writes a `sync_run_events` row (`event = "notified"`, `level = "info"`) carrying the notification's
+   title and sanitized body, in the same transaction as the rest of the run's trail. This needs **no
+   migration** — `event` is `String(64)` free text, and the row lands in the run timeline where ADR-0016
+   already says "what did we tell whom" belongs. The decision is made once, in one language, by the
+   function that already encodes it.
+
+   The webhook becomes one sink of that record and the browser another. Recording happens whether or
+   not a webhook is configured, so an instance with no `METALMARK_NOTIFY_WEBHOOK_URL` still notifies
+   in-app.
+
+3. **The browser polls `GET /sync/notifications?since=<id>`**, a scoped, owner-only endpoint returning
+   notices newer than the cursor. The cursor is the last-seen row id, held in `localStorage`. Each
+   notice is shown once per browser; a notice already shown is never re-shown, because the page is
+   reading a decision that was already made rather than making one.
+
+4. **Permission is requested from an explicit action, never on load.** A browser-native permission
+   prompt that appears unbidden is the one every user reflexively denies, and a denial is permanent
+   for that origin. The request is a button in Admin → Sync activity that states what will be sent
+   before it asks.
+
+5. **Displayed by the service worker**, via `registration.showNotification`. The page-context
+   `new Notification(...)` constructor throws on Android Chrome, so the single code path is the one that
+   works everywhere. `vite-plugin-pwa` runs in `generateSW` mode, which does not let us author the
+   service worker directly, so the `notificationclick` handler ships as a static `public/sw-notify.js`
+   wired in through `workbox.importScripts`. It focuses an existing tab and routes it to `/admin`, or
+   opens one; it never opens a second tab when one is already there.
+
+6. **No financial detail leaves the page to make a notification.** The body is built from the same
+   sanitized `Trouble` fields the webhook sends (ADR-0028) — connection, institution, what is wrong.
+   No balance, no merchant, no amount, no account number. `tag` is the connection id, so a repeat for
+   the same connection replaces the standing notification instead of stacking a column of them.
+
+7. **The icon is `notification-icon.png`** (`frontend/public/`), the same asset the PWA manifest and the
+   favicon are generated from.
+
+## Consequences
+
+- **Positive:** a broken connection reaches the user's desktop without the app gaining an outbound
+  dependency or a third party learning anything. The transition rule has exactly one implementation, so
+  the webhook and the browser cannot disagree about what is news, and neither can spam.
+- **Positive:** the record doubles as observability. "Did we tell anyone about Tuesday's failure?" is a
+  line in the run's timeline, not a guess.
+- **Negative / costs:** **only while a tab is open.** This is a real limitation, not a footnote — a
+  self-hosted finance app that is usually closed gets little from this feature, and the webhook stays
+  load-bearing for the asleep case. Working around it would mean either Web Push (rejected above) or a
+  native client (out of scope).
+- **Negative / costs:** the `public/sw-notify.js` shim is outside the TypeScript build, so it is checked
+  by nothing. It must stay small and be covered by an e2e test that asserts the handler exists in the
+  registered worker.
+- **Negative / costs:** a second `localStorage` cursor to get wrong. Its failure mode is benign and
+  one-directional: a lost cursor re-shows notices the user has seen; a cursor that runs ahead shows
+  none. Neither corrupts anything, which is why a browser-local cursor is acceptable here where a
+  server-side one would not be.
+- **Follow-ups:** the e2e suite cannot grant notification permission headlessly in a useful way, so the
+  poll → display path is unit-tested at the decision boundary and the endpoint is covered by an
+  integration test; the real display path is verified by hand.
+- **Follow-ups:** if the webhook is later removed or generalised, this ADR records that it is one sink
+  among several, not the owner of the notification rule.
