@@ -16,6 +16,11 @@ from app.schemas.transactions import (
     TransferLink,
     TransferOut,
 )
+from app.schemas.transfers import (
+    TransferCandidateOut,
+    TransferCandidatesOut,
+    TransferDetailOut,
+)
 from app.services import transactions as svc
 from app.services.ownership import account_owner_map, effective_owner_id
 
@@ -95,6 +100,43 @@ async def list_transactions(
     )
 
 
+# Declared before ``/{txn_id}`` deliberately. Starlette matches routes in
+# declaration order and validates path params afterwards, so the parameterized
+# route would match this path first and answer 422 for "transfer-candidates"
+# not being a UUID.
+@router.get("/transfer-candidates", response_model=TransferCandidatesOut)
+async def list_transfer_candidates(
+    txn_id: uuid.UUID = Query(...),
+    days: int = Query(default=5, ge=1, le=30),
+    ctx: RequestContext = Depends(get_context),
+):
+    """Counterpart legs for ``txn_id``, each priced, for the manual match picker.
+
+    ``days`` is bounded on both sides: it widens a scan over the household's whole
+    transaction history, so a caller passing a large number is asking for a query
+    whose cost it cannot see. 30 days is already generous for "the other leg
+    posted around then".
+    """
+    candidates = await svc.list_transfer_candidates(
+        ctx.session, ctx.household_id, txn_id, days=days
+    )
+    # Serialized through the ordinary transaction shape so a candidate carries the
+    # same fields (currency, base_amount, effective owner) as the row the user is
+    # looking at — the picker shows both legs and reads them alike.
+    items = await _serialize(ctx.session, [c.txn for c in candidates])
+    return TransferCandidatesOut(
+        items=[
+            TransferCandidateOut(
+                transaction=out,
+                days_apart=c.days_apart,
+                fx_cost_base=c.fx_cost_base,
+                within_tolerance=c.within_tolerance,
+            )
+            for c, out in zip(candidates, items, strict=True)
+        ]
+    )
+
+
 @router.get("/{txn_id}", response_model=TransactionOut)
 async def get_transaction(txn_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
     return await _out(ctx, await svc.get_transaction(ctx.session, txn_id))
@@ -128,3 +170,27 @@ async def link_transfer(data: TransferLink, ctx: RequestContext = Depends(get_co
         fx_cost_base=group.fx_cost_base,
         txn_ids=[data.from_txn_id, data.to_txn_id],
     )
+
+
+@router.get("/transfers/{group_id}", response_model=TransferDetailOut)
+async def get_transfer(group_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
+    """Read a link back whole: a leg carries only its group id, so this is how a
+    detail view finds the other leg (and the residual the pair cost)."""
+    group, legs = await svc.get_transfer_group(ctx.session, ctx.household_id, group_id)
+    return TransferDetailOut(
+        transfer_group_id=group.id,
+        matched_by=group.matched_by,
+        fx_cost_base=group.fx_cost_base,
+        legs=await _serialize(ctx.session, legs),
+    )
+
+
+@router.delete("/transfers/{group_id}", status_code=204)
+async def unlink_transfer(group_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
+    """Unlink a transfer, returning both legs to cash-flow and spending.
+
+    No body and no 200: the resource the caller named is gone, and the legs'
+    restored state is visible by re-reading them (or the reports) like any other
+    change.
+    """
+    await svc.unlink_transfer(ctx.session, ctx.household_id, group_id)

@@ -10,14 +10,15 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, extract, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.money import allocate
+from app.core.money import allocate, minor_unit, quantize_storage
 from app.models import (
     Account,
     Transaction,
@@ -259,6 +260,59 @@ async def replace_splits(session: AsyncSession, txn_id: uuid.UUID,
 
 # ---- Transfers ------------------------------------------------------------
 
+# How far apart two legs' base amounts may sit and still be called a match, as a
+# fraction of the amount being matched. It exists because FX moves: a
+# cross-currency pair is never equal-and-opposite in native terms (ADR-0008's own
+# cost note), and the bank's rate on the day lands either side of the ledger's, so
+# equality would fail to match exactly the pairs ADR-0018 was written for. The
+# floor keeps a transfer small enough that the percentage rounds away from having
+# a zero-width window.
+_FX_MATCH_TOLERANCE = Decimal("0.02")
+
+# Candidates feed a picker, not a report. ``days`` already bounds the time window;
+# capping the rows too is what keeps the endpoint's cost independent of how much
+# history the household has accumulated — a busy checking account inside a
+# 30-day window would otherwise return every one of its postings.
+CANDIDATE_LIMIT = 25
+
+
+def _residual_base(a: Transaction, b: Transaction) -> Decimal | None:
+    """Σ base_amount of two legs: what linking them stores as ``fx_cost_base``.
+
+    The whole of ADR-0018 is in this sum. Same-currency legs cancel to exactly 0,
+    because ``base_amount`` is the same native number converted the same way;
+    cross-currency legs leave the spread the bank took, which the cash-flow
+    exclusion would otherwise swallow. ``None`` means "no residual to report" —
+    either the sum really is 0, or a leg has no rate at all (ADR-0017's "no rate"
+    flag, never a silent 0).
+
+    Both ``link_transfer`` and the candidate picker call this, so the number a
+    user accepts before linking is by construction the number they end up with.
+    """
+    if a.base_amount is None or b.base_amount is None:
+        return None
+    residual = quantize_storage(a.base_amount + b.base_amount)
+    return residual if residual != 0 else None
+
+
+def _matches_on_amounts(subject: Transaction, other: Transaction,
+                        residual: Decimal | None, tol: Decimal) -> bool:
+    """Whether these two legs "match" in amount terms (ADR-0018).
+
+    Same-currency legs are compared in their own currency — equal-and-opposite or
+    not, with no tolerance, because there is no rate between them that could have
+    moved. Only cross-currency legs need one, and they match when the residual is
+    inside it. A residual of ``None`` is not a match: with no rate on a leg there
+    is nothing to compare, and answering "unknown" with "matches" is the silent
+    zero the FX module exists to prevent.
+    """
+    if subject.currency == other.currency:
+        return subject.amount + other.amount == 0
+    if residual is None:
+        return False
+    return abs(residual) <= tol
+
+
 async def link_transfer(session: AsyncSession, household_id: uuid.UUID,
                         from_txn_id: uuid.UUID, to_txn_id: uuid.UUID) -> TransferGroup:
     a = await get_transaction(session, from_txn_id)
@@ -269,18 +323,190 @@ async def link_transfer(session: AsyncSession, household_id: uuid.UUID,
         raise LedgerError("Transfer legs must have opposite signs", 400)
 
     # Residual base value: 0 for same-currency, the FX spread for cross-currency.
-    fx_cost = None
-    if a.base_amount is not None and b.base_amount is not None:
-        residual = a.base_amount + b.base_amount
-        fx_cost = residual if residual != 0 else None
-
-    group = TransferGroup(household_id=household_id, matched_by="manual", fx_cost_base=fx_cost)
+    group = TransferGroup(household_id=household_id, matched_by="manual",
+                          fx_cost_base=_residual_base(a, b))
     session.add(group)
     await session.flush()
     a.transfer_group_id = group.id
     b.transfer_group_id = group.id
     await session.flush()
     return group
+
+
+async def _transfer_group(session: AsyncSession, household_id: uuid.UUID,
+                          group_id: uuid.UUID) -> TransferGroup:
+    """One household's transfer group, or a 404.
+
+    Household-scoped twice over — the explicit predicate and RLS — so another
+    household's group reads as missing rather than as someone else's data.
+    """
+    group = (
+        await session.execute(
+            select(TransferGroup).where(
+                TransferGroup.id == group_id,
+                TransferGroup.household_id == household_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if group is None:
+        raise LedgerError("Transfer group not found", 404)
+    return group
+
+
+async def get_transfer_group(session: AsyncSession, household_id: uuid.UUID,
+                             group_id: uuid.UUID) -> tuple[TransferGroup, list[Transaction]]:
+    """A group and its legs, for a detail view that has to show both sides.
+
+    Ordered by date then id, so the pair reads the same way on every load — a
+    sheet whose legs reshuffled between fetches would look like the data had
+    changed underneath the user. The legs carry their splits, because they are
+    serialized through the same transaction shape as everywhere else.
+    """
+    group = await _transfer_group(session, household_id, group_id)
+    legs = (
+        await session.execute(
+            select(Transaction)
+            .options(selectinload(Transaction.splits))
+            .where(Transaction.transfer_group_id == group_id)
+            .order_by(Transaction.transacted_at.asc(), Transaction.id.asc())
+        )
+    ).scalars().all()
+    return group, list(legs)
+
+
+async def unlink_transfer(session: AsyncSession, household_id: uuid.UUID,
+                          group_id: uuid.UUID) -> None:
+    """Undo a link: both legs become ordinary transactions again.
+
+    This is what makes ADR-0008's exclusion safe to apply at all. The exclusion is
+    a property of the *link*, never of the rows — every report asks "is this in a
+    transfer group?" — so removing the link is the whole of the repair and the
+    legs return to cash-flow and spending with no other trace. The group row goes
+    with it: a group with no legs is not a state this model has, and leaving an
+    empty one behind would make every later "is this pair already linked?" query
+    answer yes for a link that no longer exists.
+    """
+    group = await _transfer_group(session, household_id, group_id)
+
+    # Cleared through the loaded objects, exactly as ``link_transfer`` sets them.
+    # A Core UPDATE would leave an already-loaded leg in this session still
+    # carrying the group id, so a report or a re-serialization later in the same
+    # request would still exclude it — the unlink would appear to have worked
+    # while the numbers said otherwise.
+    legs = (
+        await session.execute(
+            select(Transaction).where(Transaction.transfer_group_id == group_id)
+        )
+    ).scalars().all()
+    for leg in legs:
+        leg.transfer_group_id = None
+    await session.flush()  # drop the references before the row they point at
+    await session.delete(group)
+    await session.flush()
+
+
+@dataclass(frozen=True)
+class TransferCandidate:
+    """A row that could be the subject's other leg, priced.
+
+    A dataclass rather than the bare ORM row because the useful part is what is
+    *derived from the pair* — how far apart in time the legs are, and the residual
+    linking would store — and neither can be read off one row alone. ``txn`` is
+    serialized through the ordinary transaction shape, so a candidate renders in
+    the UI exactly like any other transaction.
+    """
+
+    txn: Transaction
+    days_apart: int
+    fx_cost_base: Decimal | None
+    within_tolerance: bool
+
+
+async def list_transfer_candidates(
+    session: AsyncSession,
+    household_id: uuid.UUID,
+    txn_id: uuid.UUID,
+    *,
+    days: int = 5,
+    limit: int = CANDIDATE_LIMIT,
+) -> list[TransferCandidate]:
+    """Counterpart legs for ``txn_id``, best first, each with the cost of linking it.
+
+    The filters are ``link_transfer``'s own rules — a different account, opposite
+    signs — plus the two that make a row a *candidate*: not the subject itself,
+    and not already spoken for by another group. A row that survives the query is
+    therefore a row the link endpoint would accept, which is the property that
+    keeps the picker from offering choices that then fail.
+
+    Ordering is time first, base amount second: a transfer posts within days of
+    its other leg (ARCHITECTURE §3 "within a few days"), so proximity in time is
+    the stronger signal and the base-amount gap only breaks ties inside a date.
+    Rows whose base amount is unknown sort last within their date rather than
+    dropping out — "we cannot price this" is not "this is wrong".
+
+    Hidden rows are included on purpose: hiding is a decision about the list, not
+    a claim that a row is not half of a transfer.
+    """
+    subject = await get_transaction(session, txn_id)
+    base = await base_currency(session, household_id)
+    # The tolerance is a share of the amount being matched. With no base amount on
+    # the subject there is no scale to take a share of, and every residual below
+    # comes out None anyway — the minor-unit floor is what that degenerate case
+    # falls back to.
+    tol = max(abs(subject.base_amount or Decimal(0)) * _FX_MATCH_TOLERANCE, minor_unit(base))
+
+    window = timedelta(days=days)
+    conds = [
+        Transaction.id != subject.id,
+        Transaction.account_id != subject.account_id,
+        # A leg already in a group is not free to match again, and a second link
+        # would strand the group it is already in.
+        Transaction.transfer_group_id.is_(None),
+        Transaction.transacted_at >= subject.transacted_at - window,
+        Transaction.transacted_at <= subject.transacted_at + window,
+    ]
+    # The complement of the sign test ``link_transfer`` rejects on, written as a
+    # range so the two can never drift apart. ``amount > 0`` rather than ``< 0`` is
+    # deliberate: that is the predicate over there, and a zero amount falls on its
+    # negative side in both places.
+    if subject.amount > 0:
+        conds.append(Transaction.amount <= 0)
+    else:
+        conds.append(Transaction.amount > 0)
+
+    # Distance as a number rather than an interval difference: "within N days" is
+    # the only meaning the window has, and it sorts.
+    distance = func.abs(extract("epoch", Transaction.transacted_at - subject.transacted_at))
+    order = [distance.asc()]
+    if subject.base_amount is not None:
+        # NULLS LAST falls out of the arithmetic: a leg with no base amount cannot
+        # be measured against the subject's, so it cannot be "closest".
+        order.append(
+            func.abs(Transaction.base_amount + subject.base_amount).asc().nulls_last()
+        )
+    order.append(Transaction.id.asc())  # a total order, so the cap is deterministic
+
+    stmt = (
+        select(Transaction)
+        .options(selectinload(Transaction.splits))
+        .where(and_(*conds))
+        .order_by(*order)
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+
+    candidates = []
+    for row in rows:
+        residual = _residual_base(subject, row)
+        candidates.append(
+            TransferCandidate(
+                txn=row,
+                days_apart=abs(row.transacted_at - subject.transacted_at).days,
+                fx_cost_base=residual,
+                within_tolerance=_matches_on_amounts(subject, row, residual, tol),
+            )
+        )
+    return candidates
 
 
 # ---- Listing (keyset pagination) ------------------------------------------

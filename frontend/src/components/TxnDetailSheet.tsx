@@ -1,34 +1,42 @@
 // Slide-over sheet to edit a single transaction: core fields, owner, category,
 // tags, notes, review status, plus an inline split editor (by $ or %) that saves
 // through the dedicated splits endpoint. Delete lives here too (with confirm).
+// The transfer panel at the bottom is where a leg is matched to its counterpart,
+// unlinked, or shown the FX cost it came with (ADR-0008/0018).
 import { useMemo, useState } from "react";
 import {
   useDeleteTransaction,
+  useHousehold,
   useOwners,
   useReplaceSplits,
   useUpdateTransaction,
 } from "@/api/hooks";
-import type { Account, Category, SplitIn, Tag, Transaction } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { useLinkTransfer, useTransfer, useTransferCandidates, useUnlinkTransfer } from "@/api/transfers";
+import type { Account, Category, Money, SplitIn, Tag, Transaction } from "@/api/types";
+import { formatDate, formatMoney } from "@/lib/format";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
 
-export default function TxnDetailSheet({
-  txn,
-  accounts,
-  categories,
-  tags,
-  onClose,
-  onReplaced,
-}: {
+interface TxnDetailSheetProps {
   txn: Transaction;
   accounts: Account[];
   categories: Category[];
   tags: Tag[];
   onClose: () => void;
   onReplaced: (updated: Transaction) => void;
-}) {
+}
+
+export default function TxnDetailSheet(props: TxnDetailSheetProps) {
+  // Keyed by transaction id, so the form below re-initializes whenever the row it
+  // is editing changes — whether that is a new pick from the list behind the
+  // sheet, or the sheet navigating to the counterpart leg of a transfer. Without
+  // the key the fields would keep the previous row's half-edited values, which is
+  // exactly the kind of silent wrong-write the ledger does not need.
+  return <TxnDetailForm key={props.txn.id} {...props} />;
+}
+
+function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }: TxnDetailSheetProps) {
   const update = useUpdateTransaction();
   const del = useDeleteTransaction();
   const owners = useOwners();
@@ -188,6 +196,15 @@ export default function TxnDetailSheet({
 
         {update.isError && <p className="text-sm text-red-400">{(update.error as Error).message}</p>}
 
+        <TransferSection
+          txn={txn}
+          accounts={accounts}
+          // Navigating to the counterpart is the same operation as the list
+          // selecting another row: the sheet now shows a different transaction.
+          onNavigate={onReplaced}
+          onReplaced={onReplaced}
+        />
+
         <SplitEditor
           txn={txn}
           currency={account?.currency ?? txn.currency}
@@ -214,6 +231,230 @@ export default function TxnDetailSheet({
         )}
       </div>
     </Dialog>
+  );
+}
+
+// ---- Transfers (ADR-0008/0018) --------------------------------------------
+
+/** How a candidate's (or a linked pair's) residual reads to a person.
+ *
+ * The three cases are kept apart on purpose. A `null` residual is not "free":
+ * same-currency legs really do cancel, but a cross-currency pair with `null` has
+ * no rate behind it, and saying "no FX cost" there would be the silent zero the
+ * FX module exists to prevent (ADR-0017). Never hides it (ADR-0018).
+ */
+function residualText(crossCurrency: boolean, cost: Money | null, base: string): string {
+  if (cost !== null) return `FX cost ${formatMoney(cost, base)}`;
+  if (!crossCurrency) return "No FX cost — same currency";
+  return "FX cost unknown — no exchange rate for one of the legs yet";
+}
+
+function legsApart(days: number): string {
+  if (days === 0) return "same day";
+  return `${days} day${days === 1 ? "" : "s"} apart`;
+}
+
+function TransferSection({
+  txn,
+  accounts,
+  onNavigate,
+  onReplaced,
+}: {
+  txn: Transaction;
+  accounts: Account[];
+  /** Point the sheet at another transaction (the counterpart leg). */
+  onNavigate: (t: Transaction) => void;
+  /** This transaction changed in place — it was just linked or unlinked. */
+  onReplaced: (t: Transaction) => void;
+}) {
+  // The residual is in the household's base currency, whatever the legs' own
+  // currencies are, so it is formatted with the household's, not the leg's.
+  const household = useHousehold();
+  const base = household.data?.base_currency ?? txn.currency;
+  const groupId = txn.transfer_group_id;
+
+  const transfer = useTransfer(groupId);
+  const unlink = useUnlinkTransfer();
+  const link = useLinkTransfer();
+  const [matching, setMatching] = useState(false);
+  // Only fetched once the user asks: this is a picker, not something to run on
+  // every row the sheet opens.
+  const candidates = useTransferCandidates(matching ? txn.id : null);
+
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "another account";
+
+  const label = (t: Transaction) => t.merchant || t.description || "(no description)";
+
+  if (groupId) {
+    const legs = transfer.data?.legs ?? [];
+    const counterpart = legs.find((l) => l.id !== txn.id);
+    const cost = transfer.data?.fx_cost_base ?? null;
+    const crossCurrency =
+      counterpart !== undefined && counterpart.currency !== txn.currency;
+    return (
+      <div className="rounded-lg border border-brand/40 bg-brand/5 p-3" data-testid="transfer-section">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-slate-200">
+            Transfer
+            <span className="ml-2 text-xs text-slate-400">
+              excluded from cash flow and spending
+            </span>
+          </p>
+          <Button
+            variant="secondary"
+            className="px-2 py-1 text-xs"
+            disabled={unlink.isPending}
+            onClick={() =>
+              unlink.mutate(groupId, {
+                // The server has cleared the link by now; mirror that here so the
+                // sheet immediately offers to match again instead of showing a
+                // dead link until the list refetches.
+                onSuccess: () => onReplaced({ ...txn, transfer_group_id: null }),
+              })
+            }
+            data-testid="transfer-unlink"
+          >
+            Unlink
+          </Button>
+        </div>
+
+        {transfer.isLoading && (
+          <p className="mt-2 text-xs text-slate-500">Loading the other leg…</p>
+        )}
+        {transfer.isError && (
+          <p className="mt-2 text-sm text-red-400">{(transfer.error as Error).message}</p>
+        )}
+
+        {counterpart && (
+          <button
+            type="button"
+            onClick={() => onNavigate(counterpart)}
+            className="mt-2 w-full rounded-lg bg-slate-800/60 p-2 text-left hover:bg-slate-800"
+            data-testid="transfer-counterpart"
+          >
+            <p className="text-sm text-slate-200">{label(counterpart)}</p>
+            <p className="text-xs text-slate-500">
+              {formatDate(counterpart.transacted_at)} · {accountName(counterpart.account_id)}
+            </p>
+            <p className="mt-1 text-sm text-slate-100">
+              {formatMoney(counterpart.amount, counterpart.currency)}
+            </p>
+          </button>
+        )}
+        {!transfer.isLoading && !transfer.isError && !counterpart && (
+          <p className="mt-2 text-xs text-slate-500">The other leg of this transfer is missing.</p>
+        )}
+
+        {counterpart && (
+          <p
+            className={`mt-2 text-xs ${cost !== null ? "font-medium text-amber-300" : "text-slate-500"}`}
+            data-testid="transfer-fx-cost"
+          >
+            {residualText(crossCurrency, cost, base)}
+          </p>
+        )}
+        {unlink.isError && (
+          <p className="mt-2 text-sm text-red-400">{(unlink.error as Error).message}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-800 p-3" data-testid="transfer-section">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-200">Transfer</p>
+        {!matching ? (
+          <Button
+            variant="secondary"
+            className="px-2 py-1 text-xs"
+            onClick={() => setMatching(true)}
+            data-testid="transfer-match-open"
+          >
+            Match a transfer
+          </Button>
+        ) : (
+          <span className="text-xs text-slate-500">
+            opposite sign, another account, within 5 days
+          </span>
+        )}
+      </div>
+
+      {matching && (
+        <div className="mt-3 space-y-2">
+          {candidates.isLoading && (
+            <p className="text-xs text-slate-500">Looking for the other leg…</p>
+          )}
+          {candidates.isError && (
+            <p className="text-sm text-red-400">{(candidates.error as Error).message}</p>
+          )}
+
+          {candidates.data?.items.map((c) => {
+            const other = c.transaction;
+            const crossCurrency = other.currency !== txn.currency;
+            return (
+              <button
+                key={other.id}
+                type="button"
+                disabled={link.isPending}
+                onClick={() =>
+                  link.mutate(
+                    { from_txn_id: txn.id, to_txn_id: other.id },
+                    {
+                      onSuccess: (group) =>
+                        onReplaced({ ...txn, transfer_group_id: group.transfer_group_id }),
+                    },
+                  )
+                }
+                className="w-full rounded-lg bg-slate-800/60 p-2 text-left hover:bg-slate-800 disabled:opacity-50"
+                data-testid={`transfer-candidate-${other.id}`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="min-w-0 truncate text-sm text-slate-200">{label(other)}</p>
+                  <p className="shrink-0 text-sm text-slate-100">
+                    {formatMoney(other.amount, other.currency)}
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {formatDate(other.transacted_at)} · {legsApart(c.days_apart)} ·{" "}
+                  {accountName(other.account_id)}
+                </p>
+                {/* The price of this choice, before the user makes it. */}
+                <p
+                  className={`mt-1 text-xs ${
+                    c.fx_cost_base !== null ? "font-medium text-amber-300" : "text-slate-500"
+                  }`}
+                  data-testid={`transfer-candidate-cost-${other.id}`}
+                >
+                  {residualText(crossCurrency, c.fx_cost_base, base)}
+                  {c.fx_cost_base !== null && !c.within_tolerance
+                    ? " — wider than a bank spread usually is; check it is the right leg"
+                    : ""}
+                </p>
+              </button>
+            );
+          })}
+
+          {candidates.data && candidates.data.items.length === 0 && (
+            <p className="text-xs text-slate-500" data-testid="transfer-no-candidates">
+              Nothing in this household looks like the other leg.
+            </p>
+          )}
+          {link.isError && (
+            <p className="text-sm text-red-400">{(link.error as Error).message}</p>
+          )}
+
+          <Button
+            variant="ghost"
+            className="text-xs"
+            onClick={() => setMatching(false)}
+            data-testid="transfer-match-close"
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 
