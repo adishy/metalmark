@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calendarDay,
+  formatBucket,
   formatDay,
   formatInstant,
   formatMonth,
@@ -198,6 +199,51 @@ describe("formatMonth", () => {
     expect(() => formatMonth("2026")).toThrow(/Not an ISO month/);
     expect(() => formatMonth("2026-13")).toThrow(/Not a calendar month/);
     expect(() => formatMonth("2026-00")).toThrow(/Not a calendar month/);
+  });
+});
+
+describe("formatBucket", () => {
+  it("names a bucket by the granularity it is", () => {
+    const day = "2026-04-06"; // a Monday, so `week` and `day` share a label here
+    expect(formatBucket(day, "day")).toBe("Apr 06");
+    expect(formatBucket(day, "day", "long")).toBe("Apr 06 2026");
+    // A week is labelled by where it starts: the axis title carries the
+    // granularity, and "w/c Apr 06" on twelve labels is twelve times the ink.
+    expect(formatBucket(day, "week")).toBe("Apr 06");
+    expect(formatBucket(day, "month")).toBe("Apr");
+    expect(formatBucket(day, "month", "long")).toBe("Apr 2026");
+    expect(formatBucket(day, "year")).toBe("2026");
+  });
+
+  it("numbers quarters, because a quarter has no name of its own", () => {
+    // One day per quarter, including the two ends of a year — the boundary a
+    // hand-rolled `(month / 3) | 0` would put on the wrong side.
+    expect(formatBucket("2026-01-01", "quarter")).toBe("Q1");
+    expect(formatBucket("2026-03-31", "quarter")).toBe("Q1");
+    expect(formatBucket("2026-04-01", "quarter")).toBe("Q2");
+    expect(formatBucket("2026-06-30", "quarter")).toBe("Q2");
+    expect(formatBucket("2026-07-01", "quarter")).toBe("Q3");
+    expect(formatBucket("2026-10-01", "quarter")).toBe("Q4");
+    expect(formatBucket("2026-12-31", "quarter")).toBe("Q4");
+    // The year is added at `long` only: `Q1` alone is ambiguous the moment two
+    // years are on screen, and useless ink when they are not.
+    expect(formatBucket("2026-10-01", "quarter", "long")).toBe("Q4 2026");
+  });
+
+  it("labels a clipped first bucket by where it begins, not by its period", () => {
+    // The server dates a point by its first day *inside the window*, so a window
+    // opening 15 March gives a March bucket labelled `2026-03-15`. It must still
+    // read "Mar" — the clip only ever moves a bucket start forward within its own
+    // period, which is why the label survives it.
+    expect(formatBucket("2026-03-15", "month")).toBe("Mar");
+    expect(formatBucket("2026-03-15", "quarter")).toBe("Q1");
+    expect(formatBucket("2026-02-15", "year")).toBe("2026");
+  });
+
+  it("rejects something that is not an ISO day", () => {
+    expect(() => formatBucket("March", "day")).toThrow(/Not an ISO date/);
+    expect(() => formatBucket("2026-03", "day")).toThrow(/Not an ISO date/);
+    expect(() => formatBucket("March", "quarter")).toThrow(/Not an ISO date/);
   });
 });
 

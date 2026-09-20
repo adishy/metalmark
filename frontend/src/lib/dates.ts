@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 //
 //   - A **calendar day** is a day, not a moment: `transacted_at`, a report
-//     point's `date`/`month`, `rate_date`. It is read from the value's own date
+//     point's `date`, `rate_date`. It is read from the value's own date
 //     part and is **never converted**. A transaction dated 2026-09-20 is the
 //     20th in the ledger wherever the reader is standing, which is what a
 //     ledger means by a date. The backend anchors date-only imports at noon UTC
@@ -40,6 +40,11 @@
 // **The ISO form is never the visible text.** It belongs in a `title` and in
 // `<time datetime>`. `components/datetime.tsx` is how the app renders a date, so
 // that rule cannot be forgotten at a call site.
+
+// The bucket vocabulary is the API's, imported rather than restated: a second
+// copy here could drift by one member, and `formatBucket`'s switch would then
+// silently fall through for a granularity the server had started sending.
+import type { Granularity } from "@/api/types";
 
 const MONTHS = [
   "Jan",
@@ -243,6 +248,55 @@ export function formatMonth(value: string, style: "short" | "long" = "short"): s
   const month = Number(m[2]);
   if (month < 1 || month > 12) throw new Error(`Not a calendar month: ${JSON.stringify(value)}`);
   return style === "long" ? `${MONTHS[month - 1]} ${m[1]}` : (MONTHS[month - 1] ?? "");
+}
+
+// ---------------------------------------------------------------------------
+// Buckets
+// ---------------------------------------------------------------------------
+
+/**
+ * A reporting bucket, named by the granularity it *is*.
+ *
+ * A report chart's x-axis is a bucket, and a bucket is not a day — so this is
+ * the one place that decides what `granularity` looks like on screen, next to
+ * the functions that decide what a day and a month look like. A chart that
+ * formatted its own labels would be a second vocabulary, which is how the axis
+ * and the tooltip end up disagreeing about the same bar.
+ *
+ * `value` is a bucket's first day, as the API dates its points. The rules:
+ *
+ *   - `day`/`week` render as a day. A week is labelled by where it starts, not
+ *     by "week of" — the axis title carries the granularity, and repeating it in
+ *     twelve labels is twelve times the ink for one piece of information.
+ *   - `month` is `formatMonth`, unchanged. The axis of a year is twelve months,
+ *     which is what that function was written for.
+ *   - `quarter` is `Q1`/`Q1 2026` — a quarter has no name of its own, so it is
+ *     numbered, and `long` adds the year it belongs to because `Q1` alone is
+ *     ambiguous the moment a reader can see two years at once.
+ *   - `year` is the year, at both styles. `2026` is neither short nor long; it
+ *     is the whole of it.
+ *
+ * The ISO form is never the visible text (§6.6), here as everywhere else.
+ */
+export function formatBucket(
+  value: string,
+  granularity: Granularity,
+  style: "short" | "long" = "short",
+): string {
+  switch (granularity) {
+    case "day":
+    case "week":
+      return formatDay(value, style === "long" ? "long" : "medium");
+    case "month":
+      return formatMonth(value, style);
+    case "quarter": {
+      const t = ymd(value);
+      const quarter = Math.floor((t.m - 1) / 3) + 1;
+      return style === "long" ? `Q${quarter} ${t.y}` : `Q${quarter}`;
+    }
+    case "year":
+      return String(ymd(value).y);
+  }
 }
 
 // ---------------------------------------------------------------------------

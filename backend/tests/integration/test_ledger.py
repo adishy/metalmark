@@ -14,9 +14,9 @@ import pytest
 
 from app.db import scoped_session
 from app.models import CategoryGroup, Tag
-from app.schemas.ledger import AccountCreate
+from app.schemas.ledger import AccountCreate, AccountUpdate
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
-from app.services import ledger, reports
+from app.services import ledger, periods, reports
 from app.services import transactions as txns
 from app.services.errors import LedgerError
 
@@ -171,11 +171,16 @@ async def test_report_range_covers_the_whole_end_day(household_factory):
             account_id=acct.id, amount=D("-999"), transacted_at=_dt(2026, 2, 1),
             category_id=exp.id))
 
-        _base, cf = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 1), date(2026, 1, 31))
+        # Monthly, so the window is a single bucket and the assertion below is
+        # about the range's own bound. `auto` would cut 31 days into days, and
+        # `cf[0]` would then be January 1st — an empty day, which the test would
+        # pass for a reason that has nothing to do with the end bound.
+        _base, _g, cf = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
         _base, spend, spend_total = await reports.spending_by_category(
             s, hh, date(2026, 1, 1), date(2026, 1, 31))
 
+    assert len(cf) == 1
     assert cf[0]["expense"] == D("-40.0000")
     assert spend_total == D("40.0000")
     assert [row["category_name"] for row in spend] == ["Groceries"]
@@ -208,12 +213,16 @@ async def test_report_buckets_do_not_reach_outside_the_window(household_factory)
                 account_id=acct.id, amount=amount, transacted_at=_dt(*day),
                 category_id=exp.id))
 
-        _base, cf = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 15), date(2026, 9, 20))
+        _base, _g, cf = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 15), date(2026, 9, 20), granularity="month")
 
-    # Buckets are keyed by the calendar month they *are*, even the two the window
-    # clipped — `2026-01`, not `2026-01-15`.
-    assert [p["month"] for p in cf] == [f"2026-{m:02d}" for m in range(1, 10)]
+    # Nine buckets, dated by their first day *inside the window*: the clipped first
+    # one begins where the window does, and every later one begins on its month's
+    # first — so a point's date is never a day the report does not cover, and the
+    # months are still aligned to the calendar rather than to `start`.
+    assert [p["date"] for p in cf] == [date(2026, 1, 15)] + [
+        date(2026, m, 1) for m in range(2, 10)
+    ]
     assert cf[0]["expense"] == D("-22.0000")
     assert cf[-1]["expense"] == D("-44.0000")
     # The property the clipping exists for: the chart's total and the range's
@@ -257,6 +266,118 @@ async def test_net_worth_points_start_at_the_window_start_and_end_at_its_end(hou
     assert guarded["delta_net_worth"] == D("0.0000")
 
 
+async def test_cash_flow_partitions_the_window_at_every_granularity(household_factory):
+    """The bars total the window itself, whatever they are cut into.
+
+    This is the property that makes a granularity control safe to hand a reader: if
+    the money in the chart moved when they switched from months to quarters, the
+    control would be changing the answer rather than its shape. `auto` is included
+    as one more cut, because it has to obey the same rule as the explicit ones.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        exp = await _make_category(s, hh, "expense", "Misc")
+        inc = await _make_category(s, hh, "income", "Pay")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        # Both edges deliberately off a calendar boundary, and one amount in the
+        # days the old code reached past (before the window, inside its first month)
+        # so a bucket that overran would show up in the total.
+        for amount, day in (
+            (D("-11"), (2026, 1, 14)),
+            (D("500"), (2026, 1, 15)),
+            (D("-22"), (2026, 3, 20)),
+            (D("-44"), (2026, 9, 20)),
+            (D("-33"), (2026, 9, 21)),
+        ):
+            await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=acct.id, amount=amount, transacted_at=_dt(*day),
+                category_id=(inc if amount > 0 else exp).id))
+
+        runs = {
+            g: await reports.cash_flow_series(
+                s, hh, date(2026, 1, 15), date(2026, 9, 20), granularity=g)
+            for g in (*periods.GRANULARITIES, "auto")
+        }
+
+    totals = {}
+    for g, (_base, resolved, points) in runs.items():
+        assert points, f"{g} produced no points"
+        assert resolved in periods.GRANULARITIES, f"{g} resolved to {resolved!r}"
+        assert resolved != "auto"
+        dates = [p["date"] for p in points]
+        assert dates == sorted(dates)
+        # Every point is dated inside the window, so no bar can be labelled with a
+        # day the reader did not ask for.
+        assert all(date(2026, 1, 15) <= d <= date(2026, 9, 20) for d in dates)
+        assert dates[0] == date(2026, 1, 15)
+        for p in points:
+            assert p["net"] == p["income"] + p["expense"]
+        totals[g] = sum((p["net"] for p in points), D("0"))
+
+    # One cut, one total: 500 − 22 − 44, and not a cent of the 11 or the 33.
+    assert set(totals.values()) == {D("434.0000")}, totals
+    # `auto` over 249 days is months, and a month cut has to be *the* month cut.
+    assert runs["auto"][1] == "month"
+    assert runs["auto"][2] == runs["month"][2]
+    # Fewer, coarser buckets, and the same money in them. Stated as the ordering
+    # rather than as four counts, because the counts are arithmetic I would have to
+    # get right twice: what matters is that coarser is *strictly* coarser.
+    counts = {g: len(runs[g][2]) for g in periods.GRANULARITIES}
+    assert list(counts.values()) == sorted(counts.values(), reverse=True), counts
+    # Three quarters, not four: the window opens and closes inside Q1 and Q3, and a
+    # bucket is a calendar period clipped to the window, never one it does not reach.
+    assert counts == {"day": 249, "week": 36, "month": 9, "quarter": 3, "year": 1}
+
+
+async def test_the_reconciliation_does_not_move_when_the_granularity_does(household_factory):
+    """`granularity` cuts the chart, never the identity.
+
+    ADR-0032's identity is a statement about the window. If bucketing reached it,
+    the four terms would change when a reader switched the chart from months to
+    quarters, and a reconciliation whose numbers depend on how you drew it is not a
+    reconciliation. So every term but `points` must come back byte-identical.
+    """
+    hh = await household_factory(base="USD")
+    window = (date(2026, 1, 1), date(2026, 12, 31))
+    async with scoped_session(household_id=hh) as s:
+        exp = await _make_category(s, hh, "expense", "Misc")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD",
+                                 current_balance=D("1000"), balance_date=date(2026, 1, 1)))
+        await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-250"), transacted_at=_dt(2026, 6, 15),
+            category_id=exp.id))
+        await ledger.update_account(s, acct.id, AccountUpdate(
+            current_balance=D("750"), balance_date=date(2026, 12, 31)))
+
+        runs = {
+            g: await reports.net_worth_series(s, hh, *window, granularity=g)
+            for g in (*periods.GRANULARITIES, "auto")
+        }
+
+    terms = (
+        "delta_net_worth", "net_cash_flow", "currency_revaluation",
+        "market_appreciation", "unexplained",
+    )
+    reference = {k: runs["month"][k] for k in terms}
+    for g, series in runs.items():
+        assert {k: series[k] for k in terms} == reference, f"{g} moved the identity"
+    # The identity still adds up under every cut — the trivial way to keep the
+    # terms equal would be to break them all the same way.
+    assert reference["delta_net_worth"] == (
+        reference["net_cash_flow"]
+        + reference["currency_revaluation"]
+        + reference["market_appreciation"]
+        + reference["unexplained"]
+    )
+    # And the only thing that did change is how many points were drawn.
+    counts = {g: len(s["points"]) for g, s in runs.items()}
+    assert counts["year"] == 2  # the baseline, then the single year bucket's end
+    assert counts["month"] == 13
+    assert len(set(counts.values())) > 1, counts
+
+
 async def test_split_base_allocation_no_drift(household_factory):
     hh = await household_factory(base="USD")
     async with scoped_session(household_id=hh) as s:
@@ -296,10 +417,14 @@ async def test_transfer_excluded_from_cash_flow(household_factory):
             account_id=a.id, amount=D("-30"), transacted_at=_dt(2026, 1, 11),
             category_id=exp.id))
 
-        # before linking, the two legs distort cash flow
-        _b, before = await reports.cash_flow_series(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+        # Before linking, the two legs distort cash flow. Monthly — `auto` cuts a
+        # 31-day window into days, and this test is about the two legs, not about
+        # which day they landed on.
+        _b, _g, before = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
         await txns.link_transfer(s, hh, t_out.id, t_in.id)
-        _b, after = await reports.cash_flow_series(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+        _b, _g, after = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
 
     # after linking, only the -30 expense remains in cash flow
     assert after[0]["expense"] == D("-30.0000")

@@ -6,6 +6,11 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+# The granularity vocabulary has exactly one definition, in the pure module that
+# implements it — a second Literal here would be a second place for `quarter` to
+# go missing. `periods` imports nothing but the standard library.
+from app.services.periods import Granularity
+
 
 class NetWorthPoint(BaseModel):
     date: date
@@ -13,7 +18,16 @@ class NetWorthPoint(BaseModel):
 
 
 class CashFlowPoint(BaseModel):
-    month: str  # YYYY-MM
+    """One bucket of the series.
+
+    ``date`` is the bucket's first day **within the window**, not the period it
+    belongs to: a window opening on 15 March labels its first monthly bar
+    `2026-03-15`, which is a day the report actually covers. Naming the unclipped
+    period (`2026-03-01`) would put a date in the payload that lies outside the
+    window the same payload echoes — exactly the confusion this field replaced.
+    """
+
+    date: date
     income: Decimal
     expense: Decimal
     net: Decimal
@@ -21,6 +35,14 @@ class CashFlowPoint(BaseModel):
 
 class CashFlowSeries(BaseModel):
     base_currency: str
+    # The window this answered for, echoed rather than left implicit: a chart then
+    # labels its own axis from the data it drew instead of from the controls, so
+    # the two cannot disagree about what is on screen. `granularity` is the
+    # *resolved* value — never `auto`, which is a request rather than a period,
+    # and handing it back would leave the chart doing the resolution it delegated.
+    start: date
+    end: date
+    granularity: Granularity
     points: list[CashFlowPoint]
     # Always "row": an owner filter selects entries, not accounts, so this is the
     # mirror of NetWorthSeries.attribution. The two reports take the same owner_id
@@ -64,6 +86,14 @@ class NetWorthSeries(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     base_currency: str
+    # Echoed for the same reason as CashFlowSeries's: the chart labels itself.
+    start: date
+    end: date
+    # Sets the *points and nothing else*. Every term of the identity below, and
+    # every per-account decomposition, is scoped to the whole window — the identity
+    # is a claim about the window, so a reader switching the chart from months to
+    # quarters must not see the reconciliation's numbers move.
+    granularity: Granularity
     points: list[NetWorthPoint]
 
     # Δ net worth = net cash flow + currency revaluation + market appreciation
@@ -91,6 +121,13 @@ class NetWorthSeries(BaseModel):
 
 class SpendingReport(BaseModel):
     base_currency: str
+    # `start`/`end` but no `granularity`: this report is one total over the window,
+    # so it has no buckets to cut and a granularity field would be a promise it
+    # does not keep. The window is still echoed — it is the one field every report
+    # shares, and a reader holding two of these should not have to remember which
+    # range they asked for.
+    start: date
+    end: date
     rows: list[CategorySpendRow]
     total: Decimal
     # Always "row", for the same reason as CashFlowSeries.attribution.

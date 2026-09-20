@@ -117,8 +117,14 @@ export interface TransactionPage {
   next_cursor: string | null;
 }
 
-export interface NetWorthSeries {
+export interface NetWorthSeries extends ReportWindow {
   base_currency: string;
+  /**
+   * Sets the **points and nothing else**. Every term of the identity below is
+   * scoped to the whole window, so switching the chart from months to quarters
+   * redraws it without moving a single number in the reconciliation.
+   */
+  granularity: Granularity;
   points: { date: string; net_worth: Money }[];
   delta_net_worth: Money;
   net_cash_flow: Money;
@@ -160,21 +166,46 @@ export interface NetWorthSeries {
   attribution: "account";
 }
 
+/**
+ * A window a report answered for, echoed by the server on every report.
+ *
+ * Carried rather than remembered: a chart labels its own axis from the data it
+ * drew, so the picture and the payload cannot disagree about what is on screen.
+ */
+export interface ReportWindow {
+  start: string;
+  end: string;
+}
+
+/**
+ * How finely a window is cut. `auto` is a **request** and never a response —
+ * the server resolves it and echoes the period it picked, so a chart never has
+ * to resolve the span itself and risk disagreeing with the bars it was given.
+ */
+export type Granularity = "day" | "week" | "month" | "quarter" | "year";
+export type GranularityParam = "auto" | Granularity;
+
 export interface CashFlowPoint {
-  month: string;
+  /**
+   * The bucket's first day **inside the window** — never the period it belongs
+   * to, which for a window opening mid-month would be a day outside the range
+   * this series reports.
+   */
+  date: string;
   income: Money;
   expense: Money;
   net: Money;
 }
 
-export interface CashFlowSeries {
+export interface CashFlowSeries extends ReportWindow {
   base_currency: string;
+  granularity: Granularity;
   points: CashFlowPoint[];
   /** Every entry stands on its own owner — the mirror of net worth's "account". */
   attribution: "row";
 }
 
-export interface SpendingReport {
+export interface SpendingReport extends ReportWindow {
   base_currency: string;
   rows: { category_id: UUID | null; category_name: string; total: Money }[];
   total: Money;

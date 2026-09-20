@@ -4,7 +4,8 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { useCashFlow, useNetWorthSeries, useOwners, useSpending } from "@/api/hooks";
-import { formatDay, formatMonth, isoDay } from "@/lib/dates";
+import type { Granularity } from "@/api/types";
+import { formatBucket, isoDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -23,6 +24,23 @@ import {
 function yearRange(): { start: string; end: string } {
   const year = new Date().getFullYear();
   return { start: isoDay(new Date(year, 0, 1)), end: isoDay(new Date(year, 11, 31)) };
+}
+
+/**
+ * Axis labels for a series, read from the payload's own window.
+ *
+ * The granularity comes off the **response**, never from a control here: `auto`
+ * was resolved by the server, and a chart that re-derived it would be a second
+ * implementation of the same rule, free to disagree with the bars it was handed.
+ * Every bucket label goes through `formatBucket`, which is the one place that
+ * decides what a granularity looks like — the axis and the pointer chip render
+ * the same string, and decision H says the ISO form is never the text a person
+ * reads.
+ */
+function bucketLabels(
+  data: { points: { date: string }[]; granularity: Granularity } | undefined,
+): string[] {
+  return data?.points.map((p) => formatBucket(p.date, data.granularity)) ?? [];
 }
 
 export default function Reports() {
@@ -44,12 +62,7 @@ export default function Reports() {
       tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
-        // `medium` ("Jan 31"), not the raw `2026-01-31` the API sends: the axis
-        // label and the pointer chip both render this string, and decision H
-        // says the ISO form is never the text a person reads. The day is what
-        // varies along this axis and the series is one year, so the year is the
-        // part worth dropping — ECharts hides whatever still overlaps.
-        data: nw.data?.points.map((p) => formatDay(p.date, "medium")) ?? [],
+        data: bucketLabels(nw.data),
         ...chartAxis(t),
       },
       yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
@@ -75,10 +88,7 @@ export default function Reports() {
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",
-        // `2026-01` → "Jan". Short because twelve labels have to fit a phone
-        // (§5), and the chart is scoped to one year, so the year is the part the
-        // reader already knows.
-        data: cashFlow.data?.points.map((p) => formatMonth(p.month)) ?? [],
+        data: bucketLabels(cashFlow.data),
         ...chartAxis(t),
       },
       yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
@@ -154,10 +164,14 @@ export default function Reports() {
     : "Net worth over time.";
 
   const cfPoints = cashFlow.data?.points ?? [];
+  // "across 12 months" was hardcoded prose that the granularity control would
+  // have made false. The unit is read off the same response the bars came from,
+  // so a quarter chart cannot announce itself as months.
+  const cfUnit = cashFlow.data?.granularity ?? "month";
   const cfLabel = cfPoints.length
-    ? `Income and expenses across ${cfPoints.length} months, netting to ` +
-      `${formatMoney(cfPoints.reduce((a, p) => a + Number(p.net), 0), ccy)}.`
-    : "Income and expenses by month.";
+    ? `Income and expenses across ${cfPoints.length} ${cfUnit}${cfPoints.length === 1 ? "" : "s"}` +
+      `, netting to ${formatMoney(cfPoints.reduce((a, p) => a + Number(p.net), 0), ccy)}.`
+    : `Income and expenses by ${cfUnit}.`;
 
   const spendRows = spending.data?.rows ?? [];
   const spendTotal = spendRows.reduce((a, r) => a + Number(r.total), 0);

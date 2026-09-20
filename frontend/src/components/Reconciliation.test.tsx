@@ -7,6 +7,12 @@ import Reconciliation from "@/components/Reconciliation";
 function series(over: Partial<NetWorthSeries> = {}): NetWorthSeries {
   return {
     base_currency: "USD",
+    // The window and the cut the server answered for. `Reconciliation` renders
+    // neither — it is here because the type requires them, and a fixture that
+    // lied about which fields the API sends would stop being a contract test.
+    start: "2026-01-01",
+    end: "2026-12-31",
+    granularity: "month",
     points: [{ date: "2026-09-20", net_worth: "1000.0000" }],
     delta_net_worth: "1000.0000",
     net_cash_flow: "1200.0000",

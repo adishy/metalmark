@@ -451,10 +451,11 @@ async def test_cash_flow_report_is_row_scoped(household_factory):
     hh = await household_factory()
     async with scoped_session(household_id=hh) as s:
         f = await _owner_filter_fixture(s, hh)
-        _b, all_months = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 1), date(2026, 1, 31))
-        _b, beth_months = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 1), date(2026, 1, 31), f["beth"].id)
+        _b, _g, all_months = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
+        _b, _g, beth_months = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), f["beth"].id,
+            granularity="month")
     assert all_months[0]["expense"] == D("-130.0000")
     assert beth_months[0]["expense"] == D("-50.0000")
 
@@ -540,11 +541,12 @@ async def test_filtered_net_worth_counts_transfers_crossing_the_subset(household
         await ledger.update_account(s, alex_acct.id, AccountUpdate(
             current_balance=D("40"), balance_date=date(2026, 1, 31)))
 
-        _b, whole = await reports.cash_flow_series(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+        _b, _g, whole = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), granularity="month")
         beth_series = await reports.net_worth_series(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), beth.id)
-        _b, beth_rows = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 1), date(2026, 1, 31), beth.id)
+        _b, _g, beth_rows = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), beth.id, granularity="month")
 
     # Household-wide: the transfer cancelled, so nothing happened.
     assert whole[0]["net"] == D("0.0000")
@@ -565,8 +567,9 @@ async def test_net_worth_filter_with_no_accounts_is_zero(household_factory):
         nobody = await owners.create_owner(s, hh, name="Nobody")
         series = await reports.net_worth_series(
             s, hh, date(2026, 1, 1), date(2026, 1, 31), nobody.id)
-        _b, months = await reports.cash_flow_series(
-            s, hh, date(2026, 1, 1), date(2026, 1, 31), nobody.id)
+        _b, _g, months = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 1), date(2026, 1, 31), nobody.id,
+            granularity="month")
     assert series["delta_net_worth"] == D("0.0000")
     assert series["net_cash_flow"] == D("0.0000")
     assert months[0]["net"] == D("0.0000")

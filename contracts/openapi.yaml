@@ -1338,6 +1338,20 @@ paths:
             format: uuid
           - type: 'null'
           title: Owner Id
+      - name: granularity
+        in: query
+        required: false
+        schema:
+          enum:
+          - auto
+          - day
+          - week
+          - month
+          - quarter
+          - year
+          type: string
+          default: auto
+          title: Granularity
       - name: metalmark_session
         in: cookie
         required: false
@@ -1389,6 +1403,20 @@ paths:
             format: uuid
           - type: 'null'
           title: Owner Id
+      - name: granularity
+        in: query
+        required: false
+        schema:
+          enum:
+          - auto
+          - day
+          - week
+          - month
+          - quarter
+          - year
+          type: string
+          default: auto
+          title: Granularity
       - name: metalmark_session
         in: cookie
         required: false
@@ -3354,9 +3382,10 @@ components:
       title: Body_preview_ofx_import_ofx_preview_post
     CashFlowPoint:
       properties:
-        month:
+        date:
           type: string
-          title: Month
+          format: date
+          title: Date
         income:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
@@ -3371,16 +3400,45 @@ components:
           title: Net
       type: object
       required:
-      - month
+      - date
       - income
       - expense
       - net
       title: CashFlowPoint
+      description: 'One bucket of the series.
+
+
+        ``date`` is the bucket''s first day **within the window**, not the period it
+
+        belongs to: a window opening on 15 March labels its first monthly bar
+
+        `2026-03-15`, which is a day the report actually covers. Naming the unclipped
+
+        period (`2026-03-01`) would put a date in the payload that lies outside the
+
+        window the same payload echoes — exactly the confusion this field replaced.'
     CashFlowSeries:
       properties:
         base_currency:
           type: string
           title: Base Currency
+        start:
+          type: string
+          format: date
+          title: Start
+        end:
+          type: string
+          format: date
+          title: End
+        granularity:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          - quarter
+          - year
+          title: Granularity
         points:
           items:
             $ref: '#/components/schemas/CashFlowPoint'
@@ -3393,6 +3451,9 @@ components:
       type: object
       required:
       - base_currency
+      - start
+      - end
+      - granularity
       - points
       title: CashFlowSeries
     CategoryCreate:
@@ -4423,6 +4484,23 @@ components:
         base_currency:
           type: string
           title: Base Currency
+        start:
+          type: string
+          format: date
+          title: Start
+        end:
+          type: string
+          format: date
+          title: End
+        granularity:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          - quarter
+          - year
+          title: Granularity
         points:
           items:
             $ref: '#/components/schemas/NetWorthPoint'
@@ -4468,6 +4546,9 @@ components:
       type: object
       required:
       - base_currency
+      - start
+      - end
+      - granularity
       - points
       - delta_net_worth
       - net_cash_flow
@@ -5399,6 +5480,14 @@ components:
         base_currency:
           type: string
           title: Base Currency
+        start:
+          type: string
+          format: date
+          title: Start
+        end:
+          type: string
+          format: date
+          title: End
         rows:
           items:
             $ref: '#/components/schemas/CategorySpendRow'
@@ -5415,6 +5504,8 @@ components:
       type: object
       required:
       - base_currency
+      - start
+      - end
       - rows
       - total
       title: SpendingReport

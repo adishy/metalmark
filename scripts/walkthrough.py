@@ -260,10 +260,18 @@ MONTH = dt.date.today().strftime("%Y-%m")
 
 
 def month_flow(income=False):
-    r = c.get("/reports/cash-flow", params={"start": day(-40), "end": day(1)})
+    # Monthly, explicitly: this reads a *month's* total, and the 41-day window would
+    # otherwise resolve to `auto` → `day` and offer no month to read at all.
+    #
+    # The bucket's `date` is its first day *inside the window* and the last bucket
+    # is clipped to `end` = today, so "this month" here means month-to-date — which
+    # is what the re-read below wants, since it is comparing before and after a
+    # transaction dated today.
+    r = c.get("/reports/cash-flow",
+              params={"start": day(-40), "end": day(1), "granularity": "month"})
     if r.status_code != 200:
         return None
-    row = next((m for m in r.json()["points"] if m["month"] == MONTH), None)
+    row = next((m for m in r.json()["points"] if m["date"].startswith(MONTH)), None)
     return float(row["income"] if income else row["expense"]) if row else 0.0
 
 

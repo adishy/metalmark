@@ -78,17 +78,6 @@ INVESTMENT_TRADE_TYPES = ("buy", "sell")
 UNEXPLAINED_TOLERANCE = Decimal("0.05")
 
 
-def _month_key(d: date) -> str:
-    """`YYYY-MM` for a *period*, not for a day.
-
-    Always called with a bucket's unclipped `period`, never with its clipped
-    start: a window opening on 15 March must key its first bucket `2026-03`, not
-    `2026-03-15`, and the two differ exactly when the window does not begin on a
-    calendar boundary.
-    """
-    return f"{d.year:04d}-{d.month:02d}"
-
-
 async def _category_type_map(session: AsyncSession) -> dict[uuid.UUID, str]:
     rows = (
         await session.execute(
@@ -775,17 +764,25 @@ async def _unexplained_by_account(
 
 async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
                            start: date, end: date,
-                           owner_id: uuid.UUID | None = None):
+                           owner_id: uuid.UUID | None = None,
+                           granularity: periods.GranularityIn = "auto"):
     """Net worth over time, plus the reconciliation of its change.
 
     An owner filter narrows the *accounts* and everything derived from them — the
     series, the delta, and the cash-flow term alike — so the identity still holds.
     A row-scoped cash flow here would leave the identity asserting something false.
+
+    ``granularity`` sets the **points only**. Every term of the identity and every
+    per-account decomposition stays scoped to the whole window, because the identity
+    is a statement about the window and nothing else: bucketing the terms would make
+    a report whose totals move when the reader switches the chart from months to
+    quarters, which is the opposite of a reconciliation.
     """
     base = await base_currency(session, household_id)
+    resolved = periods.resolve(granularity, start, end)
     account_ids = None if owner_id is None else await accounts_owned_by(session, owner_id)
 
-    # The level at the window's own start, then at the end of each month in it.
+    # The level at the window's own start, then at the end of each bucket in it.
     #
     # `_month_ends` gave a series that began at the first month-*end* — so a window
     # opening on 15 January had nothing to say about the 15th — and ran to the
@@ -795,7 +792,7 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     # requested. `points[0].date == start` is the property both faults violate.
     nw_start = await net_worth_at(session, start, base, account_ids=account_ids)
     points = [{"date": start, "net_worth": nw_start}]
-    for bucket in periods.buckets(start, end, "month"):
+    for bucket in periods.buckets(start, end, resolved):
         if bucket.end == start:
             # A one-day window: the baseline already *is* this bucket's end.
             continue
@@ -872,6 +869,7 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
             warnings.append("Of the unexplained change, " + " and ".join(bits) + ".")
     return {
         "base_currency": base,
+        "granularity": resolved,
         "points": points,
         "delta_net_worth": delta,
         "net_cash_flow": net_cf,
@@ -888,30 +886,44 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
 
 async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
                            start: date, end: date,
-                           owner_id: uuid.UUID | None = None):
-    """Income, expense and net per month over ``[start, end]``.
+                           owner_id: uuid.UUID | None = None,
+                           granularity: periods.GranularityIn = "auto"):
+    """Income, expense and net per bucket over ``[start, end]``.
 
     Each bucket is summed over **its own clipped span**, so the bars add up to the
     window and to nothing else. The version this replaced derived a month-end list
     from the window and then summed each month from its 1st to its own last day —
     which quietly included the days of the first and last months that lay outside
     the requested range, and reported them as if the reader had asked for them.
+
+    Returns ``(base_currency, granularity, points)``. The granularity is returned
+    rather than assumed because ``auto`` is resolved here: a chart that guessed
+    would label twelve monthly bars as quarters if it resolved the span itself and
+    disagreed with us, and the response is the only place the answer can be stated
+    once for both readers.
+
+    Each point is dated by its bucket's **first day within the window**, so every
+    point's date is inside ``[start, end]`` by construction. The first bucket of a
+    window that opens mid-period is therefore labelled by where it begins rather
+    than by the period it belongs to, which is the only one of the two that is
+    always a real day of the report.
     """
     base = await base_currency(session, household_id)
+    resolved = periods.resolve(granularity, start, end)
     out = []
-    for bucket in periods.buckets(start, end, "month"):
+    for bucket in periods.buckets(start, end, resolved):
         income, expense, net, _by_account, _ = await _cash_flow(
             session, bucket.start, bucket.end, base, owner_id=owner_id
         )
         out.append(
             {
-                "month": _month_key(bucket.period),
+                "date": bucket.start,
                 "income": income,
                 "expense": expense,
                 "net": net,
             }
         )
-    return base, out
+    return base, resolved, out
 
 
 async def spending_by_category(session: AsyncSession, household_id: uuid.UUID,
