@@ -328,6 +328,19 @@ original ordering is now correct: the shell should be *the first thing written i
 the thing it is migrated under. The original argument for Bulma-first — do not build the unbuilt UI twice —
 still holds; what has changed is that "Bulma-first" now means resolving M.1 first, not loading a stylesheet.
 
+#### M.2 — tabled by the user, 2026-09-20
+
+Put to the user with the measurement above, and the answer was to **table Bulma**, because the priority is
+getting the app's *functionality and UX* right and the substrate is not what is missing. So §M's steps 1–4
+and both routes in M.1 are deferred, not rejected: nothing below depends on them, and a later migration
+starts from M.1's measurement rather than from scratch.
+
+What this unblocks is item 7 in full — the review deck, the desktop layout and desktop notifications — which
+is now written in Tailwind and may be written once. **If Bulma is ever revisited, the desktop layout is the
+one piece likely to be rewritten**, and that is the cost this decision accepts knowingly. It is a smaller
+cost than §M assumed: decision I's substance is `AppShell` plus the page containers on four screens, not
+every component that happens to use a spacing class.
+
 ## Order of work
 
 Admin defect first (it is broken shipped behaviour and it is small), then the four requested items in the
