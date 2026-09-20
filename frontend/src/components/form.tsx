@@ -22,9 +22,14 @@ import { CheckIcon } from "@/components/icons";
  * zooms the whole viewport when a control under 16 px takes focus, and the page
  * never zooms back out.
  */
+// No `outline-none` here. It is a no-op today — the global `:focus-visible` rule
+// in index.css has equal specificity and comes later in source order, so it wins
+// — but it only stays a no-op while that ordering holds. Move the focus rule into
+// `@layer components` and every control in the app silently loses its ring. The
+// border change below is an *addition* to the ring, never a replacement for it.
 const CONTROL =
   "w-full min-h-11 rounded-control border border-border-strong bg-surface-inset px-3 text-base text-fg " +
-  "outline-none placeholder:text-fg-muted focus:border-accent " +
+  "placeholder:text-fg-muted focus:border-accent " +
   "disabled:opacity-50 aria-[invalid=true]:border-negative";
 
 /**

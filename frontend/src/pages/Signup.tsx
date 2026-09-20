@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
+import { Button, Field, Input } from "@/components/form";
 
 export default function Signup() {
   const { signup } = useAuth();
@@ -35,9 +36,6 @@ export default function Signup() {
     }
   };
 
-  const input =
-    "mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent";
-
   return (
     <div className="flex h-full items-center justify-center p-4">
       <form
@@ -49,63 +47,60 @@ export default function Signup() {
           <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
           <p className="text-sm text-fg-muted">Create your account</p>
         </div>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Email</span>
-          <input
+        {/* Shared primitives — see the note in Login.tsx: the hand-rolled input
+            this replaced was under the 44 px target floor, inherited `text-sm`
+            (iOS zooms the viewport on focus and never zooms back), and used
+            `focus:` where the spec says `focus-visible:`. */}
+        <Field label="Email" htmlFor="signup-email">
+          <Input
+            id="signup-email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={input}
             autoComplete="username"
             data-testid="signup-email"
           />
-        </label>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Display name</span>
-          <input
+        </Field>
+        <Field label="Display name" htmlFor="signup-name">
+          <Input
+            id="signup-name"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className={input}
             autoComplete="name"
             data-testid="signup-name"
           />
-        </label>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Password</span>
-          <input
+        </Field>
+        <Field label="Password" htmlFor="signup-password">
+          <Input
+            id="signup-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className={input}
             autoComplete="new-password"
             data-testid="signup-password"
           />
-        </label>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Household name</span>
-          <input
+        </Field>
+        <Field
+          label="Household name"
+          htmlFor="signup-household"
+          hint="Optional. Ignored if the household already exists on this instance."
+        >
+          <Input
+            id="signup-household"
             value={household}
             onChange={(e) => setHousehold(e.target.value)}
-            className={input}
             data-testid="signup-household"
           />
-          <span className="mt-1 block text-xs text-fg-muted">
-            Optional. Ignored if the household already exists on this instance.
-          </span>
-        </label>
+        </Field>
         {error && (
-          <p className="text-sm text-negative" data-testid="signup-error">
+          <p className="text-sm text-negative" role="alert" data-testid="signup-error">
+            <span aria-hidden="true">⚠ </span>
             {error}
           </p>
         )}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-control bg-accent py-2 font-medium text-accent-fg hover:brightness-110 disabled:opacity-50"
-          data-testid="signup-submit"
-        >
+        <Button type="submit" disabled={busy} className="w-full" data-testid="signup-submit">
           {busy ? "Creating account…" : "Create account"}
-        </button>
+        </Button>
         <p className="text-center text-xs text-fg-muted">
           Already have an account?{" "}
           <Link to="/login" className="text-accent underline" data-testid="signup-to-login">

@@ -597,6 +597,8 @@ Note `role="alert"` on the error: 4.1.3 Status Messages wants the error announce
 without moving focus, and an inline error that only changes colour is silent to a
 screen reader.
 
+Checkboxes are covered separately in §4.14.
+
 ### 4.4 Selects and pickers
 
 - **Native `<select>` under ~15 options.** It gets the platform's own accessible
@@ -792,6 +794,53 @@ bar. Anything that changes the header or tab-bar height must change those too.
 
 - The desktop nav stays `hidden sm:flex`; do not show both.
 - Page titles are `<h1>` (§7.5) and the document title changes per route (§7.11).
+
+---
+
+### 4.14 Selection controls
+
+Placeholder, in the sense that this app has exactly one selection control so far — a
+checkbox, in `form.tsx`. Radio and switch are not used anywhere yet; the rules below
+are written so that adding one does not mean inventing a new pattern.
+
+**The label is the target, not the box.** A 20 px box is below the 44 px floor (§5,
+SC 2.5.8), so the control is a `<label>` row wrapping the input and its text, at
+`min-h-11`, with the box inside it. There is no such thing as a bare checkbox in this
+app: if a checkbox has no label, it is a bug, not a layout choice.
+
+**Checked is not colour.** The box changes fill *and* draws a tick glyph
+(`peer-checked:opacity-100`). A fill-only change fails SC 1.4.1 the same way an
+accent-hued nav item does (§4.13).
+
+```tsx
+// components/form.tsx — the whole control
+<label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm text-fg">
+  <span className="relative mt-2 grid size-5 shrink-0 place-items-center">
+    <input type="checkbox" className="peer size-5 appearance-none rounded
+      border border-border-strong bg-surface-inset
+      checked:border-accent checked:bg-accent disabled:opacity-50" {...props} />
+    <CheckIcon className="pointer-events-none absolute size-3.5
+      text-accent-fg opacity-0 peer-checked:opacity-100" />
+  </span>
+  <span className="min-w-0 py-2">{label}{hint}</span>
+</label>
+```
+
+Details that are load-bearing:
+
+- **`peer` requires a *previous sibling*.** The tick must stay *after* the input in
+  the wrapper `span`, or `peer-checked:` silently stops matching and the tick never
+  appears. Reordering those two elements is a visual no-op in review and a
+  functional break at runtime.
+- **`appearance-none`** removes the native control, so the focus ring is no longer
+  free — it comes from the global `:focus-visible` rule in `index.css`, which is why
+  nothing here sets `outline-none`.
+- **Do not use `has-[:checked]:` on an ancestor** when `peer-checked:` will do; `has`
+  forces the browser to re-evaluate the ancestor on every input change.
+- **Grouped controls need a group label.** Several checkboxes that answer one question
+  belong in a `<fieldset>` with a `<legend>`, not a sequence of loose labels.
+- **A hint is not a label.** `hint` renders a second line in `text-fg-muted`; the
+  label still has to say what the control does on its own.
 
 ---
 
@@ -1029,7 +1078,17 @@ Run this list before shipping. Every item is checkable.
 
 ## 8. How to check
 
-**Greps that must return nothing** (add them to `npm run lint` or CI):
+**Greps that must return nothing.** These are implemented as
+`npm run lint:design` (`frontend/scripts/design-lint.mjs`) and run in CI, so they are
+a ratchet rather than a thing to remember. The shell forms are kept below because the
+script is a direct transcription of them. Two are not literal greps:
+rule 6 has a documented exception (a badge carrying its own padding **and** radius),
+so the script implements the exception instead of dropping the rule; and all rules
+ignore comments, because a comment explaining why `outline-none` is absent would
+otherwise trip rule 4 — and a check that cries wolf on correct code gets switched off.
+
+`npm run lint` is **not** this check: it is `eslint src` with no ESLint config in the
+repo, so it fails immediately. Design conformance is `lint:design`.
 
 ```bash
 # 1. Any raw palette class left in the app. Tokens only.

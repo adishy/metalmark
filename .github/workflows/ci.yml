@@ -95,6 +95,12 @@ jobs:
       - name: Unit tests (vitest)
         run: npm run test
 
+      # DESIGN.md §8's conformance greps. They were prose in the spec and had
+      # never been run; the tree passes them today, so this is a ratchet rather
+      # than a fix. Note `npm run lint` is NOT this — see the README.
+      - name: Design-system conformance (DESIGN.md §8)
+        run: npm run lint:design
+
       - name: Build
         run: npm run build
 

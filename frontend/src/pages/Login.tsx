@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
+import { Button, Field, Input } from "@/components/form";
 
 export default function Login() {
   const { login } = useAuth();
@@ -36,41 +37,42 @@ export default function Login() {
           <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
           <p className="text-sm text-fg-muted">Sign in to your household</p>
         </div>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Email</span>
-          <input
+        {/* The shared primitives, not hand-rolled inputs. The inline version
+            these replaced was `px-3 py-2` (40 px, under the 44 px floor),
+            inherited `text-sm` from its wrapper (iOS Safari zooms the viewport
+            on a control under 16 px and never zooms back), and used
+            `focus:border-accent` where the spec says `focus-visible`. */}
+        <Field label="Email" htmlFor="login-email">
+          <Input
+            id="login-email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent"
             autoComplete="username"
             data-testid="email"
           />
-        </label>
-        <label className="block text-sm">
-          <span className="text-fg-muted">Password</span>
-          <input
+        </Field>
+        <Field label="Password" htmlFor="login-password">
+          <Input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent"
             autoComplete="current-password"
             data-testid="password"
           />
-        </label>
+        </Field>
+        {/* Form-level, not field-level: the credentials are wrong, not the
+            email. role="alert" so it is announced without moving focus. */}
         {error && (
-          <p className="text-sm text-negative" data-testid="login-error">
+          <p className="text-sm text-negative" role="alert" data-testid="login-error">
+            <span aria-hidden="true">⚠ </span>
             {error}
           </p>
         )}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full rounded-control bg-accent py-2 font-medium text-accent-fg hover:brightness-110 disabled:opacity-50"
-          data-testid="login-submit"
-        >
+        <Button type="submit" disabled={busy} className="w-full" data-testid="login-submit">
           {busy ? "Signing in…" : "Sign in"}
-        </button>
+        </Button>
         <p className="text-center text-xs text-fg-muted">
           No account yet?{" "}
           <Link to="/signup" className="text-accent underline" data-testid="login-to-signup">

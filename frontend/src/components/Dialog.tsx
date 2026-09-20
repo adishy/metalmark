@@ -138,7 +138,10 @@ export default function Dialog({
         }}
         className={
           // shadow-lg, not shadow-2xl: §2.6 allows exactly one overlay shadow.
-          "relative flex flex-col bg-surface-raised shadow-lg outline-none " +
+          // No `outline-none`: the panel is `tabIndex={-1}` and receives focus
+          // when it has no focusable children, and that focus must be visible.
+          // The global `:focus-visible` rule supplies the ring.
+          "relative flex flex-col bg-surface-raised shadow-lg " +
           (side
             ? "h-full w-full max-w-md"
             : // `dvh`, not `vh`: on iOS Safari `vh` is measured against the

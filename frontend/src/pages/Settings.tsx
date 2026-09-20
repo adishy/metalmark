@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import {
   useAccounts,
@@ -37,6 +37,7 @@ import { formatDate } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import {
   Button,
+  Checkbox,
   Field,
   Input,
   Select,
@@ -60,17 +61,49 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Settings() {
   const [tab, setTab] = useState<TabId>("categories");
+  // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
+  // it. Declaring role="tablist" without that model announces a tab widget that
+  // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  function onTabKey(e: React.KeyboardEvent<HTMLButtonElement>) {
+    const i = TABS.findIndex((t) => t.id === tab);
+    const last = TABS.length - 1;
+    let next: number;
+    if (e.key === "ArrowRight") next = i === last ? 0 : i + 1;
+    else if (e.key === "ArrowLeft") next = i === 0 ? last : i - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = last;
+    else return;
+    e.preventDefault();
+    // Automatic activation: the panel is a local swap, so selecting on focus
+    // saves the Enter that manual activation would cost.
+    setTab(TABS[next].id);
+    tabRefs.current[next]?.focus();
+  }
+
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-medium">Settings</h2>
-      <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
-        {TABS.map((t) => (
+      <h1 className="text-lg font-medium">Settings</h1>
+      <div
+        className="flex flex-wrap gap-1 border-b border-border"
+        role="tablist"
+        aria-label="Settings sections"
+      >
+        {TABS.map((t, i) => (
           <button
             key={t.id}
+            ref={(el) => {
+              tabRefs.current[i] = el;
+            }}
             role="tab"
+            id={`tab-${t.id}`}
             aria-selected={tab === t.id}
+            aria-controls={`panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
-            className={`rounded-t-lg px-3 py-2 text-sm ${
+            onKeyDown={onTabKey}
+            className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm ${
               tab === t.id ? "border-b-2 border-accent text-fg" : "text-fg-muted hover:text-fg"
             }`}
             data-testid={`settings-tab-${t.id}`}
@@ -80,7 +113,12 @@ export default function Settings() {
         ))}
       </div>
 
-      <div data-testid={`settings-panel-${tab}`}>
+      <div
+        role="tabpanel"
+        id={`panel-${tab}`}
+        aria-labelledby={`tab-${tab}`}
+        data-testid={`settings-panel-${tab}`}
+      >
         {tab === "categories" && <CategoriesSection />}
         {tab === "tags" && <TagsSection />}
         {tab === "currencies" && <CurrenciesSection />}
@@ -96,7 +134,7 @@ export default function Settings() {
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-3 rounded-card bg-surface-raised p-4">
-      <h3 className="text-sm font-semibold text-fg">{title}</h3>
+      <h2 className="text-sm font-semibold text-fg">{title}</h2>
       {children}
     </section>
   );
@@ -379,7 +417,11 @@ function CurrenciesSection() {
             <Button type="submit" disabled={upsert.isPending} data-testid="fx-save">Add rate</Button>
           </div>
         </form>
-        {upsert.isError && <p className="text-sm text-negative">{(upsert.error as Error).message}</p>}
+        {upsert.isError && (
+          <p className="text-sm text-negative" role="alert">
+            {(upsert.error as Error).message}
+          </p>
+        )}
       </Card>
 
       <Card title="FX rates">
@@ -451,7 +493,11 @@ function HouseholdSection() {
             </Button>
           </form>
         )}
-        {update.isError && <p className="text-sm text-negative">{(update.error as Error).message}</p>}
+        {update.isError && (
+          <p className="text-sm text-negative" role="alert">
+            {(update.error as Error).message}
+          </p>
+        )}
       </Card>
 
       <Card title="Members">
@@ -518,7 +564,7 @@ function OwnersSection() {
           <Button type="submit" disabled={create.isPending} data-testid="owner-save">Add owner</Button>
         </form>
         {create.isError && (
-          <p className="text-sm text-negative" data-testid="owner-error">
+          <p className="text-sm text-negative" role="alert" data-testid="owner-error">
             {(create.error as Error).message}
           </p>
         )}
@@ -542,7 +588,11 @@ function OwnersSection() {
           ))}
         </ul>
         {deleted && (
-          <p className="text-xs text-fg-muted" data-testid="owner-delete-result">
+          <p
+            className="text-xs text-fg-muted"
+            role="status"
+            data-testid="owner-delete-result"
+          >
             Deleted “{deleted.name}” and moved {deleted.counts.reassigned_accounts} accounts,{" "}
             {deleted.counts.reassigned_transactions} transactions and{" "}
             {deleted.counts.reassigned_splits} splits.
@@ -627,7 +677,11 @@ function OwnerRow({
         <p className="text-xs text-fg-muted">Shared is permanent — it cannot be deleted.</p>
       )}
       {update.isError && (
-        <p className="text-xs text-negative" data-testid={`owner-rename-error-${owner.id}`}>
+        <p
+          className="text-xs text-negative"
+          role="alert"
+          data-testid={`owner-rename-error-${owner.id}`}
+        >
           {(update.error as Error).message}
         </p>
       )}
@@ -678,7 +732,11 @@ function OwnerRow({
               Yes, delete
             </Button>
           </div>
-          {del.isError && <p className="mt-2 text-sm text-negative">{(del.error as Error).message}</p>}
+          {del.isError && (
+            <p className="mt-2 text-sm text-negative" role="alert">
+              {(del.error as Error).message}
+            </p>
+          )}
         </div>
       )}
     </li>
@@ -746,14 +804,14 @@ function RulesSection() {
         </div>
 
         {applied && (
-          <p className="text-xs text-fg-muted" data-testid="rule-apply-result">
+          <p className="text-xs text-fg-muted" role="status" data-testid="rule-apply-result">
             {applied.updated === 0
               ? `Matched ${applied.matched} transactions — nothing left to change, the rules are already applied.`
               : `Matched ${applied.matched} transactions and updated ${applied.updated}.`}
           </p>
         )}
         {apply.isError && (
-          <p className="text-sm text-negative" data-testid="rule-apply-error">
+          <p className="text-sm text-negative" role="alert" data-testid="rule-apply-error">
             {(apply.error as Error).message}
           </p>
         )}
@@ -765,18 +823,22 @@ function RulesSection() {
               className="flex flex-wrap items-start gap-3 rounded-control bg-surface-inset/40 px-3 py-2"
               data-testid={`rule-row-${r.id}`}
             >
-              <label className="flex items-center gap-2 pt-0.5 text-sm">
-                <input
-                  type="checkbox"
-                  checked={r.enabled}
-                  disabled={!isOwner || update.isPending}
-                  onChange={(e) =>
-                    update.mutate({ id: r.id, body: { enabled: e.target.checked } })
-                  }
-                  aria-label={`${r.name} enabled`}
-                  data-testid={`rule-enabled-${r.id}`}
-                />
-              </label>
+              {/* The row already reads the rule's name, so the box's own label
+                  stays visually hidden — a second copy of the name beside the
+                  box would be read twice. It still comes from the label, not an
+                  aria-label, so the accessible name and the 44px hit row are the
+                  same element. `min-w-11` is there because a hidden label leaves
+                  the row 32px wide; the target still has to be 44px both ways. */}
+              <Checkbox
+                label={<span className="sr-only">{`${r.name} enabled`}</span>}
+                className="min-w-11"
+                checked={r.enabled}
+                disabled={!isOwner || update.isPending}
+                onChange={(e) =>
+                  update.mutate({ id: r.id, body: { enabled: e.target.checked } })
+                }
+                data-testid={`rule-enabled-${r.id}`}
+              />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-fg">
                   {r.name}{" "}
@@ -811,7 +873,9 @@ function RulesSection() {
                 </Button>
               </div>
               {update.isError && update.variables?.id === r.id && (
-                <p className="w-full text-xs text-negative">{(update.error as Error).message}</p>
+                <p className="w-full text-xs text-negative" role="alert">
+                  {(update.error as Error).message}
+                </p>
               )}
             </li>
           ))}
