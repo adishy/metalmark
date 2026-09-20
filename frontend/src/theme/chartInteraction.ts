@@ -87,9 +87,56 @@ export function chartMotion(reduced: boolean | null): EChartsOption {
  * `confine` keeps it inside the canvas: without it a tooltip on a phone-width
  * chart overhangs the card it belongs to.
  */
+/**
+ * The single point a formatter here is handed.
+ *
+ * Deliberately loose rather than ECharts' own `TopLevelFormatterParams`, which is
+ * a union that also admits the *array* it passes for an axis tooltip. Every
+ * formatter in this app reads the single-point case, and describing that case is
+ * what makes one readable — while `unknown` on the two value fields is honest,
+ * because narrowing a value you are about to format is the thing the *chart*
+ * knows and this module does not.
+ */
+export interface TooltipPoint {
+  name?: string;
+  value?: unknown;
+  /** The data item under the pointer: an edge in a graph series, or nothing at
+   *  all. Loosely typed for the same reason as `value`. */
+  data?: unknown;
+}
+
+/** The shape of a **link** in a graph series, for the tooltips that read one. */
+export interface TooltipEdge {
+  source?: unknown;
+  target?: unknown;
+  value?: unknown;
+}
+
+/**
+ * ECharts' own `formatter` slot, derived from the option type rather than
+ * imported by name: the callback is generic over its params, so naming it here
+ * would mean restating the union `TooltipPoint` exists to avoid.
+ */
+type EChartsFormatter = Extract<
+  NonNullable<EChartsOption["tooltip"]>,
+  { formatter?: unknown }
+>["formatter"];
+
 export function chartTooltip(
   t: ChartTokens,
-  { trigger = "axis", formatter }: { trigger?: "axis" | "item"; formatter?: string } = {},
+  {
+    trigger = "axis",
+    formatter,
+  }: {
+    trigger?: "axis" | "item";
+    /**
+     * ECharts' template string (`"{b}: {c}"`), or a function when the figure a
+     * reader needs is not a raw field — a money value has to be formatted in the
+     * report's own currency, and a node in a Sankey is identified by an id that is
+     * not the word anyone should read).
+     */
+    formatter?: string | ((params: TooltipPoint) => string);
+  } = {},
 ): NonNullable<EChartsOption["tooltip"]> {
   return {
     trigger,
@@ -97,7 +144,15 @@ export function chartTooltip(
     backgroundColor: t.surface,
     borderColor: t.border,
     textStyle: { color: t.fg },
-    ...(formatter ? { formatter } : {}),
+    // The one cast in this module, and it pays for a real gap in ECharts' types
+    // rather than papering over one here. `TooltipFormatterCallback` takes the
+    // *union* of the single point and the array an axis tooltip passes, so no
+    // function that names its parameter can satisfy it: TypeScript requires the
+    // whole union to be assignable to `TooltipPoint`, and an array shares no
+    // property with it. A formatter is always registered under a trigger it knows
+    // — `TooltipPoint` above is that knowledge written down — and this is the one
+    // place it has to be handed back to the library's blunter type.
+    ...(formatter ? { formatter: formatter as EChartsFormatter } : {}),
     // An item-triggered tooltip has no axis to point at.
     ...(trigger === "axis"
       ? {
@@ -202,6 +257,29 @@ export function emphasisBar(t: ChartTokens, color: string) {
     focus: "series" as const,
     blur: { itemStyle: { opacity: DIM } },
     itemStyle: { color, borderColor: t.surface, borderWidth: 1 },
+  };
+}
+
+/**
+ * Spotlight the hovered branch of a cash-flow graph, dim the rest.
+ *
+ * `focus: "adjacency"` rather than `"self"`, and that choice is the whole point
+ * of the helper. A Sankey's meaning is *where money went*, so hovering a node has
+ * to light the ribbons attached to it and leave the rest of the graph quiet —
+ * `self` would dim every other node while leaving all the flows at full strength,
+ * which answers a question nobody asked. It is also the one focus mode ECharts
+ * offers that a Sankey's node-link structure actually supports.
+ *
+ * The label dims with its node for the reason `emphasisPie` gives: a caption at
+ * full strength on a dimmed node reads as a rendering fault, not a highlight. The
+ * ribbons are dimmed by the same constant as everything else — a branch at 30%
+ * must stay legible as "still here".
+ */
+export function emphasisSankey(t: ChartTokens) {
+  return {
+    focus: "adjacency" as const,
+    blur: { itemStyle: { opacity: DIM }, label: { opacity: DIM } },
+    itemStyle: { borderColor: t.surface, borderWidth: 1 },
   };
 }
 

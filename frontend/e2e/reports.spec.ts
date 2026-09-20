@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { addAccount, addOwner, login } from "./helpers";
+import { addAccount, addOwner, login, parseMoney } from "./helpers";
 
-// Reports owns three ECharts surfaces — the net-worth series, the income-vs-expense
-// trend and the spending donut — and has no component test, so this spec is the
-// only place that proves they mount at all (vitest renders none of them; jsdom has
-// no canvas) and that the owner filter genuinely re-scopes them.
+// Reports owns four ECharts surfaces — the net-worth series, the income-vs-expense
+// trend, the cash-flow Sankey and the spending donut — and has no component test, so
+// this spec is the only place that proves they mount at all (vitest renders none of
+// them; jsdom has no canvas) and that the owner filter genuinely re-scopes them.
 //
 // The trend chart in particular is what `/reports/cash-flow` draws: one stacked bar
 // per month with a net line over it. Asserting the canvas exists is the honest
@@ -31,14 +31,27 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await page.getByTestId("nav-reports").click();
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
 
-  // Unfiltered: all three surfaces draw, and nothing claims an attribution — with no
+  // Unfiltered: all four surfaces draw, and nothing claims an attribution — with no
   // filter there is no scoping to describe.
   await expect(page.getByTestId("net-worth-chart").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
+  await expect(page.getByTestId("cash-flow-sankey").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("spending-donut").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("net-worth-attribution")).toBeHidden();
   await expect(page.getByTestId("cash-flow-attribution")).toBeHidden();
+  await expect(page.getByTestId("sankey-attribution")).toBeHidden();
   await expect(page.getByTestId("spending-attribution")).toBeHidden();
+
+  // The graph's text equivalent, which is the part a canvas cannot carry (§2.9):
+  // both sides listed with a total each, and both totals the same figure — the
+  // property the picture is drawn on, asserted where a reader can see it.
+  const inTotal = page.getByTestId("report-sankey").locator("p").filter({ hasText: /^In — / });
+  const outTotal = page.getByTestId("report-sankey").locator("p").filter({ hasText: /^Out — / });
+  await expect(inTotal).toBeVisible();
+  await expect(outTotal).toBeVisible();
+  expect(parseMoney((await inTotal.textContent()) ?? "")).toBe(
+    parseMoney((await outTotal.textContent()) ?? ""),
+  );
 
   // Filtered to one owner: still draws, and now says which scoping it used. Net
   // worth is account-scoped while spending and cash flow are row-scoped, so leaving
@@ -49,6 +62,8 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await expect(page.getByTestId("net-worth-attribution")).toContainText("account");
   await expect(page.getByTestId("cash-flow-attribution")).toBeVisible();
   await expect(page.getByTestId("cash-flow-attribution")).toContainText("row");
+  await expect(page.getByTestId("sankey-attribution")).toBeVisible();
+  await expect(page.getByTestId("sankey-attribution")).toContainText("row");
   await expect(page.getByTestId("spending-attribution")).toBeVisible();
   await expect(page.getByTestId("spending-attribution")).toContainText("row");
 
@@ -56,8 +71,10 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await page.getByTestId("owner-filter-all").click();
   await expect(page.getByTestId("net-worth-attribution")).toBeHidden();
   await expect(page.getByTestId("cash-flow-attribution")).toBeHidden();
+  await expect(page.getByTestId("sankey-attribution")).toBeHidden();
   await expect(page.getByTestId("spending-attribution")).toBeHidden();
   await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
+  await expect(page.getByTestId("cash-flow-sankey").locator("canvas")).toBeVisible();
 });
 
 // The window is the page's one piece of linkable state, and this is the only
@@ -102,6 +119,7 @@ test("the report window is the reader's, and survives a reload", async ({ page }
   await expect(page.getByTestId("report-net-worth")).toContainText("ends before it starts");
   await expect(page.getByTestId("net-worth-chart")).toHaveCount(0);
   await expect(page.getByTestId("cash-flow-chart")).toHaveCount(0);
+  await expect(page.getByTestId("cash-flow-sankey")).toHaveCount(0);
   await expect(page.getByTestId("spending-donut")).toHaveCount(0);
 
   // One click back to the default, and the charts return. The default preset is

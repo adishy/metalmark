@@ -499,6 +499,123 @@ async def test_transfer_excluded_from_cash_flow(household_factory):
     assert after[0]["income"] == D("0.0000")
 
 
+async def test_the_sankey_and_the_cash_flow_series_report_the_same_money(household_factory):
+    """Two reports of one quantity, which is only worth having if they agree.
+
+    The graph exists to be drawn, and a picture is far more persuasive than a bar
+    chart — which is precisely why it must not be able to disagree with one. Both
+    are built on `_load_entries`, so this test does not re-derive the arithmetic;
+    it says the two call sites really do share it, by putting every exclusion in
+    one window and reading the total through both.
+    """
+    hh = await household_factory(base="USD")
+    start, end = date(2026, 1, 1), date(2026, 3, 31)
+    async with scoped_session(household_id=hh) as s:
+        salary = await _make_category(s, hh, "income", "Salary")
+        refunds = await _make_category(s, hh, "income", "Refunds")
+        misc = await _make_category(s, hh, "expense", "Misc")
+        checking = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD",
+                                 current_balance=D("0"), balance_date=start))
+        savings = await ledger.create_account(
+            s, hh, AccountCreate(name="Savings", type="depository", currency="USD",
+                                 current_balance=D("0"), balance_date=start))
+
+        for amount, day, cat in (
+            (D("2000"), (2026, 1, 5), salary.id),
+            (D("-120"), (2026, 1, 9), misc.id),
+            # One category, both directions. A picture that netted them would say
+            # this household spent nothing on refunds and received nothing back.
+            (D("-80"), (2026, 2, 3), refunds.id),
+            (D("30"), (2026, 2, 11), refunds.id),
+            # Nothing has filed this one, and it is still cash flow.
+            (D("-45"), (2026, 3, 1), None),
+            # A zero: neither income nor expense, so it must not become the one
+            # node in the graph with nothing behind it.
+            (D("0"), (2026, 3, 5), misc.id),
+        ):
+            await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=checking.id, amount=amount, transacted_at=_dt(*day),
+                category_id=cat))
+
+        # A transfer: excluded for the whole household, in both reports alike.
+        out = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=checking.id, amount=D("-500"), transacted_at=_dt(2026, 3, 10)))
+        inn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=savings.id, amount=D("500"), transacted_at=_dt(2026, 3, 10)))
+        await txns.link_transfer(s, hh, out.id, inn.id)
+
+        graph = await reports.cash_flow_sankey(s, hh, start, end)
+        # One bucket spanning the window, so the comparison is between two totals
+        # and not between a total and a sum of bar heights.
+        _base, _g, series = await reports.cash_flow_series(
+            s, hh, start, end, granularity="year")
+
+    assert len(series) == 1
+    assert graph["total_income"] == series[0]["income"] == D("2030.0000")
+    # The series carries expense negative and the graph carries it positive, which
+    # is the one place the two shapes differ — the graph's sides encode direction,
+    # so a negative on both would leave nothing to draw.
+    assert graph["total_expense"] == -series[0]["expense"] == D("245.0000")
+    assert graph["net"] == series[0]["net"] == D("1785.0000")
+
+    income = [(r["key"], r["total"]) for r in graph["income"]]
+    expense = [(r["key"], r["total"]) for r in graph["expense"]]
+    assert income == [(f"cat:{salary.id}", D("2000.0000")), (f"cat:{refunds.id}", D("30.0000"))]
+    assert expense == [
+        (f"cat:{misc.id}", D("120.0000")),
+        (f"cat:{refunds.id}", D("80.0000")),
+        ("uncategorized", D("45.0000")),
+    ]
+    # `Refunds` is on both sides, each sum standing on its own — the property that
+    # keeps a refund from quietly cancelling a purchase in the same category.
+    assert {k for k, _ in income} & {k for k, _ in expense} == {f"cat:{refunds.id}"}
+
+    # The two sides and the net are one equation with no slack in it, so the
+    # picture balances by construction and leaves a reader nothing to reconcile:
+    # the left side minus the net *is* the right side.
+    assert graph["total_income"] - graph["total_expense"] == graph["net"]
+    # Every figure is a magnitude, and the totals are the rows added up — not a
+    # second sum that could round differently from the rows beside it.
+    for side in ("income", "expense"):
+        assert all(r["total"] > 0 for r in graph[side]), side
+        assert sum((r["total"] for r in graph[side]), D("0")) == graph[f"total_{side}"]
+
+
+async def test_a_sankey_node_is_an_identity_not_a_label(household_factory):
+    """Two rows that read the same are still two rows.
+
+    A household is free to name a category "Uncategorized", and doing so must not
+    pour the unfiled entries into it — or it out of them. The key is what keeps
+    them apart, which is why the response carries one and why a chart builds its
+    node ids from the key rather than from the string a reader sees.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        # Deliberately the same name the unfiled bucket shows.
+        named = await _make_category(s, hh, "expense", "Uncategorized")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        for amount, day, cat in (
+            (D("-10"), (2026, 1, 4), named.id),
+            (D("-25"), (2026, 1, 5), None),
+        ):
+            await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=acct.id, amount=amount, transacted_at=_dt(*day),
+                category_id=cat))
+
+        graph = await reports.cash_flow_sankey(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+
+    assert len(graph["expense"]) == 2
+    keys = {r["key"] for r in graph["expense"]}
+    assert keys == {f"cat:{named.id}", "uncategorized"}
+    # Same label, different nodes — and the category's own id is carried, so a UI
+    # can link the real one without parsing a key.
+    assert {r["label"] for r in graph["expense"]} == {"Uncategorized"}
+    assert {r["category_id"] for r in graph["expense"]} == {None, named.id}
+    assert graph["total_expense"] == D("35.0000")
+
+
 async def test_transaction_owner_and_provenance(household_factory):
     """Owner is a label row, and setting it is a user-sourced decision."""
     from app.services import owners as owner_svc

@@ -205,6 +205,56 @@ export interface CashFlowSeries extends ReportWindow {
   attribution: "row";
 }
 
+/**
+ * One node of the cash-flow graph.
+ *
+ * `total` is a **magnitude** — always positive — because the list the row is in
+ * carries the direction. See `CashFlowSankey`.
+ */
+export interface CashFlowSankeyRow {
+  /**
+   * The row's *identity*, which is neither its label nor its `category_id`.
+   *
+   * Two categories may share a name and a household may name one
+   * "Uncategorized", so a graph keyed on what a reader sees would merge unrelated
+   * money. Node ids are built from this; the rows that are not categories at all
+   * (`"uncategorized"`, `"investment:dividend"`, `"investment:fee"`) get keys of
+   * their own so they cannot collide with a real category either.
+   */
+  key: string;
+  label: string;
+  /** `null` for the rows above that are not a category. */
+  category_id: UUID | null;
+  total: Money;
+}
+
+/**
+ * The window's cash flow as the two sides of one graph.
+ *
+ * **Rows, not nodes and links**: grouping is the arithmetic and the picture's
+ * shape follows from it, so the client builds the graph. Sending a layout would
+ * put a decision on the wire that no reader could check.
+ *
+ * Every figure except `net` is a magnitude, which is why `total_expense` is
+ * positive where `CashFlowPoint.expense` is not: a Sankey encodes direction by
+ * which side a node sits on, and a value negative on both sides is not a graph
+ * anyone can draw. `total_income` and `total_expense` are the sums of the rows
+ * above them, so the picture balances by construction.
+ */
+export interface CashFlowSankey extends ReportWindow {
+  base_currency: string;
+  income: CashFlowSankeyRow[];
+  expense: CashFlowSankeyRow[];
+  total_income: Money;
+  total_expense: Money;
+  /** `total_income - total_expense`, and the value the middle of the graph holds. */
+  net: Money;
+  /** Same row-level reading as cash flow — the two are the same money. */
+  attribution: "row";
+  /** A flow dropped for want of a rate is a missing branch of a whole picture. */
+  warnings: string[];
+}
+
 export interface SpendingReport extends ReportWindow {
   base_currency: string;
   rows: { category_id: UUID | null; category_name: string; total: Money }[];

@@ -559,3 +559,62 @@ async def test_an_owner_filtered_cash_flow_does_not_total_the_households_dividen
         # protecting, and it never needed the carve-out to hold.
         series = await reports.net_worth_series(s, hh, *window, alex.id, "month")
         assert series["net_cash_flow"] == Decimal("7.0000")
+
+
+async def test_a_sankey_gives_a_dividend_and_a_fee_a_node_of_their_own(household_factory):
+    """Investment events are unclassified, which is not the same as unfiled.
+
+    An ``InvestmentTransaction`` has no category column at all, so it arrives in
+    the graph with ``category_id`` of ``None`` — the exact state an unfiled
+    transaction is in. Drawing them as one node would tell a reader that a
+    dividend is spending nobody has filed yet. The node's key comes off the event
+    *type* instead, so income and fees separate without either of them borrowing a
+    category's identity.
+
+    And the label follows the type, never the sign: a reversed dividend is still a
+    dividend, and naming it a fee because its amount happened to land on the
+    expense side would be the label contradicting the data under it.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acct = await _account(s, hh, name="Brokerage")
+        s.add_all(
+            [
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="dividend",
+                    trade_date=date(2026, 2, 5), amount=Decimal("120"), currency="USD",
+                ),
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="fee",
+                    trade_date=date(2026, 2, 6), amount=Decimal("-15"), currency="USD",
+                ),
+                # The sign and the type disagree on purpose: this is an expense-side
+                # event that is still income, and the two must not be conflated.
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="dividend",
+                    trade_date=date(2026, 2, 7), amount=Decimal("-5"), currency="USD",
+                ),
+                # A trade moves money between two things the household owns, so it
+                # is not cash flow at all (ADR-0033 §1).
+                InvestmentTransaction(
+                    household_id=hh, account_id=acct.id, type="buy",
+                    trade_date=date(2026, 2, 8), amount=Decimal("-900"), currency="USD",
+                ),
+            ]
+        )
+        await s.flush()
+
+        graph = await reports.cash_flow_sankey(
+            s, hh, date(2026, 2, 1), date(2026, 2, 28)
+        )
+
+    assert [(r["key"], r["label"], r["total"]) for r in graph["income"]] == [
+        ("investment:dividend", "Investment income", Decimal("120.0000")),
+    ]
+    assert [(r["key"], r["label"], r["total"]) for r in graph["expense"]] == [
+        ("investment:fee", "Investment fees", Decimal("15.0000")),
+        ("investment:dividend", "Investment income", Decimal("5.0000")),
+    ]
+    # The buy is nowhere, and neither is a node claiming an unfiled transaction.
+    assert graph["net"] == Decimal("100.0000")
+    assert all(r["category_id"] is None for r in graph["income"] + graph["expense"])

@@ -8,11 +8,25 @@
 // chart and false of the next.
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
-import { useCashFlow, useNetWorthSeries, useOwners, useSpending } from "@/api/hooks";
+import {
+  useCashFlow,
+  useCashFlowSankey,
+  useNetWorthSeries,
+  useOwners,
+  useSpending,
+} from "@/api/hooks";
 import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
+import {
+  LEFTOVER_NODE,
+  SAVINGS_NODE,
+  WINDOW_NODE,
+  buildSankey,
+  sideRows,
+  type SankeyNode,
+} from "@/lib/sankey";
 import Chart from "@/components/Chart";
 import { Day } from "@/components/datetime";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -27,6 +41,9 @@ import {
   emphasisBar,
   emphasisLine,
   emphasisPie,
+  emphasisSankey,
+  type TooltipEdge,
+  type TooltipPoint,
 } from "@/theme/chartInteraction";
 
 /**
@@ -62,6 +79,7 @@ export default function Reports() {
 
   const nw = useNetWorthSeries(active.start, active.end, ownerFilter, range.granularity);
   const cashFlow = useCashFlow(active.start, active.end, ownerFilter, range.granularity);
+  const sankey = useCashFlowSankey(active.start, active.end, ownerFilter);
   const spending = useSpending(active.start, active.end, ownerFilter);
   const ccy = nw.data?.base_currency ?? "USD";
 
@@ -162,6 +180,100 @@ export default function Reports() {
     [spending.data, t],
   );
 
+  // The graph, built here and nowhere else: the payload carries rows and this is
+  // the one place the picture's shape is decided, so a layout bug and a data bug
+  // can never be confused for one another.
+  const graph = useMemo(
+    () => (sankey.data ? buildSankey(sankey.data) : null),
+    [sankey.data],
+  );
+
+  const sankeyOption: EChartsOption = useMemo(() => {
+    if (graph === null) return {};
+
+    // Colour by *side*, not by position in the palette. A Sankey is read as a
+    // direction of travel, so the two sides have to be told apart at a glance and
+    // must not change colour when the window changes — which a cycling palette
+    // would do, since a node's index moves as rows are added and removed. The
+    // three nodes that are not a category at all (the window itself and the two
+    // residual nodes) take the accent, which reads as "the household's own money"
+    // rather than as one more source or destination.
+    const color = (node: SankeyNode) =>
+      node.name === WINDOW_NODE || node.name === SAVINGS_NODE || node.name === LEFTOVER_NODE
+        ? t.accent
+        : node.depth === 0
+          ? t.positive
+          : t.negative;
+
+    return {
+      tooltip: chartTooltip(t, {
+        trigger: "item",
+        // Node captions and the tooltip both need *words* where the graph stores
+        // an id: an id has to be unique across the picture and a label does not,
+        // so they are different strings and only one of them is readable.
+        formatter: (p: TooltipPoint) => {
+          const label = (id: unknown) => graph.labels.get(String(id)) ?? String(id);
+          // The pointer can be on a node or on a ribbon, and ECharts types the
+          // item as either. A link is the case with endpoints — its own `name` is
+          // empty, and what it means is the two nodes it joins.
+          const edge = p.data as TooltipEdge | null | undefined;
+          if (edge?.source !== undefined && edge.target !== undefined) {
+            return `${label(edge.source)} → ${label(edge.target)}: ${formatMoney(
+              Number(edge.value),
+              ccy,
+            )}`;
+          }
+          return `${label(p.name)}: ${formatMoney(Number(p.value), ccy)}`;
+        },
+      }),
+      series: [
+        {
+          type: "sankey",
+          // Not the usual hairline inset: these margins are where the node labels
+          // live. Each column's words are placed *outward* from its node — sources
+          // to the left, destinations to the right — so a label sits beside the
+          // graph instead of on top of a ribbon, which is where ECharts puts it by
+          // default. The middle node's goes above it, having no margin of its own.
+          left: 88,
+          right: 104,
+          // Deep enough for the middle column's label, which ECharts draws *above*
+          // its node: at a hairline inset the word is cut in half by the canvas
+          // edge, which reads as a rendering fault rather than as a crop.
+          top: 26,
+          bottom: 8,
+          // Wide enough that a ribbon reads as a flow rather than as a hairline.
+          nodeWidth: 14,
+          nodeGap: 10,
+          data: graph.nodes.map((n) => ({
+            name: n.name,
+            depth: n.depth,
+            itemStyle: { color: color(n) },
+            label: { position: n.depth === 0 ? "left" : n.depth === 2 ? "right" : "top" },
+          })),
+          links: graph.links,
+          label: {
+            color: t.label,
+            // Bounded so a long name cannot run back over the graph or off the
+            // canvas — a household names its own categories, and one can be longer
+            // than any margin. Truncation is the honest failure: the alternative is
+            // a clipped word or a label over the ribbons, and the list under the
+            // chart carries every name in full either way.
+            width: 84,
+            overflow: "truncate",
+            formatter: (p: TooltipPoint) => graph.labels.get(String(p.name)) ?? "",
+          },
+          // `source` is not decoration: a ribbon is tinted by where it came from,
+          // which is what makes "this came out of Salary" readable without a
+          // legend. `curveness` keeps two flows from a shared origin apart.
+          lineStyle: { color: "source", opacity: 0.4, curveness: 0.5 },
+          emphasis: emphasisSankey(t),
+        },
+      ],
+    };
+    // `graph.labels` is rebuilt with `graph`, so the two are one dependency, and
+    // `color` closes over `t` rather than being a dependency of its own.
+  }, [graph, t, ccy]);
+
   const hasSpending = (spending.data?.rows.length ?? 0) > 0;
   const hasSeries = (nw.data?.points.length ?? 0) > 0;
   const hasCashFlow = (cashFlow.data?.points.length ?? 0) > 0;
@@ -211,6 +323,21 @@ export default function Reports() {
     ? `Spending by category, ${formatMoney(spendTotal, ccy)} across ${spendRows.length} ` +
       `categories, ${shownText}. Largest: ${top.category_name} at ${formatMoney(top.total, ccy)}.`
     : `Spending by category, ${shownText}.`;
+
+  // The graph read as words, for the reason §2.9 gives: canvas is invisible, and
+  // a picture of where money went is exactly the kind of thing a reader has to be
+  // able to *read*. Built from the graph rather than from the payload, so the two
+  // residual rows — which exist only in the graph — cannot go missing from the
+  // list beside it.
+  const sankeyIn = graph ? sideRows(graph, "in") : [];
+  const sankeyOut = graph ? sideRows(graph, "out") : [];
+  const sankeyLabel = graph
+    ? `${formatMoney(sankey.data?.total_income ?? 0, ccy)} in and ` +
+      `${formatMoney(sankey.data?.total_expense ?? 0, ccy)} out, ${shownText}, ` +
+      `netting ${formatMoney(sankey.data?.net ?? 0, ccy)}. ` +
+      `In: ${sankeyIn.map((r) => `${r.label} ${formatMoney(r.total, ccy)}`).join(", ")}. ` +
+      `Out: ${sankeyOut.map((r) => `${r.label} ${formatMoney(r.total, ccy)}`).join(", ")}.`
+    : `Where the money went, ${shownText}.`;
 
   // Said inside each section rather than once above them: a reader who scrolls
   // to the spending donut should not have to scroll back up to find out why
@@ -291,6 +418,81 @@ export default function Reports() {
               <p className="mt-2 text-xs text-fg-muted" data-testid="cash-flow-attribution">
                 Attribution: {cashFlow.data.attribution} — each entry counts under the owner it is
                 assigned to, so this reads the household's postings rather than one owner's accounts.
+              </p>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="rounded-card bg-surface-raised p-6" data-testid="report-sankey">
+        <p className="mb-2 text-sm text-fg-muted">Where the money went</p>
+        {blocked ? (
+          notDrawn
+        ) : (
+          <>
+            {graph ? (
+              <>
+                <Chart
+                  option={sankeyOption}
+                  label={sankeyLabel}
+                  height={360}
+                  testid="cash-flow-sankey"
+                />
+                {/* The text equivalent. Two lists, because the graph is two
+                    sides — and the residual row in each is the one that says
+                    whether the window was funded by what it earned. */}
+                <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      ["In", sankeyIn],
+                      ["Out", sankeyOut],
+                    ] as const
+                  ).map(([side, rows]) => (
+                    <div key={side}>
+                      {/* The heading is the *side's* total, not the payload's
+                          income or expense — and the difference is the residual
+                          row. The "Out" list carries "Left over", so heading it
+                          with `total_expense` would put a figure above a column
+                          that adds up to something else. Both headings are the
+                          graph's own throughput, which is what the two sides have
+                          in common and the reason there is a picture at all. */}
+                      <p className="text-xs font-medium text-fg-muted">
+                        {side} — {formatMoney(graph.flow, ccy)}
+                      </p>
+                      <ul className="mt-1 space-y-1">
+                        {rows.map((r) => (
+                          <li key={r.key} className="flex justify-between gap-4 text-sm">
+                            <span>{r.label}</span>
+                            <span>{formatMoney(r.total, ccy)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-fg-muted">No cash flow in range.</p>
+            )}
+            {/* Last, and only when there is something to say: a flow dropped for
+                want of a rate is a missing branch of a picture that claims to be
+                the whole picture, so it is not a footnote on this chart. */}
+            {(sankey.data?.warnings.length ?? 0) > 0 && (
+              <div className="mt-3 rounded-control bg-warning/10 p-3" data-testid="sankey-warnings">
+                <p className="text-xs font-medium text-warning">
+                  Some of these flows are missing data
+                </p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-fg-muted">
+                  {sankey.data?.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {ownerFilter && sankey.data && (
+              <p className="mt-2 text-xs text-fg-muted" data-testid="sankey-attribution">
+                Attribution: {sankey.data.attribution} — the same entries the income-vs-expense
+                trend above counts, so the two are the same money arranged two ways.
               </p>
             )}
           </>

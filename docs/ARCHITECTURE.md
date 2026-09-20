@@ -440,7 +440,12 @@ provider is an adapter that produces the *same* writes a human would (tagging it
     already means midnight at the start of the first day.
   - Net worth over time (area/line from `balance_snapshots`), with the **currency-revaluation** contribution
     shown as its own component so multi-currency deltas are explained, not mysterious (ADR-0017).
-  - **Cash-flow Sankey**: income sources → category groups → categories for a period.
+  - **Cash-flow Sankey**: the period's income buckets and expense buckets, with the window itself as the
+    node between them — `income → window → expense`, plus **one residual node on whichever side is short**:
+    "Left over" when the period earned more than it spent, "From savings" when it spent more. The residual
+    is what lets the picture balance, and a graph without one cannot: three stages from income to spending
+    only close when the two happen to be equal. Both sides then carry `max(income, expense)`, so the graph's
+    two ends are the same width by construction. (`services/reports.py::cash_flow_sankey`.)
   - Spending by category (donut) with click-through drill-down to a filtered transaction list.
   - Income vs. expense trend (stacked bar), month-over-month.
   - **Investment reporting** (addresses Monarch's weakest area): dividends/interest income, cost-basis vs.

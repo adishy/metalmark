@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.deps import RequestContext, get_context
 from app.schemas.reports import (
     CashFlowPoint,
+    CashFlowSankey,
     CashFlowSeries,
     NetWorthSeries,
     SpendingReport,
@@ -18,16 +19,17 @@ from app.services.periods import GranularityIn
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
-# The three reports take the same owner_id but answer different questions with it
-# (account-scoped here, row-scoped below) — see the module docstring in
-# services/reports.py and ADR-0026.
+# The reports take the same owner_id but answer different questions with it
+# (account-scoped for net worth, row-scoped for the rest) — see the module
+# docstring in services/reports.py and ADR-0026.
 #
 # They also take the same window, and each one echoes it back resolved. `start` is
 # optional so a reader can ask for *all of it* — the one range a client cannot
 # compute, because only the server knows where the data begins. `granularity` is
 # on the two that have buckets; `/spending` is a single total over the window and
-# takes none, because a parameter that provably changes nothing is worse than an
-# absent one: a caller would be right to assume it did something.
+# `/cash-flow/sankey` is a single graph over it, and both take none, because a
+# parameter that provably changes nothing is worse than an absent one: a caller
+# would be right to assume it did something.
 
 
 async def _window(ctx: RequestContext, start: date | None, end: date) -> tuple[date, date]:
@@ -82,6 +84,19 @@ async def cash_flow(
         end=end,
         granularity=resolved,
         points=[CashFlowPoint(**p) for p in out],
+    )
+
+
+@router.get("/cash-flow/sankey", response_model=CashFlowSankey)
+async def cash_flow_sankey(
+    end: date,
+    start: date | None = Query(default=None),
+    owner_id: uuid.UUID | None = Query(default=None),
+    ctx: RequestContext = Depends(get_context),
+):
+    start, end = await _window(ctx, start, end)
+    return CashFlowSankey(
+        **await reports.cash_flow_sankey(ctx.session, ctx.household_id, start, end, owner_id)
     )
 
 

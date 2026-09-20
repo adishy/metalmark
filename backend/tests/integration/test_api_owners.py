@@ -493,6 +493,16 @@ async def test_base_currency_cannot_be_patched(client):
 
 # ---- Reports ---------------------------------------------------------------
 
+#: Every report endpoint. Kept as one list so a fourth cannot be added without the
+#: window, attribution and owner-filter sweeps below covering it — each of which
+#: exists because a report once shipped without that property.
+REPORTS = (
+    "/reports/net-worth",
+    "/reports/cash-flow",
+    "/reports/cash-flow/sankey",
+    "/reports/spending",
+)
+
 
 async def test_net_worth_response_declares_its_attribution(client):
     await _signup(client)
@@ -507,8 +517,63 @@ async def test_net_worth_response_declares_its_attribution(client):
     assert body["delta_net_worth"] == "0.0000"
 
 
+async def test_the_sankey_totals_the_same_window_the_bars_do(client):
+    """Two endpoints over one quantity, compared through the wire.
+
+    The service tests pin the arithmetic; this pins the *route* — that the graph
+    reads the same window, under the same owner filter, and comes back with
+    figures that reconcile against the bars beside them. A graph is more
+    convincing than a bar chart and would be believed over one, so the two are
+    held to each other rather than trusted to agree.
+
+    ``expense`` is where the two shapes part company: the series carries it
+    negative, the graph positive, because a Sankey encodes direction by which side
+    a node sits on. That is the one difference, and it is asserted rather than
+    glossed.
+    """
+    await _signup(client)
+    acct = (await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2026-01-01",
+    })).json()
+    group = (await client.post("/category-groups", json={
+        "name": "Income", "type": "income"})).json()
+    salary = (await client.post("/categories", json={
+        "group_id": group["id"], "name": "Salary"})).json()
+    for amount, day, cat in (
+        ("2000", "2026-02-05", salary["id"]),
+        ("-120", "2026-02-09", None),
+        ("-45", "2026-03-01", None),
+    ):
+        await client.post("/transactions", json={
+            "account_id": acct["id"], "amount": amount,
+            "transacted_at": f"{day}T12:00:00Z", "category_id": cat,
+        })
+
+    window = {"start": "2026-01-01", "end": "2026-03-31"}
+    bars = (await client.get("/reports/cash-flow", params=window)).json()
+    graph = (await client.get("/reports/cash-flow/sankey", params=window)).json()
+
+    def bars_total(field: str) -> Decimal:
+        return sum((Decimal(p[field]) for p in bars["points"]), Decimal("0"))
+
+    assert graph["attribution"] == bars["attribution"] == "row"
+    assert graph["base_currency"] == bars["base_currency"]
+    assert (graph["start"], graph["end"]) == (bars["start"], bars["end"])
+    assert Decimal(graph["total_income"]) == bars_total("income") == Decimal("2000")
+    # The one place the two shapes part company, asserted rather than glossed: the
+    # series carries expense negative, the graph carries it positive.
+    assert Decimal(graph["total_expense"]) == -bars_total("expense") == Decimal("165")
+    assert Decimal(graph["net"]) == bars_total("net")
+    # And the graph's own figures add up, so no reader has to reconcile a residual
+    # the server could have left in it.
+    assert Decimal(graph["total_income"]) - Decimal(graph["total_expense"]) == Decimal(
+        graph["net"]
+    )
+
+
 async def test_every_report_declares_which_question_its_owner_filter_answered(client):
-    """The three reports share an ``owner_id`` and mean different things by it.
+    """The reports share an ``owner_id`` and mean different things by it.
 
     Net worth scopes *accounts*; cash-flow and spending scope *entries*. Nothing in
     the request says which, and the figures are not additive across the two
@@ -548,17 +613,20 @@ async def test_the_window_is_echoed_on_every_report(client):
     })
     window = {"start": "2026-03-01", "end": "2026-09-20"}
 
-    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+    for path in REPORTS:
         body = (await client.get(path, params=window)).json()
         assert (body["start"], body["end"]) == ("2026-03-01", "2026-09-20"), path
 
     # `granularity` is echoed *resolved* on the two reports that have buckets, and
-    # is absent from the one that does not: `auto` is a request, not a period, and
-    # a chart handed it back would be doing the resolution it delegated.
+    # is absent from the two that do not: `auto` is a request, not a period, and a
+    # chart handed it back would be doing the resolution it delegated. The sankey
+    # is one graph over the window, so a granularity on it would promise a
+    # sequence of graphs rather than the one picture it draws.
     nw = (await client.get("/reports/net-worth", params=window)).json()
     cf = (await client.get("/reports/cash-flow", params=window)).json()
     assert nw["granularity"] == cf["granularity"] == "month"
-    assert "granularity" not in (await client.get("/reports/spending", params=window)).json()
+    for path in ("/reports/spending", "/reports/cash-flow/sankey"):
+        assert "granularity" not in (await client.get(path, params=window)).json(), path
 
     # And an explicit granularity is honoured rather than re-resolved.
     quarterly = (await client.get(
@@ -588,7 +656,7 @@ async def test_an_omitted_start_opens_where_the_data_does(client):
         "account_id": acct["id"], "amount": "-10", "transacted_at": "2026-05-01T12:00:00Z",
     })
 
-    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+    for path in REPORTS:
         body = (await client.get(path, params={"end": "2026-09-20"})).json()
         assert body["start"] == "2026-02-14", path
         assert body["end"] == "2026-09-20", path
@@ -603,7 +671,7 @@ async def test_an_inverted_window_is_refused_rather_than_drawn_empty(client):
         "name": "Chk", "type": "depository", "currency": "USD",
         "current_balance": "100", "balance_date": "2026-01-01",
     })
-    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+    for path in REPORTS:
         resp = await client.get(path, params={"start": "2026-09-20", "end": "2026-01-01"})
         assert resp.status_code == 422, f"{path}: {resp.status_code}"
         assert resp.json()["detail"] == "start is after end"
@@ -613,7 +681,7 @@ async def test_owner_filters_are_accepted_everywhere_they_are_offered(client):
     await _signup(client)
     alex = (await client.post("/owners", json={"name": "Alex"})).json()
     scoped = {"start": "2026-01-01", "end": "2026-01-31", "owner_id": alex["id"]}
-    for path in ("/reports/net-worth", "/reports/cash-flow", "/reports/spending"):
+    for path in REPORTS:
         resp = await client.get(path, params=scoped)
         assert resp.status_code == 200, f"{path}: {resp.text}"
     for path in ("/accounts", "/accounts/net-worth", "/transactions"):

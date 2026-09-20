@@ -4,6 +4,7 @@ import type {
   Account,
   AccountCreate,
   AccountUpdate,
+  CashFlowSankey,
   CashFlowSeries,
   Category,
   CategoryGroup,
@@ -181,6 +182,16 @@ export function useCashFlow(
     queryKey: ["report-cash-flow", start, end, ownerId ?? null, granularity],
     queryFn: () =>
       api.get<CashFlowSeries>(reportUrl("/reports/cash-flow", start, end, ownerId, granularity)),
+  });
+}
+
+/** No granularity: a Sankey is one graph over the window, so a cut would promise
+ *  a *sequence* of graphs rather than the one picture it draws. */
+export function useCashFlowSankey(start: string | null, end: string, ownerId?: string | null) {
+  return useQuery({
+    queryKey: ["report-cash-flow-sankey", start, end, ownerId ?? null],
+    queryFn: () =>
+      api.get<CashFlowSankey>(reportUrl("/reports/cash-flow/sankey", start, end, ownerId)),
   });
 }
 

@@ -397,6 +397,8 @@ The mapping, per chart:
 | `tooltip.textStyle.color` | `fg` |
 | `pie.itemStyle.borderColor` | `surface-raised` (currently `#0f172a`) |
 | series colours | `chart-1` … `chart-10` in order |
+| sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
+| sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
 Three further chart rules:
 
@@ -414,7 +416,7 @@ Three further chart rules:
 
 §2.9 covers what a chart is painted with; this covers what it does when pointed at.
 Every option is assembled from `src/theme/chartInteraction.ts` — **no page writes a
-`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the six charts cannot
+`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the seven charts cannot
 drift apart. §8 rule 8 enforces that.
 
 **Hovering never removes ink.** The rule exists because it was broken: the net-worth
@@ -1325,7 +1327,7 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 # 8. Hand-written chart interaction. Every tooltip, axis pointer and emphasis
 #    comes from theme/chartInteraction.ts (§2.10), which is the only file
 #    allowed to name those keys — that is what makes hover behave identically
-#    on all six charts instead of being remembered per chart.
+#    on all seven charts instead of being remembered per chart.
 #
 #    Not a bare grep, for the same reason rule 6 is not: `tooltip:` appears on
 #    correct code in the form `tooltip: chartTooltip(t)`. The script keys on the

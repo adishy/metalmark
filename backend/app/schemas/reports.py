@@ -51,6 +51,62 @@ class CashFlowSeries(BaseModel):
     attribution: str = "row"
 
 
+class CashFlowSankeyRow(BaseModel):
+    """One node of the cash-flow graph — where a group of entries came from, or went.
+
+    ``total`` is a **magnitude**: always positive, because the list this row is in
+    carries the direction (see ``CashFlowSankey``).
+    """
+
+    # The row's *identity*, which is neither its label nor its ``category_id``.
+    # Two categories may share a name and a household may name one "Uncategorized",
+    # so grouping by what a reader sees would merge unrelated money — a chart
+    # builds its node ids from this instead. The rows that are not categories at
+    # all (unfiled transactions, investment income, investment fees) get keys of
+    # their own so they cannot collide with a real category either.
+    key: str
+    label: str
+    # ``None`` for the rows above that are not a category. Carried so a UI can link
+    # a row to its category without parsing ``key``, which is not a wire format.
+    category_id: uuid.UUID | None
+    total: Decimal
+
+
+class CashFlowSankey(BaseModel):
+    """The window's cash flow as the two sides of one graph.
+
+    ``income`` and ``expense`` are **rows, not nodes and links**: grouping is the
+    arithmetic, and the picture's shape follows from it. Sending the shape would
+    put a layout decision on the wire where no reader could check it.
+
+    Every ``total`` here — the rows and the two figures below alike — is a
+    magnitude, and ``net`` is the only signed number. That is why ``total_expense``
+    is positive where ``CashFlowPoint.expense`` is not: a Sankey encodes direction
+    by which side a node sits on, and a value negative on both sides is not a graph
+    anyone can draw or read.
+
+    ``total_income`` and ``total_expense`` are the sums of the rows above them, so
+    the picture balances **by construction** — the left side plus ``net`` equals
+    the right side, with no residual to reconcile and no rounding gap to explain.
+    """
+
+    base_currency: str
+    start: date
+    end: date
+    income: list[CashFlowSankeyRow]
+    expense: list[CashFlowSankeyRow]
+    total_income: Decimal
+    total_expense: Decimal
+    # ``total_income - total_expense``: the one signed figure, and the value the
+    # middle of the graph is drawn at.
+    net: Decimal
+    # Always "row", for the same reason as CashFlowSeries.attribution.
+    attribution: str = "row"
+    # A flow dropped for want of an FX rate is a missing branch of a picture whose
+    # whole claim is that it is complete, so this is not a footnote here.
+    warnings: list[str] = []
+
+
 class CategorySpendRow(BaseModel):
     category_id: uuid.UUID | None
     category_name: str

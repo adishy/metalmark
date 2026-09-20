@@ -84,6 +84,19 @@ INVESTMENT_TRADE_TYPES = ("buy", "sell")
 #: that was chased to an account.
 UNEXPLAINED_TOLERANCE = Decimal("0.05")
 
+#: What an investment event is called in the cash-flow graph. Keyed by the
+#: ``InvestmentTransaction.type`` that produced it, **not** by which side of the
+#: graph it lands on: a reversed dividend is a negative dividend, and naming it a
+#: fee because its amount came out on the expense side would be the label
+#: contradicting the data. A reader gets the same word either way and can see the
+#: sign for themselves.
+INVESTMENT_LABELS = {
+    "dividend": "Investment income",
+    "interest": "Investment income",
+    "fee": "Investment fees",
+    "transfer": "Investment transfer",
+}
+
 
 async def _category_type_map(session: AsyncSession) -> dict[uuid.UUID, str]:
     rows = (
@@ -334,6 +347,13 @@ class Flow(NamedTuple):
     an investment event has no category column at all, so it is unclassified for a
     reason the reader cannot fix by filing it, and the two must not be labelled
     the same way.
+
+    ``source`` is ``"transaction"`` or ``"investment:<type>"``, carrying the
+    investment type rather than a bare ``"investment"`` because the type is the
+    only thing that distinguishes income from fees — and the two are separate
+    nodes in the cash-flow graph, which would otherwise merge. Encoding it here
+    rather than in a second nullable field keeps "which type is it" and "is it an
+    investment at all" from being two answers that can disagree.
     """
 
     category_id: uuid.UUID | None
@@ -398,7 +418,7 @@ async def _investment_flows(
                 account_id=t.account_id,
                 owner_id=owners[t.account_id],
                 amount=base_amount,
-                source="investment",
+                source=f"investment:{t.type}",
             )
         )
     return flows, warnings
@@ -1061,6 +1081,118 @@ async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
             }
         )
     return base, resolved, out
+
+
+def _flow_node(f: Flow, names: dict[uuid.UUID, str]) -> tuple[str, str]:
+    """The graph node a flow belongs to — ``(key, label)``.
+
+    ``key`` is an *identity*, and the reason this returns two things instead of
+    one. A label is not unique: a household may name a category "Uncategorized",
+    and nothing stops two categories from sharing a name — so grouping by the
+    string a reader sees would merge two unrelated rows into one node and silently
+    move money between them. The key is what a chart builds its node ids from, and
+    the sentinel rows get a key of their own so they cannot collide with a real
+    category either.
+    """
+    if f.source != "transaction":
+        # `source` is "investment:<type>"; the label follows the *type* and never
+        # the sign, so a negative dividend still reads as investment income.
+        return f.source, INVESTMENT_LABELS.get(f.source.partition(":")[2], "Investment")
+    if f.category_id is None:
+        return "uncategorized", "Uncategorized"
+    return f"cat:{f.category_id}", names.get(f.category_id, "Uncategorized")
+
+
+async def cash_flow_sankey(
+    session: AsyncSession,
+    household_id: uuid.UUID,
+    start: date,
+    end: date,
+    owner_id: uuid.UUID | None = None,
+):
+    """The window's cash flow as two sets of named buckets, ready to be drawn.
+
+    Built on ``_load_entries``, so it is the *same money* ``/reports/cash-flow``
+    totals over the same window under the same owner filter — a claim a test can
+    falsify by comparing the two, which is the only thing that makes a second
+    report of one quantity worth having rather than a second place to be wrong.
+
+    **Rows, not nodes and links.** Grouping is the whole of the arithmetic here;
+    the graph's shape follows from it mechanically. Emitting the shape would put a
+    layout decision on the wire where nothing downstream could tell a bad layout
+    from bad data. The server knows which entries belong together, says that, and
+    stops.
+
+    **Two lists, each of magnitudes.** The side a row is in carries the direction,
+    so every figure here is positive and ``total_income``/``total_expense`` are
+    their own lists' sums. This is a departure from ``_fold``, where ``expense`` is
+    negative, and it is forced: a Sankey encodes direction by *where a node sits*,
+    and a value that is negative on both sides is not a picture anyone can draw.
+    ``net`` is the one signed number, and it is the one the middle of the graph is
+    drawn at.
+
+    **A category can appear on both sides and is never netted.** A month with a
+    purchase and a refund in one category is two flows moving opposite ways;
+    collapsing them to their difference would draw a graph that balances while
+    telling the reader nothing happened. Each side sums its own entries, so a
+    refund reduces the income side rather than hiding inside an expense total.
+
+    ``warnings`` carries more weight here than anywhere else it appears: a flow
+    dropped for want of an FX rate is a missing branch of a picture whose entire
+    claim is that it is the whole picture, and the response has to be able to say
+    so.
+    """
+    base = await base_currency(session, household_id)
+    flows, warnings = await _load_entries(session, start, end, base, owner_id=owner_id)
+    names = dict((await session.execute(select(Category.id, Category.name))).all())
+
+    income_rows: dict[str, dict] = {}
+    expense_rows: dict[str, dict] = {}
+    for f in flows:
+        if f.amount == 0:
+            # Neither income nor expense, which is how `_fold` reads it too — so
+            # the two reports agree about a zero instead of one of them drawing the
+            # single node in the graph with nothing behind it.
+            continue
+        key, label = _flow_node(f, names)
+        bucket = income_rows if f.amount > 0 else expense_rows
+        row = bucket.get(key)
+        if row is None:
+            row = {
+                "key": key,
+                "label": label,
+                "category_id": f.category_id,
+                "total": Decimal("0"),
+            }
+            bucket[key] = row
+        # Quantized per entry rather than on the total, so the totals below are
+        # sums of numbers already at storage precision: "the figure beside the
+        # rows" and "the rows added up" are then the same number by construction,
+        # with no second rounding that could disagree by a cent.
+        row["total"] += quantize_storage(abs(f.amount))
+
+    def ordered(rows: dict[str, dict]) -> list[dict]:
+        return sorted(rows.values(), key=lambda r: r["total"], reverse=True)
+
+    income = ordered(income_rows)
+    expense = ordered(expense_rows)
+    total_income = sum((r["total"] for r in income), Decimal("0"))
+    total_expense = sum((r["total"] for r in expense), Decimal("0"))
+    return {
+        "base_currency": base,
+        "start": start,
+        "end": end,
+        "income": income,
+        "expense": expense,
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "net": total_income - total_expense,
+        "warnings": warnings,
+        # Entries, not accounts — the same question `/reports/cash-flow` answers
+        # with the same filter, which is what lets a reader put the two side by
+        # side (ADR-0026).
+        "attribution": "row",
+    }
 
 
 async def spending_by_category(session: AsyncSession, household_id: uuid.UUID,

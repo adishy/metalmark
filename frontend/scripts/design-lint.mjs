@@ -102,7 +102,11 @@ const RULES = [
     test: (line) =>
       /\btooltip:(?!\s*chartTooltip\()/.test(line) ||
       /\baxisPointer:/.test(line) ||
-      /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie)\()/.test(line),
+      // The alternation is the list of helpers the module offers, so a new one
+      // has to be added here when it is written — the rule is "go through
+      // `chartInteraction`, not "do not write `emphasis`", and only the module
+      // knows which of the two a line is doing.
+      /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie|Sankey)\()/.test(line),
   },
   {
     id: "9",
