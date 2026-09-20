@@ -182,6 +182,81 @@ async def test_report_range_covers_the_whole_end_day(household_factory):
     assert spend[0]["total"] == D("40.0000")
 
 
+async def test_report_buckets_do_not_reach_outside_the_window(household_factory):
+    """A month bucket is clipped to the window, not summed over its whole month.
+
+    The series derived month-ends from the range and then summed each month from
+    its 1st to its own last day — so a window of 15 Jan – 20 Sep reported the
+    first half of January and the last ten days of September as well, and the bars
+    added up to more than the range the reader had asked for. Two transactions
+    outside the window but inside one of its edge months are what that counted;
+    the two inside are what it should.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        exp = await _make_category(s, hh, "expense", "Misc")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+
+        for amount, day in (
+            (D("-11"), (2026, 1, 14)),  # before the window, inside its first month
+            (D("-22"), (2026, 1, 15)),  # the window's first day
+            (D("-44"), (2026, 9, 20)),  # the window's last day
+            (D("-33"), (2026, 9, 21)),  # after it, inside its last month
+        ):
+            await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=acct.id, amount=amount, transacted_at=_dt(*day),
+                category_id=exp.id))
+
+        _base, cf = await reports.cash_flow_series(
+            s, hh, date(2026, 1, 15), date(2026, 9, 20))
+
+    # Buckets are keyed by the calendar month they *are*, even the two the window
+    # clipped — `2026-01`, not `2026-01-15`.
+    assert [p["month"] for p in cf] == [f"2026-{m:02d}" for m in range(1, 10)]
+    assert cf[0]["expense"] == D("-22.0000")
+    assert cf[-1]["expense"] == D("-44.0000")
+    # The property the clipping exists for: the chart's total and the range's
+    # total are the same money, because the buckets partition the window.
+    assert sum((p["net"] for p in cf), D("0")) == D("-66.0000")
+
+
+async def test_net_worth_points_start_at_the_window_start_and_end_at_its_end(household_factory):
+    """The series covers the window rather than the months it happens to touch.
+
+    Both faults were in the same month-end list: a window opening on 15 January
+    had no point before 31 January, and one closing on 20 September had a final
+    point computed at 30 September — a level read from snapshots dated after the
+    range, drawn as though it were inside it.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD",
+                                 current_balance=D("1000"), balance_date=date(2026, 1, 15)))
+
+        series = await reports.net_worth_series(
+            s, hh, date(2026, 1, 15), date(2026, 9, 20))
+
+        # A balance observed *after* the window, which a month-end read at
+        # 2026-09-30 would have picked up and drawn as the window's last point.
+        acct.current_balance = D("9999")
+        acct.balance_date = date(2026, 9, 25)
+        await ledger.upsert_balance_snapshot(s, acct)
+        guarded = await reports.net_worth_series(
+            s, hh, date(2026, 1, 15), date(2026, 9, 20))
+
+    dates = [p["date"] for p in series["points"]]
+    assert dates[0] == date(2026, 1, 15)
+    assert dates[-1] == date(2026, 9, 20)
+    assert dates == sorted(set(dates))
+    # Every point is a level inside the window, and the delta is the change
+    # between the first and the last of them.
+    assert series["points"][0]["net_worth"] == D("1000.0000")
+    assert guarded["points"][-1]["net_worth"] == D("1000.0000")
+    assert guarded["delta_net_worth"] == D("0.0000")
+
+
 async def test_split_base_allocation_no_drift(household_factory):
     hh = await household_factory(base="USD")
     async with scoped_session(household_id=hh) as s:

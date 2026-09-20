@@ -35,7 +35,6 @@ another's share of a shared charge. The two views are therefore not additive;
 
 from __future__ import annotations
 
-import calendar
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -57,7 +56,7 @@ from app.models import (
     TransferGroup,
 )
 from app.models.investments import CASH_SECURITY_TYPE
-from app.services import fx
+from app.services import fx, periods
 from app.services import investments as inv
 from app.services.ledger import base_currency
 from app.services.ownership import account_owner_map, effective_owner_id
@@ -80,20 +79,14 @@ UNEXPLAINED_TOLERANCE = Decimal("0.05")
 
 
 def _month_key(d: date) -> str:
+    """`YYYY-MM` for a *period*, not for a day.
+
+    Always called with a bucket's unclipped `period`, never with its clipped
+    start: a window opening on 15 March must key its first bucket `2026-03`, not
+    `2026-03-15`, and the two differ exactly when the window does not begin on a
+    calendar boundary.
+    """
     return f"{d.year:04d}-{d.month:02d}"
-
-
-def _month_ends(start: date, end: date) -> list[date]:
-    out: list[date] = []
-    y, m = start.year, start.month
-    while (y, m) <= (end.year, end.month):
-        last = calendar.monthrange(y, m)[1]
-        out.append(date(y, m, last))
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
-    return out
 
 
 async def _category_type_map(session: AsyncSession) -> dict[uuid.UUID, str]:
@@ -792,14 +785,34 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     base = await base_currency(session, household_id)
     account_ids = None if owner_id is None else await accounts_owned_by(session, owner_id)
 
-    points = []
-    for d in _month_ends(start, end):
+    # The level at the window's own start, then at the end of each month in it.
+    #
+    # `_month_ends` gave a series that began at the first month-*end* — so a window
+    # opening on 15 January had nothing to say about the 15th — and ran to the
+    # last month-end, which for a window closing on 20 September asked
+    # `net_worth_at(2026-09-30)`. That reads snapshots dated after the window, so
+    # the chart's final point was a level from ten days the reader had not
+    # requested. `points[0].date == start` is the property both faults violate.
+    nw_start = await net_worth_at(session, start, base, account_ids=account_ids)
+    points = [{"date": start, "net_worth": nw_start}]
+    for bucket in periods.buckets(start, end, "month"):
+        if bucket.end == start:
+            # A one-day window: the baseline already *is* this bucket's end.
+            continue
         points.append(
-            {"date": d, "net_worth": await net_worth_at(session, d, base, account_ids=account_ids)}
+            {
+                "date": bucket.end,
+                "net_worth": await net_worth_at(
+                    session, bucket.end, base, account_ids=account_ids
+                ),
+            }
         )
 
-    nw_start = await net_worth_at(session, start, base, account_ids=account_ids)
-    nw_end = await net_worth_at(session, end, base, account_ids=account_ids)
+    # The last point *is* the window end: the buckets partition the window, so the
+    # final bucket's end is `end` — and in the one-day case the baseline is. No
+    # second query, and no chance of the chart's last point and the reported delta
+    # disagreeing about what the window ended at.
+    nw_end = points[-1]["net_worth"]
     delta = quantize_storage(nw_end - nw_start)
     _income, _expense, net_cf, cash_flow_by_account, warnings = await _cash_flow(
         session, start, end, base, account_ids=account_ids
@@ -876,14 +889,28 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
 async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
                            start: date, end: date,
                            owner_id: uuid.UUID | None = None):
+    """Income, expense and net per month over ``[start, end]``.
+
+    Each bucket is summed over **its own clipped span**, so the bars add up to the
+    window and to nothing else. The version this replaced derived a month-end list
+    from the window and then summed each month from its 1st to its own last day —
+    which quietly included the days of the first and last months that lay outside
+    the requested range, and reported them as if the reader had asked for them.
+    """
     base = await base_currency(session, household_id)
     out = []
-    for d in _month_ends(start, end):
-        m_start = date(d.year, d.month, 1)
+    for bucket in periods.buckets(start, end, "month"):
         income, expense, net, _by_account, _ = await _cash_flow(
-            session, m_start, d, base, owner_id=owner_id
+            session, bucket.start, bucket.end, base, owner_id=owner_id
         )
-        out.append({"month": _month_key(d), "income": income, "expense": expense, "net": net})
+        out.append(
+            {
+                "month": _month_key(bucket.period),
+                "income": income,
+                "expense": expense,
+                "net": net,
+            }
+        )
     return base, out
 
 
