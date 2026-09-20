@@ -61,3 +61,5 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0027](0027-open-signup-replaces-invite-only.md) | Open signup replaces invite-only (invite half of 0013) | Accepted |
 | [0028](0028-provider-seam-and-cadence.md) | The aggregator seam, per-connection provider selection, cadence bounds, error taxonomy | Accepted |
 | [0029](0029-job-claim-heartbeat-fence.md) | Job claim: heartbeat, fence, per-household enumeration (claim half of 0004) | Accepted |
+| [0030](0030-ofx-import-scope.md) | OFX/QFX import: 2.x only, FITID-first dedupe, banking rows only | Accepted |
+| [0031](0031-auto-split-rules.md) | Auto-split rules: balanced by construction, a human's split is final | Accepted |
