@@ -28,14 +28,21 @@ the account has no cash-ledger rows.
 Owner filters mean two *different* things here, and that is deliberate (ADR-0026):
 net worth is **account-scoped** ("the accounts Alex owns") so its decomposition
 still reconciles, while cash-flow and spending are **row-scoped** ("entries
-attributed to Alex", judged per split child) so one person's report never totals
-another's share of a shared charge. The two views are therefore not additive;
-``attribution`` on the net-worth response says which question it answered.
+attributed to Alex") so one person's report never totals another's share of a
+shared charge. The two views are therefore not additive; ``attribution`` on the
+net-worth response says which question it answered.
+
+Row-scoping is applied in ``_load_entries`` and nowhere else, so it is *total*:
+every entry in a row-scoped report is judged on its own effective owner, with no
+term carved out. The one entry with no owner of its own is an investment event,
+which falls to its account's — the answer ``effective_owner_id`` already gives
+when there is nothing more specific, and the only one available.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import NamedTuple
@@ -310,16 +317,41 @@ async def _investment_base_amount(
     return conv
 
 
-async def _investment_cash_flow(
+class Flow(NamedTuple):
+    """One reporting entry, in base currency, after every exclusion.
+
+    The unit both cash-flow reports are built from — the totals here, the
+    category rows in ``cash_flow_sankey`` — so that a second report cannot
+    disagree with the first about what counts.
+
+    ``amount`` is signed: positive is money in. ``owner_id`` is the **effective**
+    owner (``ownership.effective_owner_id``) and is carried rather than looked up
+    at the point of use, because a split child is owned by whoever the split says
+    and not by whoever owns the account.
+
+    ``category_id`` may be ``None``, and that is an answer rather than a gap:
+    nothing has classified this entry. ``source`` says *why* when it is ``None`` —
+    an investment event has no category column at all, so it is unclassified for a
+    reason the reader cannot fix by filing it, and the two must not be labelled
+    the same way.
+    """
+
+    category_id: uuid.UUID | None
+    account_id: uuid.UUID
+    owner_id: uuid.UUID
+    amount: Decimal
+    source: str
+
+
+async def _investment_flows(
     session: AsyncSession,
     start: date,
     end: date,
     base_ccy: str,
     *,
     account_ids: set[uuid.UUID] | None = None,
-) -> tuple[Decimal, Decimal, dict[uuid.UUID, Decimal], list[str]]:
-    """``(income, expense, by_account, warnings)`` from investment events
-    (ADR-0033 §2).
+) -> tuple[list[Flow], list[str]]:
+    """The investment events that are cash flow, as ``Flow``s (ADR-0033 §2).
 
     A ``buy`` or ``sell`` never appears: for an investment account it is not an
     excluded cash flow, it is not a cash flow at all — the account has no
@@ -330,9 +362,10 @@ async def _investment_cash_flow(
     rule exactly: excluded for the whole household, where its other leg cancels
     it, and counted when a subset of accounts is being measured, where it really
     does move that subset.
+
+    No ``is_hidden`` filter: an investment transaction has no such column, and
+    hiding one is what deleting it is for.
     """
-    # No `is_hidden` filter: an investment transaction has no such column, and
-    # hiding one is what deleting it is for.
     stmt = select(InvestmentTransaction).where(
         InvestmentTransaction.trade_date >= start,
         InvestmentTransaction.trade_date <= end,
@@ -340,10 +373,9 @@ async def _investment_cash_flow(
     if account_ids is not None:
         stmt = stmt.where(InvestmentTransaction.account_id.in_(account_ids))
     rows = list((await session.execute(stmt)).scalars().all())
+    owners = await account_owner_map(session)
 
-    income = Decimal("0")
-    expense = Decimal("0")
-    by_account: dict[uuid.UUID, Decimal] = {}
+    flows: list[Flow] = []
     warnings: list[str] = []
     for t in rows:
         if t.type in INVESTMENT_TRADE_TYPES:
@@ -360,12 +392,110 @@ async def _investment_cash_flow(
                 f"event is missing from cash flow"
             )
             continue
-        if base_amount > 0:
-            income += base_amount
-        else:
-            expense += base_amount
-        by_account[t.account_id] = by_account.get(t.account_id, Decimal("0")) + base_amount
-    return quantize_storage(income), quantize_storage(expense), by_account, warnings
+        flows.append(
+            Flow(
+                category_id=None,
+                account_id=t.account_id,
+                owner_id=owners[t.account_id],
+                amount=base_amount,
+                source="investment",
+            )
+        )
+    return flows, warnings
+
+
+async def _load_entries(
+    session: AsyncSession,
+    start: date,
+    end: date,
+    base_ccy: str,
+    *,
+    owner_id: uuid.UUID | None = None,
+    account_ids: set[uuid.UUID] | None = None,
+) -> tuple[list[Flow], list[str]]:
+    """Every cash-flow entry in ``[start, end]``, after every exclusion.
+
+    The one place the exclusions live — transfers, hidden rows, hidden accounts,
+    transfer-typed categories, the owner scope — so that a report built on these
+    entries cannot have a different idea of what counts than the totals beside it.
+
+    ``owner_id`` selects *rows* and is applied here, once, to everything: each
+    entry is judged on its own effective owner, so one person's report never
+    totals another's share of a shared charge. That includes investment events,
+    which have no per-row owner and therefore fall to their account's — the last
+    fallback of ``effective_owner_id`` and the only answer available.
+
+    That last sentence is a correction. Investment income used to skip this
+    filter, on the reasoning that it feeds a decomposition that is account-scoped.
+    The reasoning was right and the conclusion was wrong: it is true of the
+    *net-worth* call site, which passes ``account_ids`` and never ``owner_id``,
+    and false of ``/reports/cash-flow``, which declares ``attribution: "row"`` —
+    where the carve-out meant one owner's report quietly totalled the whole
+    household's dividends.
+
+    ``account_ids`` selects *accounts*, and is how the net-worth decomposition is
+    narrowed. That mode counts transfer legs instead of excluding them: a transfer
+    crossing the boundary of an account subset does move that subset's balance, and
+    dropping it would break ``ΔNW = cash flow + revaluation + appreciation`` for
+    that subset. For the whole household the legs cancel, which is why excluding
+    them there is exact.
+    """
+    ctype = await _category_type_map(session)
+    owners = await account_owner_map(session)
+
+    flows: list[Flow] = []
+    for t in await _reporting_transactions(session, start, end, account_ids):
+        if account_ids is None and t.transfer_group_id is not None:
+            continue
+        for cat_id, bamt, entry_owner in _entries(t, owners):
+            if bamt is None:
+                continue
+            if cat_id and ctype.get(cat_id) == "transfer":
+                continue
+            flows.append(
+                Flow(
+                    category_id=cat_id,
+                    account_id=t.account_id,
+                    owner_id=entry_owner,
+                    amount=bamt,
+                    source="transaction",
+                )
+            )
+
+    investment_flows, warnings = await _investment_flows(
+        session, start, end, base_ccy, account_ids=account_ids
+    )
+    flows.extend(investment_flows)
+
+    if owner_id is not None:
+        flows = [f for f in flows if f.owner_id == owner_id]
+    return flows, warnings
+
+
+def _fold(
+    flows: Iterable[Flow],
+) -> tuple[Decimal, Decimal, dict[uuid.UUID, Decimal]]:
+    """``(income, expense, by_account)`` — the one place the sign rule lives.
+
+    Income is the sum of the positive entries and expense the sum of the negative
+    ones, so ``expense`` is *negative* and ``income + expense`` is the window's
+    net. Two reports read these three numbers and they have to mean the same thing
+    in both, which is the whole reason this is a function rather than a loop
+    written twice.
+
+    ``by_account`` is the same money split by the account it moved through, and is
+    what lets the reconciliation name an account rather than print one number.
+    """
+    income = Decimal("0")
+    expense = Decimal("0")
+    by_account: dict[uuid.UUID, Decimal] = {}
+    for f in flows:
+        if f.amount > 0:
+            income += f.amount
+        elif f.amount < 0:
+            expense += f.amount
+        by_account[f.account_id] = by_account.get(f.account_id, Decimal("0")) + f.amount
+    return income, expense, by_account
 
 
 async def _cash_flow(
@@ -379,61 +509,18 @@ async def _cash_flow(
 ) -> tuple[Decimal, Decimal, Decimal, dict[uuid.UUID, Decimal], list[str]]:
     """``(income, expense, net, by_account, warnings)`` in base over [start, end].
 
-    ``by_account`` is the same money split by the account it moved through, and is
-    what lets the reconciliation name an account rather than print one number.
-
-    ``owner_id`` selects *rows*: each entry is judged on its own attribution, so one
-    person's report never totals another's share of a shared charge.
-
-    ``account_ids`` selects *accounts*, and is how the net-worth decomposition is
-    narrowed. That mode counts transfer legs instead of excluding them: a transfer
-    crossing the boundary of an account subset does move that subset's balance, and
-    dropping it would break ``ΔNW = cash flow + revaluation + appreciation`` for
-    that subset. For the whole household the legs cancel, which is why excluding
-    them there is exact.
-
-    **``owner_id`` does not filter investment income, and that is deliberate.**
-    Attribution of a dividend would have to be the account's owner (there is no
-    per-row owner on an investment event), and this term feeds a decomposition that
-    is account-scoped — so row-scoping half of it would make the identity assert
-    something false. The net-worth response already says ``attribution: account``.
+    A thin shell over ``_load_entries`` + ``_fold``: the exclusions and the sign
+    rule each have exactly one definition, and this is where they are quantized to
+    storage precision for the wire.
     """
-    ctype = await _category_type_map(session)
-    owners = await account_owner_map(session)
-    income = Decimal("0")
-    expense = Decimal("0")
-    by_account: dict[uuid.UUID, Decimal] = {}
-
-    txns = await _reporting_transactions(session, start, end, account_ids)
-    for t in txns:
-        if account_ids is None and t.transfer_group_id is not None:
-            continue
-        for cat_id, bamt, entry_owner in _entries(t, owners):
-            if bamt is None:
-                continue
-            if owner_id is not None and entry_owner != owner_id:
-                continue
-            kind = ctype.get(cat_id) if cat_id else None
-            if kind == "transfer":
-                continue
-            if bamt > 0:
-                income += bamt
-            else:
-                expense += bamt  # negative
-            by_account[t.account_id] = by_account.get(t.account_id, Decimal("0")) + bamt
-
-    inv_income, inv_expense, inv_by_account, warnings = await _investment_cash_flow(
-        session, start, end, base_ccy, account_ids=account_ids
+    flows, warnings = await _load_entries(
+        session, start, end, base_ccy, owner_id=owner_id, account_ids=account_ids
     )
-    income += inv_income
-    expense += inv_expense
-    for account_id, amount in inv_by_account.items():
-        by_account[account_id] = by_account.get(account_id, Decimal("0")) + amount
-    net = income + expense
+    income, expense, by_account = _fold(flows)
     return (
         quantize_storage(income),
         quantize_storage(expense),
-        quantize_storage(net),
+        quantize_storage(income + expense),
         by_account,
         warnings,
     )

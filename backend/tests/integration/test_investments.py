@@ -28,6 +28,7 @@ from app.models import (
     SecurityPrice,
 )
 from app.services import investments as inv
+from app.services import reports
 
 pytestmark = pytest.mark.integration
 
@@ -499,3 +500,62 @@ async def test_a_buy_moves_value_between_holdings_and_not_the_account(
 
         after = (await inv.value_account(s, acc, ON, BASE)).market_value_base
         assert after == before, "a buy must not move the account's value"
+
+
+async def test_an_owner_filtered_cash_flow_does_not_total_the_households_dividends(
+    household_factory,
+):
+    """Row-scoping is *total*, and an investment event's row is its account's.
+
+    A dividend has no per-row owner — there is no column for one — so it used to
+    skip the ``owner_id`` filter entirely, on the reasoning that this term feeds
+    the account-scoped net-worth decomposition and row-scoping half of it would
+    make the identity assert something false. The reasoning was right and the
+    conclusion was wrong: it holds for the net-worth call site, which passes
+    ``account_ids``, and not for ``/reports/cash-flow``, which declares
+    ``attribution: "row"`` — where the carve-out made one owner's report include
+    every other owner's dividends.
+
+    Both halves are asserted, because "stop counting dividends" would pass the
+    first assertion on its own.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        alex = Owner(household_id=hh, name="Alex", kind="person", sort=1)
+        sam = Owner(household_id=hh, name="Sam", kind="person", sort=2)
+        s.add_all([alex, sam])
+        await s.flush()
+
+        alex_acct = await _account(s, hh, name="Alex Brokerage")
+        sam_acct = await _account(s, hh, name="Sam Brokerage")
+        alex_acct.owner_id = alex.id
+        sam_acct.owner_id = sam.id
+        s.add_all(
+            [
+                InvestmentTransaction(
+                    household_id=hh, account_id=alex_acct.id, type="dividend",
+                    trade_date=date(2026, 2, 5), amount=Decimal("7"), currency="USD",
+                ),
+                InvestmentTransaction(
+                    household_id=hh, account_id=sam_acct.id, type="dividend",
+                    trade_date=date(2026, 2, 6), amount=Decimal("90"), currency="USD",
+                ),
+            ]
+        )
+        await s.flush()
+
+        window = (date(2026, 1, 1), date(2026, 2, 28))
+
+        # Unfiltered, the household's income is both dividends.
+        _b, _g, all_points = await reports.cash_flow_series(s, hh, *window, None, "month")
+        assert [p["income"] for p in all_points] == [Decimal("0.0000"), Decimal("97.0000")]
+
+        # Filtered to Alex, it is Alex's only.
+        _b, _g, alex_points = await reports.cash_flow_series(s, hh, *window, alex.id, "month")
+        assert [p["income"] for p in alex_points] == [Decimal("0.0000"), Decimal("7.0000")]
+
+        # And the net-worth decomposition is untouched: it scopes by *account*, so
+        # it already saw one side. This is the invariant the old carve-out was
+        # protecting, and it never needed the carve-out to hold.
+        series = await reports.net_worth_series(s, hh, *window, alex.id, "month")
+        assert series["net_cash_flow"] == Decimal("7.0000")
