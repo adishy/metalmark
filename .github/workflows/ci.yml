@@ -105,6 +105,13 @@ jobs:
       - name: Start API + DB
         run: docker compose up -d --build db api
 
+      # Nothing migrates a fresh volume on its own: the api container runs uvicorn
+      # and nothing else, and there is no entrypoint that migrates (that is
+      # deliberate — migrations are always explicit). /healthz below now reports
+      # 503 until the database is usable, so this has to come first.
+      - name: Migrate database
+        run: docker compose run --rm api alembic upgrade head
+
       - name: Wait for API health
         run: |
           for i in $(seq 1 60); do
@@ -127,11 +134,12 @@ jobs:
       # body to send here, and whether it answers 401 or 422 is a detail of
       # FastAPI's dependency ordering rather than a security property. The
       # multipart routes are covered in-process instead, where a body is easy to
-      # supply (tests/integration/test_imports.py).
+      # supply (tests/integration/test_imports.py) — /import is not listed because
+      # its routes are all POSTs and a GET there is a 404, not a 401.
       - name: Protected endpoints require auth (401)
         run: |
           fail=0
-          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules; do
+          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules /fx-rates; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}")
             echo "GET ${path} -> ${code}"
             if [ "$code" != "401" ]; then
@@ -146,58 +154,13 @@ jobs:
       # actually serves — it had already drifted silently. Compare them
       # semantically (YAML and JSON parse to the same structure), so key order
       # and formatting are irrelevant and only real contract changes fail.
+      # The check lives in scripts/openapi_drift_check.py rather than inline here,
+      # so `scripts/verify.sh contract` runs the identical thing locally.
       - name: OpenAPI drift check (contracts/openapi.yaml vs live /openapi.json)
         run: |
           docker compose cp contracts/openapi.yaml api:/tmp/checked-openapi.yaml
-          docker compose exec -T api python - <<'PY'
-          import json, pathlib, sys, urllib.request
-          import yaml
-
-          LIVE = "http://localhost:8000/openapi.json"
-          CHECKED = pathlib.Path("/tmp/checked-openapi.yaml")
-
-          def normalize(obj):
-              # Round-trip both sides through JSON so tuples/Decimals and any
-              # int-vs-float quirk compare identically.
-              return json.loads(json.dumps(obj, default=str))
-
-          live = normalize(json.loads(urllib.request.urlopen(LIVE).read()))
-          checked = normalize(yaml.safe_load(CHECKED.read_text()))
-
-          if live == checked:
-              print("contracts/openapi.yaml matches the live /openapi.json")
-              raise SystemExit(0)
-
-          print("DRIFT: contracts/openapi.yaml does not match the live /openapi.json", file=sys.stderr)
-          print("Re-export the served spec to YAML and commit it.\n", file=sys.stderr)
-
-          diffs = []
-
-          def walk(a, b, path=""):
-              if isinstance(a, dict) and isinstance(b, dict):
-                  for key in sorted(set(a) | set(b)):
-                      if key not in b:
-                          diffs.append(f"{path}.{key}: missing from the checked-in file")
-                      elif key not in a:
-                          diffs.append(f"{path}.{key}: extra in the checked-in file")
-                      else:
-                          walk(a[key], b[key], f"{path}.{key}")
-              elif isinstance(a, list) and isinstance(b, list):
-                  if len(a) != len(b):
-                      diffs.append(f"{path}: {len(a)} live vs {len(b)} checked in")
-                  else:
-                      for i, (x, y) in enumerate(zip(a, b)):
-                          walk(x, y, f"{path}[{i}]")
-              elif a != b:
-                  diffs.append(f"{path}: live={a!r} checked={b!r}")
-
-          walk(live, checked)
-          for line in diffs[:25]:
-              print(" -", line, file=sys.stderr)
-          if len(diffs) > 25:
-              print(f" ... and {len(diffs) - 25} more", file=sys.stderr)
-          raise SystemExit(1)
-          PY
+          docker compose cp scripts/openapi_drift_check.py api:/tmp/openapi_drift_check.py
+          docker compose exec -T api python /tmp/openapi_drift_check.py /tmp/checked-openapi.yaml
 
       - name: Tear down
         if: always()
@@ -220,6 +183,22 @@ jobs:
 
       - name: Start full stack
         run: docker compose up -d --build
+
+      # The api container runs uvicorn and nothing else — there is no entrypoint
+      # script — so nothing migrates a fresh volume. Without this step the tables
+      # do not exist *and* the metalmark_app role does not either (migration 0001
+      # creates it), so the seed dies on `password authentication failed for user
+      # "metalmark_app"` — an error that points nowhere near the real cause. It
+      # must also precede the health wait below, which now fails closed.
+      - name: Migrate database
+        run: docker compose run --rm api alembic upgrade head
+
+      # The top risk in this project is the ORM metadata and the migrated schema
+      # drifting apart, and until now nothing checked. `alembic check` compares a
+      # freshly-migrated database against the live metadata and fails on any
+      # difference, which is exactly the drift a fresh `create_all` would hide.
+      - name: Schema matches the ORM metadata (alembic check)
+        run: docker compose run --rm api alembic check
 
       - name: Wait for API + web
         run: |
@@ -249,6 +228,18 @@ jobs:
           -v "${{ github.workspace }}/frontend":/work -w /work
           mcr.microsoft.com/playwright:v1.63.0-noble
           sh -c "npm ci && npx playwright test"
+
+      # After Playwright, deliberately: the walkthrough leaves uncategorized
+      # transactions behind, and review.spec.ts drains a queue that they would
+      # otherwise inflate. Same stack, same database, real HTTP.
+      - name: Walkthrough (M1a paths Playwright does not reach)
+        run: |
+          docker compose run --rm -T \
+            -e WALKTHROUGH_BASE_URL=http://api:8000 \
+            -e WALKTHROUGH_EMAIL=owner@example.com \
+            -e WALKTHROUGH_PASSWORD=devpassword123 \
+            -v "${{ github.workspace }}/scripts":/scripts:ro \
+            api python /scripts/walkthrough.py
 
       - name: Upload Playwright report + diffs
         if: always()

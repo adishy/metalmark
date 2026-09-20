@@ -9,7 +9,7 @@ paths:
       tags:
       - health
       summary: Healthz
-      description: Liveness + DB reachability.
+      description: 'Readiness: 503 while the database is unreachable, 200 once it answers.'
       operationId: healthz_healthz_get
       responses:
         '200':
@@ -20,6 +20,10 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Healthz Healthz Get
+        '503':
+          description: The database is unreachable or the app role cannot authenticate. The process is
+            up but the stack is not usable — most often because `alembic upgrade head` has not been run
+            against this database.
   /auth/signup:
     post:
       tags:
@@ -657,6 +661,7 @@ paths:
       tags:
       - owners
       summary: Create Owner
+      description: Create an owner. Household owner role required.
       operationId: create_owner_owners_post
       parameters:
       - name: metalmark_session
@@ -691,6 +696,7 @@ paths:
       tags:
       - owners
       summary: Update Owner
+      description: Rename or reorder an owner. Household owner role required.
       operationId: update_owner_owners__owner_id__patch
       parameters:
       - name: owner_id
@@ -2551,9 +2557,7 @@ components:
       - reassigned_transactions
       - reassigned_splits
       title: OwnerDeleteResult
-      description: 'What the delete actually moved — the UI tells the user, rather than
-
-        implying that deleting an owner was free.'
+      description: How many rows the delete moved onto ``reassign_to``.
     OwnerOut:
       properties:
         id:
@@ -2592,6 +2596,7 @@ components:
           title: Sort
       type: object
       title: OwnerUpdate
+      description: Send only the fields you want to change; an explicit null is rejected.
     RuleActions:
       properties:
         set_category_id:
