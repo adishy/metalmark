@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatDate, formatDuration, relativeTime } from "@/lib/format";
+import { formatMoney, formatDuration } from "@/lib/format";
 
 // Intl uses NBSP / narrow-NBSP between symbol and digits in some runtimes;
 // normalize to a plain space so assertions are locale-runtime-stable.
@@ -55,16 +55,6 @@ describe("formatMoney", () => {
   });
 });
 
-describe("formatDate", () => {
-  it("renders an ISO date as a short human date", () => {
-    const out = formatDate("2026-09-19T12:00:00Z");
-    expect(out).toContain("2026");
-    // Month is rendered as an abbreviation ("Sep"), not the raw number.
-    expect(out).toMatch(/Sep/);
-    expect(out).toContain("19");
-  });
-});
-
 describe("formatDuration", () => {
   it("stays in milliseconds under a second", () => {
     expect(formatDuration(0)).toBe("0 ms");
@@ -98,59 +88,5 @@ describe("formatDuration", () => {
     // A duration is a difference of two server timestamps. Clock skew between
     // the two should not produce "-3 ms" in a table.
     expect(formatDuration(-5)).toBe("0 ms");
-  });
-});
-
-describe("relativeTime", () => {
-  // Fixed `now`, because the function's whole implementation is its boundaries.
-  const now = new Date("2026-09-20T12:00:00Z");
-  const ago = (seconds: number) =>
-    relativeTime(new Date(now.getTime() - seconds * 1000).toISOString(), now);
-  const ahead = (seconds: number) =>
-    relativeTime(new Date(now.getTime() + seconds * 1000).toISOString(), now);
-
-  it("calls anything under a minute 'just now'", () => {
-    expect(ago(0)).toBe("just now");
-    expect(ago(44)).toBe("just now");
-  });
-
-  it("rounds the first minute up rather than saying '0 min ago'", () => {
-    expect(ago(45)).toBe("1 min ago");
-    expect(ago(89)).toBe("1 min ago");
-    expect(ago(90)).toBe("1 min ago");
-  });
-
-  it("floors, so the label never overstates elapsed time", () => {
-    // 119 s is the case that distinguishes floor from round: rounding would
-    // claim two minutes for something that has not had them.
-    expect(ago(119)).toBe("1 min ago");
-    expect(ago(3599)).toBe("59 min ago");
-    expect(ago(86_399)).toBe("23 h ago");
-  });
-
-  it("advances units at the boundary", () => {
-    expect(ago(3600)).toBe("1 h ago");
-    expect(ago(86_400)).toBe("1 d ago");
-    expect(ago(6 * 86_400)).toBe("6 d ago");
-  });
-
-  it("hands off to a date past a week", () => {
-    // "37 d ago" is a worse answer than the day it happened.
-    const out = ago(8 * 86_400);
-    expect(out).toMatch(/2026/);
-    expect(out).not.toContain("d ago");
-  });
-
-  it("reads forward for a future timestamp", () => {
-    expect(ahead(30)).toBe("any second now");
-    expect(ahead(60)).toBe("in 1 min");
-    expect(ahead(7200)).toBe("in 2 h");
-    expect(ahead(86_400)).toBe("in 1 d");
-  });
-
-  it("treats a few seconds of clock skew as 'now', not as the future", () => {
-    // `next_sync_at` is computed by the server and read by the browser; the two
-    // clocks are not the same clock.
-    expect(ahead(5)).toBe("any second now");
   });
 });

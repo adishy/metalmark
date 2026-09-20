@@ -25,7 +25,10 @@ import {
   emphasisLine,
   emphasisPie,
 } from "@/theme/chartInteraction";
-import { formatDuration, formatMoney, relativeTime } from "@/lib/format";
+import { formatDuration, formatMoney } from "@/lib/format";
+import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
+import AccountMark from "@/components/AccountMark";
+import { Day, Instant, Time } from "@/components/datetime";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import type { Connection, Owner } from "@/api/types";
 
@@ -116,6 +119,52 @@ const DEMO_OWNERS: Owner[] = [
   { id: "o1", name: "Alex", kind: "person", sort: 1 },
   { id: "o2", name: "Beth", kind: "person", sort: 2 },
   { id: "o3", name: "Shared", kind: "shared", sort: 99 },
+];
+
+/** The reference clock the elapsed-time gallery is pinned to. */
+const DEMO_NOW = new Date("2026-09-20T12:00:00Z");
+
+/** The day styles, each with the surface that wants it. Written out rather than
+ *  derived, because "which style does this surface want" is the decision this
+ *  table exists to record. */
+const DAY_STYLES: { style: DayStyle; label: string; value: string; use: string }[] = [
+  {
+    style: "long",
+    label: "long",
+    value: "2026-01-02T12:00:00Z",
+    use: "A standalone date — a page heading, a run's start — where nothing nearby says the year.",
+  },
+  {
+    style: "medium",
+    label: "medium",
+    value: "2026-01-02T12:00:00Z",
+    use: "Card meta and chart axes: the year is already known, and the day is what varies.",
+  },
+  {
+    style: "weekday",
+    label: "weekday",
+    value: "2026-01-02T12:00:00Z",
+    use: "Beside a clock time, so a weekday reads without arithmetic.",
+  },
+  {
+    style: "compact",
+    label: "compact",
+    value: "2026-01-02T12:00:00Z",
+    use: "The transaction row — the densest surface in the app, so it gets the shortest vocabulary.",
+  },
+];
+
+/** A realistic set of accounts, chosen to show the two things the mark has to
+ *  get right: two accounts at one institution (Chase Checking / Chase Savings —
+ *  same hue, different letters) and an institution that is not in the curated
+ *  map at all (Zzyzx), which falls back to the name's own hash. */
+const DEMO_ACCOUNTS: { name: string; institution: string | null }[] = [
+  { name: "Chase Checking", institution: "Chase" },
+  { name: "Chase Savings", institution: "Chase" },
+  { name: "Amex", institution: "American Express" },
+  { name: "Capital One Venture", institution: "Capital One" },
+  { name: "Fidelity 401k", institution: "Fidelity" },
+  { name: "Rainy Day Fund", institution: "Zzyzx Credit Union" },
 ];
 
 /** One row per state the badge can be in — including the last one, which is the
@@ -428,6 +477,9 @@ export default function DesignSystem() {
         title="Elapsed time"
         note="Coarse on purpose, and floored rather than rounded so the label never overstates how long something has taken."
       >
+        {/* A fixed reference clock, so the gallery shows the same six phrases
+            tomorrow as today. The app itself reads the viewer's own clock —
+            `relativeTime`'s `now` argument exists for tests and for this. */}
         <ul className="divide-y divide-border">
           {[
             { label: "A few seconds", iso: "2026-09-20T11:59:32Z" },
@@ -440,7 +492,7 @@ export default function DesignSystem() {
             <li key={r.label} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1 text-sm text-fg-muted">{r.label}</span>
               <span className="shrink-0 text-sm text-fg tabular-nums">
-                {relativeTime(r.iso, new Date("2026-09-20T12:00:00Z"))}
+                {relativeTime(r.iso, DEMO_NOW)}
               </span>
             </li>
           ))}
@@ -455,6 +507,103 @@ export default function DesignSystem() {
         <p className="text-xs text-fg-muted">
           Past a week the phrase hands off to a date: “37 d ago” is a worse answer than the day it
           happened.
+        </p>
+      </Section>
+
+      <Section
+        title="Dates"
+        note="One vocabulary, five styles, fixed rather than locale-aware — so the same ledger reads the same on two machines. The ISO form is never the visible text: it is the title (hover, and on focus) and the <time datetime> value, which is why every date below carries one."
+      >
+        <ul className="divide-y divide-border">
+          {DAY_STYLES.map((r) => (
+            <li key={r.label} className="flex items-center gap-3 py-2">
+              <span className="w-20 shrink-0 font-mono text-xs text-fg-muted">{r.label}</span>
+              <span className="shrink-0 text-sm text-fg tabular-nums">
+                <Day value={r.value} style={r.style} />
+              </span>
+              <span className="min-w-0 flex-1 text-xs text-fg-muted">{r.use}</span>
+            </li>
+          ))}
+          {/* The two relative words, which are by definition relative to when
+              this page is read — the only rows here that move. */}
+          <li className="flex items-center gap-3 py-2">
+            <span className="w-20 shrink-0 font-mono text-xs text-fg-muted">compact</span>
+            <span className="shrink-0 text-sm text-fg tabular-nums">
+              <Day value={`${todayIso()}T12:00:00Z`} style="compact" />
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-fg-muted">
+              Today — and Yesterday for the day before it. There is no “Tomorrow”: nothing in a
+              ledger is legitimately dated ahead.
+            </span>
+          </li>
+          <li className="flex items-center gap-3 py-2">
+            <span className="w-20 shrink-0 font-mono text-xs text-fg-muted">instant</span>
+            <span className="shrink-0 text-sm text-fg tabular-nums">
+              <Instant value="2026-01-02T14:03:07Z" style="relative" />
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-fg-muted">
+              An instant, not a day: converted to the viewer's local clock, because someone asking
+              when a sync ran means their own.
+            </span>
+          </li>
+          <li className="flex items-center gap-3 py-2">
+            <span className="w-20 shrink-0 font-mono text-xs text-fg-muted">time</span>
+            <span className="shrink-0 text-sm text-fg tabular-nums">
+              <Time value="2026-01-02T14:03:07Z" />
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-fg-muted">
+              Fixed 24-hour and fixed width, for the one column that needs a clock time without a
+              date: a run's event log, where two events can share a second.
+            </span>
+          </li>
+          <li className="flex items-center gap-3 py-2">
+            <span className="w-20 shrink-0 font-mono text-xs text-fg-muted">month</span>
+            <span className="shrink-0 text-sm text-fg tabular-nums">
+              {formatMonth("2026-01")} · {formatMonth("2026-01", "long")}
+            </span>
+            <span className="min-w-0 flex-1 text-xs text-fg-muted">
+              The one thing the five styles do not cover — a month axis is not a day. Twelve short
+              labels are what fit a phone (§5).
+            </span>
+          </li>
+        </ul>
+        <p className="text-xs text-fg-muted">
+          A <strong>calendar day</strong> is read from the value's own date part and never
+          converted: a transaction dated {formatDay("2026-01-02", "medium")} is the 2nd in the
+          ledger wherever the reader is standing. An <strong>instant</strong> is converted to local
+          time. Getting those two the wrong way round is the entire failure mode, so the frame is
+          in the component's name — <code>&lt;Day&gt;</code> or <code>&lt;Instant&gt;</code> — and
+          not a prop.
+        </p>
+      </Section>
+
+      <Section
+        title="Account marks"
+        note="Computed, never fetched. Which banks a household uses is not something to hand to a favicon service, and asking each institution for its logo is a request that leaks the same thing (ADR-0002, decision G). So the mark is initials from the account's own name plus a hue from the chart tokens: no network, and the same account always produces the same mark, in every session."
+      >
+        <ul className="divide-y divide-border">
+          {DEMO_ACCOUNTS.map((a) => (
+            <li key={a.name} className="flex items-center gap-3 py-2">
+              <AccountMark name={a.name} institution={a.institution} size="md" />
+              <span className="min-w-0 flex-1 truncate text-sm text-fg">{a.name}</span>
+              <span className="shrink-0 text-xs text-fg-muted">{a.institution ?? "—"}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-center gap-3">
+          <AccountMark name="Chase Checking" />
+          <AccountMark name="Chase Savings" />
+          <AccountMark name="Zzyzx Credit Union" />
+          <span className="text-xs text-fg-muted">
+            20px in a list row, 24px on a card or a sheet
+          </span>
+        </div>
+        <p className="text-xs text-fg-muted">
+          The <strong>colour identifies the institution</strong> for the handful of names people
+          actually have (Chase is blue, Capital One is red), and falls back to a hash of the name
+          for everything else; the <strong>initials identify the account</strong>, which is what
+          separates two accounts at one bank. It is never colour alone (§7.8) — the letters carry
+          the mark, and the account name is the accessible name.
         </p>
       </Section>
 

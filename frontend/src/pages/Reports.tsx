@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { useCashFlow, useNetWorthSeries, useOwners, useSpending } from "@/api/hooks";
-import { isoDay } from "@/lib/dates";
+import { formatDay, formatMonth, isoDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -43,7 +43,12 @@ export default function Reports() {
       tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
-        data: nw.data?.points.map((p) => p.date) ?? [],
+        // `medium` ("Jan 31"), not the raw `2026-01-31` the API sends: the axis
+        // label and the pointer chip both render this string, and decision H
+        // says the ISO form is never the text a person reads. The day is what
+        // varies along this axis and the series is one year, so the year is the
+        // part worth dropping — ECharts hides whatever still overlaps.
+        data: nw.data?.points.map((p) => formatDay(p.date, "medium")) ?? [],
         ...chartAxis(t),
       },
       yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
@@ -69,7 +74,10 @@ export default function Reports() {
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",
-        data: cashFlow.data?.points.map((p) => p.month) ?? [],
+        // `2026-01` → "Jan". Short because twelve labels have to fit a phone
+        // (§5), and the chart is scoped to one year, so the year is the part the
+        // reader already knows.
+        data: cashFlow.data?.points.map((p) => formatMonth(p.month)) ?? [],
         ...chartAxis(t),
       },
       yAxis: { type: "value", ...chartAxis(t, { grid: true }) },

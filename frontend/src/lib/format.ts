@@ -1,5 +1,6 @@
-// Money arrives as decimal strings; format for display without float coercion
-// where it matters (display rounding only).
+// Money and durations. Dates and times are not here — they live in `dates.ts`,
+// which owns the vocabulary (decision H) and the calendar-day/instant frame
+// distinction. Two modules rendering dates is how a vocabulary drifts.
 
 /** Currencies with no minor unit. Anything absent is assumed to have 2. */
 const MINOR_UNITS: Record<string, number> = { JPY: 0, KRW: 0, VND: 0 };
@@ -38,14 +39,6 @@ export function formatMoney(amount: string | number, currency = "USD"): string {
   }
 }
 
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 /**
  * A duration in milliseconds, for a table cell: "820 ms", "1.4 s", "2 min 05 s".
  *
@@ -68,64 +61,4 @@ export function formatDuration(ms: number): string {
   if (minutes < 60) return `${minutes} min ${String(rest).padStart(2, "0")} s`;
   const hours = Math.floor(minutes / 60);
   return `${hours} h ${String(minutes % 60).padStart(2, "0")} min`;
-}
-
-/*
- * Thresholds are in seconds and are chosen so no phrase is ever *wrong*, only
- * coarse. "3 min ago" for something 150 s old is coarse; "1 min ago" for
- * something 90 s old is a lie in the direction a person notices, so each bucket
- * ends past its own boundary (45 → 90 → 60 min) rather than at it.
- *
- * `now` is a parameter so the output is a function of its inputs. A helper that
- * reads the clock is untestable at its boundaries, and these boundaries are the
- * whole implementation.
- */
-const MINUTE = 60;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-/** Past `relativeTime`: "just now", "3 min ago", "2 h ago", "5 d ago", then a
- *  date — "37 d ago" is a worse answer than "Jul 3, 2026" once it is that old.
- *
- *  `floor` at every step, and each unit is left at the moment the next one
- *  begins: rounding would produce "90 min ago" followed by "2 h ago" as time
- *  advanced, and a label that jumps forward by half an hour is worse than one
- *  that is merely coarse. Flooring also means the phrase never overstates how
- *  much time has passed. */
-function ago(seconds: number, iso: string): string {
-  if (seconds < 45) return "just now";
-  if (seconds < 90) return "1 min ago";
-  if (seconds < HOUR) return `${Math.floor(seconds / MINUTE)} min ago`;
-  if (seconds < DAY) return `${Math.floor(seconds / HOUR)} h ago`;
-  if (seconds < 7 * DAY) return `${Math.floor(seconds / DAY)} d ago`;
-  return formatDate(iso);
-}
-
-/** Future `relativeTime`: "in 1 min", "in 2 h", "in 3 d". */
-function until(seconds: number, iso: string): string {
-  if (seconds < 45) return "any second now";
-  if (seconds < 90) return "in 1 min";
-  if (seconds < HOUR) return `in ${Math.floor(seconds / MINUTE)} min`;
-  if (seconds < DAY) return `in ${Math.floor(seconds / HOUR)} h`;
-  if (seconds < 7 * DAY) return `in ${Math.floor(seconds / DAY)} d`;
-  return formatDate(iso);
-}
-
-/**
- * A coarse interval phrase for a timestamp, in either direction — "3 min ago"
- * for a last run, "in 2 h" for a next one.
- *
- * Coarse deliberately: this labels a sync that the *server* schedules in hours,
- * and a dashboard that says "2 hours and 14 minutes ago" is claiming a precision
- * about the bank's freshness that nothing in the system actually has.
- *
- * Buckets at the day boundary hand off to {@link formatDate}, so the phrase
- * never degrades into "37 d ago".
- */
-export function relativeTime(iso: string, now: Date = new Date()): string {
-  const then = new Date(iso).getTime();
-  const delta = (now.getTime() - then) / 1000;
-  // A clock skew of a few seconds is not "in the future"; the server and the
-  // browser are different machines and `next_sync_at` is computed server-side.
-  return delta >= 0 ? ago(delta, iso) : until(-delta, iso);
 }

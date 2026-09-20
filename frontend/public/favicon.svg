@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="MetalMark">
+  <defs>
+    <!-- The sheen: bright at the leading edge, deep at the trailing one. Per
+         wing, so each gets its own ramp and the wings read as separate planes
+         of metal rather than one sheet. -->
+    <linearGradient id="sheen" x1="0.1" y1="0" x2="0.45" y2="1">
+      <stop offset="0" stop-color="#f0fdfa"/>
+      <stop offset="0.45" stop-color="#99f6e4"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0.2" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#99f6e4"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none"
+        stroke="#14b8a6" stroke-opacity="0.45" stroke-width="2"/>
+  <g transform="translate(0 0) scale(1)">
+      <path d="M31 25C22 16 13 15 9 19C11 25 20 32 31 34Z" fill="url(#sheen)"/>
+      <path d="M33 25C42 16 51 15 55 19C53 25 44 32 33 34Z" fill="url(#sheen)"/>
+      <path d="M31 33C22 34 16 36 15 40C15 46 22 50 31.5 49Z" fill="url(#metal)"/>
+      <path d="M33 33C42 34 48 36 49 40C49 46 42 50 32.5 49Z" fill="url(#metal)"/>
+      <path d="M36.5 26.5C42 24 48 22 52.5 21Z" fill="none" stroke="#0f172a" stroke-opacity="0.34" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M27.5 26.5C22 24 16 22 11.5 21Z" fill="none" stroke="#0f172a" stroke-opacity="0.34" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M36 39.5C40 39 44 38.5 47.5 38Z" fill="none" stroke="#0f172a" stroke-opacity="0.34" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M28 39.5C24 39 20 38.5 16.5 38Z" fill="none" stroke="#0f172a" stroke-opacity="0.34" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M32 23.5C33.6 24.5 34.3 27 34.3 30C34.3 39 34.3 42 34.3 44.5C34.3 48 33.2 50.5 32 51C30.8 50.5 29.7 48 29.7 44.5C29.7 42 29.7 39 29.7 30C29.7 27 30.4 24.5 32 23.5Z" fill="#0f172a"/>
+      <circle cx="32" cy="21.6" r="2.6" fill="#0f172a"/>
+      <circle cx="32" cy="21.6" r="2.6" fill="#5eead4" fill-opacity="0.35"/>
+      <path d="M30.8 19.8L25.6 13.2" fill="none" stroke="#5eead4" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="25.6" cy="13.2" r="1.7" fill="#5eead4"/>
+      <path d="M33.2 19.8L38.4 13.2" fill="none" stroke="#5eead4" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="38.4" cy="13.2" r="1.7" fill="#5eead4"/>
+  </g>
+</svg>

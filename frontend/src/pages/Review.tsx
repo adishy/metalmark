@@ -3,14 +3,17 @@
 // follow-up; this covers the core "swipe to sort" interaction from the spec.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
-import { useCategories, useTransactions, useUpdateTransaction } from "@/api/hooks";
-import type { Transaction } from "@/api/types";
-import { formatDate, formatMoney } from "@/lib/format";
+import { useAccounts, useCategories, useTransactions, useUpdateTransaction } from "@/api/hooks";
+import type { Account, Transaction } from "@/api/types";
+import { formatMoney } from "@/lib/format";
+import AccountMark from "@/components/AccountMark";
+import { Day } from "@/components/datetime";
 import { Button } from "@/components/form";
 
 export default function Review() {
   const queue = useTransactions({ review_status: "needs_review" });
   const categories = useCategories();
+  const accounts = useAccounts();
   const update = useUpdateTransaction();
   // Track the cards we have decided by id, never by position: the query
   // refetches after each decision and the decided txn drops out of the list, so
@@ -28,6 +31,15 @@ export default function Review() {
     categories.data?.forEach((c) => m.set(c.id, c.name));
     return m;
   }, [categories.data]);
+
+  // The account, because the card has to answer "which account is this credit or
+  // debit from?" — the mark carries the hue (from the institution) and the
+  // initials (from the name), so the card needs both, not just the name.
+  const accountFor = useMemo(() => {
+    const m = new Map<string, Account>();
+    accounts.data?.forEach((a) => m.set(a.id, a));
+    return m;
+  }, [accounts.data]);
 
   const decide = useCallback(
     (txn: Transaction, keep: boolean) => {
@@ -119,6 +131,7 @@ export default function Review() {
             <SwipeCard
               key={current.id}
               txn={current}
+              account={accountFor.get(current.account_id)}
               categoryName={current.category_id ? catName.get(current.category_id) : undefined}
               onDecide={(keep) => decide(current, keep)}
             />
@@ -150,10 +163,12 @@ export default function Review() {
 
 function SwipeCard({
   txn,
+  account,
   categoryName,
   onDecide,
 }: {
   txn: Transaction;
+  account?: Account;
   categoryName?: string;
   onDecide: (keep: boolean) => void;
 }) {
@@ -198,8 +213,20 @@ function SwipeCard({
 
       <div>
         <p className="text-xl font-semibold">{txn.merchant || txn.description || "(no description)"}</p>
+        {/* Which account it came out of, above the date: on a decision card that
+            is often the thing that decides it, and it is the one question the
+            name alone cannot answer ("Chase Checking" or "Chase Savings"?). */}
+        {account && (
+          <p className="mt-1 flex min-w-0 items-center gap-2">
+            <AccountMark name={account.name} institution={account.institution} size="md" />
+            <span className="truncate text-sm text-fg-muted">{account.name}</span>
+          </p>
+        )}
         <p className="text-sm text-fg-muted">
-          {formatDate(txn.transacted_at)}
+          {/* `medium` rather than the row's `compact`: the card is not competing
+              for width, and on a card that is about to be filed under a month,
+              "Sep 20" says more than "Yesterday". */}
+          <Day value={txn.transacted_at} />
           {categoryName && ` · ${categoryName}`}
         </p>
       </div>

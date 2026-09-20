@@ -9,6 +9,18 @@
          unreachable before: the class outranked every `:root` value, so the
          light palette was defined and never once painted. -->
     <meta name="theme-color" content="#f8fafc" />
+    <!-- The metalmark (Riodinidae). Order matters: Safari picks the first icon
+         it understands, Chrome prefers the SVG when one is offered, and an
+         `.ico` remains the one thing every browser will ask for by name at
+         /favicon.ico whether or not it is linked. All of these are generated
+         by `npm run icons` — see scripts/metalmark-mark.mjs.
+
+         No `<link rel="manifest">` here on purpose: vite-plugin-pwa injects it
+         from the manifest in vite.config.ts, and a hand-written one would be a
+         second source of truth for the same file. -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>MetalMark</title>
     <script>
       /*

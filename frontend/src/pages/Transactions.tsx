@@ -9,8 +9,10 @@ import {
   type TxnFilter,
 } from "@/api/hooks";
 import type { Account, Category, Owner, Transaction, TransactionCreate } from "@/api/types";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
+import AccountMark from "@/components/AccountMark";
+import { Day } from "@/components/datetime";
 import {
   Button,
   Field,
@@ -67,11 +69,17 @@ export default function Transactions() {
     return m;
   }, [owners.data]);
 
-  const acctName = useMemo(() => {
-    const m = new Map<string, string>();
-    accounts.data?.forEach((a) => m.set(a.id, a.name));
+  // Whole accounts, not just names: the mark needs the institution too (it picks
+  // the hue), and the owner tooltip needs the name. One map, so the two cannot
+  // disagree about which account a row belongs to.
+  const acctFor = useMemo(() => {
+    const m = new Map<string, Account>();
+    accounts.data?.forEach((a) => m.set(a.id, a));
     return m;
   }, [accounts.data]);
+
+  /** The account's name, for the sentences that only need to name it. */
+  const acctName = (id: string) => acctFor.get(id)?.name ?? "the account";
 
   const tagName = useMemo(() => {
     const m = new Map<string, string>();
@@ -89,13 +97,14 @@ export default function Transactions() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-medium">Transactions</h1>
         <div className="flex items-center gap-2">
-          {/* A whole statement at once, next to adding one row by hand. */}
+          {/* A whole statement at once — CSV, OFX or QFX, the dialog asks which
+              by looking at the file — next to adding one row by hand. */}
           <Button
             variant="secondary"
             onClick={() => setImporting(true)}
             data-testid="import-csv"
           >
-            Import CSV
+            Import a statement
           </Button>
           <Button onClick={() => setOpen((v) => !v)} data-testid="add-transaction">
             Add transaction
@@ -131,58 +140,74 @@ export default function Transactions() {
               onClick={() => setSelected(t)}
               data-testid={`txn-row-${t.id}`}
             >
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <p className="truncate font-medium">
-                    {t.merchant || t.description || "(no description)"}
-                  </p>
-                  {t.is_split_parent && (
-                    // A sibling of the truncating text, not part of it: a badge
-                    // clipped to "spl…" is not a label.
-                    <span className="shrink-0 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
-                      split
+              {/* The mark leads the row because it answers the question the
+                  description cannot: a ledger running several accounts shows
+                  "Coffee" three times, and which one it came out of is the
+                  difference between a personal and a business expense. At 20px
+                  it costs the description 28px of width, and gives back the
+                  account without a second line. */}
+              <div className="flex min-w-0 items-center gap-2">
+                <AccountMark
+                  name={acctFor.get(t.account_id)?.name ?? "(unknown account)"}
+                  institution={acctFor.get(t.account_id)?.institution}
+                />
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate font-medium">
+                      {t.merchant || t.description || "(no description)"}
+                    </p>
+                    {t.is_split_parent && (
+                      // A sibling of the truncating text, not part of it: a badge
+                      // clipped to "spl…" is not a label.
+                      <span className="shrink-0 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
+                        split
+                      </span>
+                    )}
+                  </div>
+                  <p className="truncate text-xs text-fg-muted">
+                    {/* `compact`: "Today"/"Yesterday" at a glance, the date once
+                        it is older. The row is the densest surface in the app, so
+                        it gets the shortest vocabulary — the ISO form is a hover
+                        away either way. */}
+                    <Day value={t.transacted_at} style="compact" />
+                    {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
+                    {/* The effective owner is what reports actually bucket by, so
+                        that is what the row shows; a muted style marks the ones
+                        that only inherit it from their account. */}
+                    <span
+                      className={t.owner_id ? "text-fg" : "italic text-fg-muted"}
+                      title={
+                        t.owner_id
+                          ? "Owner set on this transaction"
+                          : `Inherited from ${acctName(t.account_id)}`
+                      }
+                      data-testid={`txn-owner-${t.id}`}
+                    >
+                      {` · ${ownerName.get(t.effective_owner_id) ?? "Shared"}`}
+                      {!t.owner_id && (
+                        <>
+                          {/* Inherited needs a marker that survives touch and
+                              greyscale: the glyph is decorative, the sentence
+                              behind it is the accessible name (§7.8). */}
+                          <span aria-hidden="true"> ↳</span>
+                          <span className="sr-only">
+                            {` (inherited from ${acctName(t.account_id)})`}
+                          </span>
+                        </>
+                      )}
                     </span>
+                    {t.review_status === "needs_review" && " · needs review"}
+                  </p>
+                  {t.tag_ids.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {t.tag_ids.map((id) => (
+                        <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
+                          {tagName.get(id) ?? "tag"}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <p className="truncate text-xs text-fg-muted">
-                  {formatDate(t.transacted_at)}
-                  {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
-                  {/* The effective owner is what reports actually bucket by, so
-                      that is what the row shows; a muted style marks the ones
-                      that only inherit it from their account. */}
-                  <span
-                    className={t.owner_id ? "text-fg" : "italic text-fg-muted"}
-                    title={
-                      t.owner_id
-                        ? "Owner set on this transaction"
-                        : `Inherited from ${acctName.get(t.account_id) ?? "the account"}`
-                    }
-                    data-testid={`txn-owner-${t.id}`}
-                  >
-                    {` · ${ownerName.get(t.effective_owner_id) ?? "Shared"}`}
-                    {!t.owner_id && (
-                      <>
-                        {/* Inherited needs a marker that survives touch and
-                            greyscale: the glyph is decorative, the sentence
-                            behind it is the accessible name (§7.8). */}
-                        <span aria-hidden="true"> ↳</span>
-                        <span className="sr-only">
-                          {` (inherited from ${acctName.get(t.account_id) ?? "the account"})`}
-                        </span>
-                      </>
-                    )}
-                  </span>
-                  {t.review_status === "needs_review" && " · needs review"}
-                </p>
-                {t.tag_ids.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {t.tag_ids.map((id) => (
-                      <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
-                        {tagName.get(id) ?? "tag"}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
               {/* shrink-0 and text-right: the merchant gives way, the number
                   never does (§6.5). */}

@@ -13,7 +13,9 @@ import {
 } from "@/api/hooks";
 import { useLinkTransfer, useTransfer, useTransferCandidates, useUnlinkTransfer } from "@/api/transfers";
 import type { Account, Category, Money, SplitIn, Tag, Transaction } from "@/api/types";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
+import AccountMark from "@/components/AccountMark";
+import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
@@ -115,6 +117,17 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
       }
     >
       <div className="space-y-4">
+        {/* Which account, at the top, where a transfer's other leg is not: the
+            sheet edits one row, and "which account is this credit or debit
+            from?" is the first thing about that row after the amount. The Mark
+            carries it as a shape and a name rather than as a form field — the
+            account is not editable here, so it should not look like it is. */}
+        {account && (
+          <div className="flex min-w-0 items-center gap-2" data-testid="detail-account">
+            <AccountMark name={account.name} institution={account.institution} size="md" />
+            <span className="truncate text-sm text-fg">{account.name}</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label={`Amount (${txn.currency})`} htmlFor={ids.amount} required error={amountErr}>
             <Input id={ids.amount} value={amount} inputMode="decimal" onChange={(e) => setAmount(e.target.value)} data-testid="detail-amount" />
@@ -287,7 +300,11 @@ function TransferSection({
   // every row the sheet opens.
   const candidates = useTransferCandidates(matching ? txn.id : null);
 
-  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "another account";
+  // Whole accounts, because the mark beside each leg needs the institution as
+  // well as the name — a transfer between two accounts at one bank is exactly
+  // where a colour alone would fail to separate them.
+  const accountOf = (id: string) => accounts.find((a) => a.id === id);
+  const accountName = (id: string) => accountOf(id)?.name ?? "another account";
 
   const label = (t: Transaction) => t.merchant || t.description || "(no description)";
 
@@ -339,8 +356,13 @@ function TransferSection({
             data-testid="transfer-counterpart"
           >
             <p className="text-sm text-fg">{label(counterpart)}</p>
-            <p className="text-xs text-fg-muted">
-              {formatDate(counterpart.transacted_at)} · {accountName(counterpart.account_id)}
+            <p className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+              <AccountMark
+                name={accountName(counterpart.account_id)}
+                institution={accountOf(counterpart.account_id)?.institution}
+              />
+              <Day value={counterpart.transacted_at} style="compact" />
+              {` · ${accountName(counterpart.account_id)}`}
             </p>
             <p className="mt-1 text-sm text-fg">
               {formatMoney(counterpart.amount, counterpart.currency)}
@@ -421,9 +443,17 @@ function TransferSection({
                     {formatMoney(other.amount, other.currency)}
                   </p>
                 </div>
-                <p className="text-xs text-fg-muted">
-                  {formatDate(other.transacted_at)} · {legsApart(c.days_apart)} ·{" "}
-                  {accountName(other.account_id)}
+                <p className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+                  {/* The mark is what separates these candidates at a glance:
+                      they are all "opposite sign, another account, within 5
+                      days", so the account is the only thing distinguishing
+                      one row from the next. */}
+                  <AccountMark
+                    name={accountName(other.account_id)}
+                    institution={accountOf(other.account_id)?.institution}
+                  />
+                  <Day value={other.transacted_at} style="compact" />
+                  {` · ${legsApart(c.days_apart)} · ${accountName(other.account_id)}`}
                 </p>
                 {/* The price of this choice, before the user makes it. */}
                 <p

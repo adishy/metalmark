@@ -27,8 +27,9 @@ import {
 } from "@/api/sync";
 import type { RunStatus, SyncJob, SyncRun } from "@/api/types";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import { Instant, Time } from "@/components/datetime";
 import { Button, Select, Spinner } from "@/components/form";
-import { formatDate, formatDuration, relativeTime } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
 
 // ---- presentational bits ---------------------------------------------------
 
@@ -52,6 +53,23 @@ function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs ${TONES[tone]}`}>
       {children}
     </span>
+  );
+}
+
+/**
+ * A sync run's start or finish, as a day and a clock time.
+ *
+ * Two `<time>` elements rather than one string, because they are two different
+ * precisions and the run log needs both — "which day did this happen" and "how
+ * long did it take" are answered by different parts of the same timestamp.
+ * Either element carries the full ISO on hover, so nothing is lost to the
+ * split. Local, because a person asking when a sync ran means their own clock.
+ */
+function Stamp({ value }: { value: string }) {
+  return (
+    <>
+      <Instant value={value} style="long" /> <Time value={value} seconds={false} />
+    </>
   );
 }
 
@@ -176,10 +194,19 @@ export default function Admin() {
                 </div>
 
                 <p className="text-xs text-fg-muted">
-                  {c.last_synced_at
-                    ? `Last synced ${relativeTime(c.last_synced_at)}`
-                    : "Never synced"}
-                  {c.next_sync_at && ` · next ${relativeTime(c.next_sync_at)}`}
+                  {c.last_synced_at ? (
+                    <>
+                      Last synced <Instant value={c.last_synced_at} style="relative" />
+                    </>
+                  ) : (
+                    "Never synced"
+                  )}
+                  {c.next_sync_at && (
+                    <>
+                      {" · next "}
+                      <Instant value={c.next_sync_at} style="relative" />
+                    </>
+                  )}
                   {` · every ${formatInterval(c.sync_interval_minutes)}`}
                 </p>
 
@@ -389,9 +416,11 @@ function JobRow({
       <td className="py-2 pr-3">
         <Badge tone={job.status === "running" ? "busy" : "idle"}>{job.status}</Badge>
       </td>
-      <td className="py-2 pr-3 text-fg-muted">{relativeTime(started)}</td>
       <td className="py-2 pr-3 text-fg-muted">
-        {job.heartbeat_at ? relativeTime(job.heartbeat_at) : "—"}
+        <Instant value={started} style="relative" />
+      </td>
+      <td className="py-2 pr-3 text-fg-muted">
+        {job.heartbeat_at ? <Instant value={job.heartbeat_at} style="relative" /> : "—"}
       </td>
       <td className="py-2 pr-3 text-fg-muted">
         {job.attempts > 1 ? `${job.attempts} (retried)` : String(job.attempts)}
@@ -428,7 +457,7 @@ function RunRow({
         <Badge tone={RUN_TONES[run.status]}>{run.status}</Badge>
         <span className="text-sm text-fg">{where}</span>
         <span className="text-xs text-fg-muted">
-          {relativeTime(run.started_at)}
+          <Instant value={run.started_at} style="relative" />
           {run.duration_ms !== null && ` · took ${formatDuration(run.duration_ms)}`}
           {run.http_status !== null && ` · HTTP ${run.http_status}`}
         </span>
@@ -471,7 +500,10 @@ function RunRow({
                   {detail.data.events.map((event) => (
                     <li key={event.id} className="flex flex-wrap gap-x-2 text-xs">
                       <span className="text-fg-muted tabular-nums">
-                        {new Date(event.ts).toLocaleTimeString()}
+                        {/* Fixed 24-hour, so this column lines up and two events
+                            in the same second stay distinguishable — which is
+                            why seconds are on here and off in CounterGrid. */}
+                        <Time value={event.ts} />
                       </span>
                       <span className={event.level === "error" ? "text-negative" : "text-fg"}>
                         {event.event}
@@ -495,7 +527,7 @@ function RunRow({
  *  row: the row answers "did it work", and this answers "what exactly did it
  *  touch", which is the question someone asks only when something looks wrong. */
 function CounterGrid({ run }: { run: SyncRun }) {
-  const cells: [string, string][] = [
+  const cells: [string, React.ReactNode][] = [
     ["Accounts seen", String(run.accounts_seen)],
     ["Accounts created", String(run.accounts_created)],
     ["Accounts remapped", String(run.accounts_remapped)],
@@ -508,8 +540,12 @@ function CounterGrid({ run }: { run: SyncRun }) {
     ["Rules applied", String(run.rules_applied)],
     ["Fetch time", run.http_ms === null ? "—" : formatDuration(run.http_ms)],
     ["Fetched", run.bytes_fetched === null ? "—" : formatBytes(run.bytes_fetched)],
-    ["Started", formatDate(run.started_at)],
-    ["Finished", run.finished_at ? formatDate(run.finished_at) : "—"],
+    // The day and the clock time are two different precisions, and a sync run
+    // needs both: "which day did this happen" and "how long did it take" are
+    // answered by different parts of the same timestamp. Each element still
+    // carries the full ISO on hover.
+    ["Started", <Stamp value={run.started_at} />],
+    ["Finished", run.finished_at ? <Stamp value={run.finished_at} /> : "—"],
   ];
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
