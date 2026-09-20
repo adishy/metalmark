@@ -49,7 +49,11 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        # v7, not the newest release: setup-uv stopped publishing floating major tags
+        # after v7, so `@v10` fails to resolve outright ("unable to find version v10")
+        # even though v10.1.0 exists as a tag. v7 is node24, which is the reason for
+        # touching this at all. Bumping past it means pinning an exact version.
+        uses: astral-sh/setup-uv@v7
 
       - name: Install backend dependencies (from uv.lock)
         working-directory: backend
