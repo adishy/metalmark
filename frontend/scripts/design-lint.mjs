@@ -104,6 +104,21 @@ const RULES = [
       /\baxisPointer:/.test(line) ||
       /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie)\()/.test(line),
   },
+  {
+    id: "9",
+    why: "an ISO date as visible text — render it through <Day>/<Instant> (§9.5)",
+    /*
+     * Keyed on the two shapes of an ISO date that reach the screen, not on
+     * `.slice(0, 10)` itself: a native `<input type="date">` needs an ISO
+     * `value`, and that is a wire format rather than text anyone reads. What is
+     * banned is `.slice(0, 10)` *interpolated into a string* or standing alone
+     * as a JSX child — `2026-01-01 to 2026-01-31` printed at the reader, which
+     * is what the OFX preview did.
+     */
+    test: (line) =>
+      /\$\{[^}]*\.slice\(0, ?10\)/.test(line) ||
+      />\{[^}]*\.slice\(0, ?10\)\}</.test(line),
+  },
 ];
 
 async function walk(dir) {
@@ -168,7 +183,7 @@ for (const file of await walk(SRC)) {
 }
 
 if (findings.length === 0) {
-  console.log("design-lint: clean (DESIGN.md §8 rules 1-6, 8)");
+  console.log("design-lint: clean (DESIGN.md §8 rules 1-6, 8, 9)");
   process.exit(0);
 }
 

@@ -31,6 +31,7 @@ import {
   type OfxPreview,
 } from "@/api/import";
 import Dialog from "@/components/Dialog";
+import { Day } from "@/components/datetime";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId } from "@/components/form";
 
 interface ImportDialogProps {
@@ -48,10 +49,37 @@ type Preview =
   | { kind: "ofx"; ofx: OfxPreview }
   | null;
 
+/**
+ * The span the file covers, in the date vocabulary.
+ *
+ * A file that names only one end still says something — everything from here, or
+ * everything up to here — so the two cases are spelled out rather than collapsed
+ * into "no range known". The words differ ("from" / "up to") because the two
+ * halves are not symmetric, and a reader checking a download against a statement
+ * needs to see which end they were given.
+ */
+function covered(start: string | null, end: string | null) {
+  if (start && end) {
+    return (
+      <>
+        <Day value={start} /> to <Day value={end} />
+      </>
+    );
+  }
+  if (start) return <>from <Day value={start} /></>;
+  if (end) return <>up to <Day value={end} /></>;
+  return null;
+}
+
 /** One "what the file says" fact. Absent facts render nothing rather than a
- * blank: an empty row would claim the bank sent a value and sent it empty. */
-function OfxFact({ label, value }: { label: string; value: string | null }) {
-  if (!value) return null;
+ * blank: an empty row would claim the bank sent a value and sent it empty.
+ *
+ * `value` is a node because a date is not a string: it goes through the date
+ * vocabulary so the ISO form stays in the `title` and never on screen. The
+ * string case is for the bank's own words — an institution name, an account id.
+ */
+function OfxFact({ label, value }: { label: string; value: React.ReactNode }) {
+  if (value === null || value === undefined || value === "") return null;
   return (
     <>
       <dt className="text-fg-muted">{label}</dt>
@@ -303,14 +331,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
               <OfxFact label="Bank account" value={ofx.acct_id} />
               <OfxFact label="Account type" value={ofx.acct_type} />
               <OfxFact label="Currency" value={ofx.currency} />
-              <OfxFact
-                label="Covers"
-                value={
-                  ofx.start && ofx.end
-                    ? `${ofx.start.slice(0, 10)} to ${ofx.end.slice(0, 10)}`
-                    : null
-                }
-              />
+              <OfxFact label="Covers" value={covered(ofx.start, ofx.end)} />
             </dl>
             <p role="status" aria-atomic="true" className="mt-2 text-fg">
               <strong data-testid="import-ofx-count">{ofx.transaction_count}</strong>

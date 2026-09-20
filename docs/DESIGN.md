@@ -1161,8 +1161,10 @@ Run this list before shipping. Every item is checkable.
 a ratchet rather than a thing to remember. The shell forms are kept below because the
 script is a direct transcription of them. Two are not literal greps:
 rule 6 has a documented exception (a badge carrying its own padding **and** radius),
-so the script implements the exception instead of dropping the rule, and rule 8 needs
-a lookahead to tell a hand-written `tooltip:` from one that calls the shared builder.
+so the script implements the exception instead of dropping the rule, rule 8 needs
+a lookahead to tell a hand-written `tooltip:` from one that calls the shared builder,
+and rule 9 keys on the two shapes of an ISO date that reach the screen rather than on
+`.slice(0, 10)`, which a native date input legitimately uses.
 All rules ignore comments, because a comment explaining why `outline-none` is absent
 would otherwise trip rule 4 — and a check that cries wolf on correct code gets
 switched off.
@@ -1218,6 +1220,17 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 #      tooltip:      NOT followed by chartTooltip(
 #      axisPointer:  anywhere outside the module
 #      emphasis:     NOT followed by emphasisLine( | emphasisBar( | emphasisPie(
+
+# 9. An ISO date as visible text. `2026-01-01` is a wire format, and the date
+#    vocabulary in lib/dates.ts is what a person reads; the ISO form belongs in
+#    the `title` and the `<time datetime>` (§9.5). Not a bare grep either: a
+#    native date input's `value` has to be ISO, so the rule keys on the two
+#    shapes that actually reach the screen — an ISO date *interpolated into a
+#    string* (`` `${x.slice(0, 10)} to …` ``) and one sitting alone as a JSX
+#    child. Both were live in ImportDialog.tsx, where the OFX "Covers" line
+#    printed `2026-01-01 to 2026-01-31` at the reader and its own test asserted
+#    that it did.
+grep -rnE '\$\{[^}]*\.slice\(0, ?10\)|>\{[^}]*\.slice\(0, ?10\)\}<' src/
 ```
 
 **Viewports to look at, in this order:** 360×640 → 390×844 → 768×1024 → 1280×800.
@@ -1402,7 +1415,7 @@ found.
 | Members table had no `<caption>` and no `scope=` | Fixed — both present |
 
 **How to re-run it** rather than trusting a snapshot: `npm run lint:design` in the `web`
-container covers §8's rules 1–6 and 8; the rest are greps —
+container covers §8's rules 1–6, 8 and 9; the rest are greps —
 
 ```sh
 grep -rn 'aria-live\|role="status"' src | wc -l     # live regions

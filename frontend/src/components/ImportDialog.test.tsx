@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Account, Category } from "@/api/types";
 import type { CsvCommitResult, CsvPreview, OfxCommitResult, OfxPreview } from "@/api/import";
@@ -192,7 +192,13 @@ describe("<ImportDialog />", () => {
     const summary = await screen.findByTestId("import-ofx-summary");
     expect(summary).toHaveTextContent("Harborline Credit Union");
     expect(summary).toHaveTextContent("000111222333");
-    expect(summary).toHaveTextContent("2026-01-01 to 2026-01-31");
+    // The span, in the date vocabulary — and the ISO form in the `title`, which
+    // is where a precise date belongs (decision H). It is *not* the visible text:
+    // `2026-01-01` is a wire format, and nobody reads a bank statement that way.
+    expect(summary).toHaveTextContent("Jan 01 to Jan 31");
+    expect(summary).not.toHaveTextContent("2026-01-01");
+    expect(within(summary).getByText("Jan 01")).toHaveAttribute("title", "2026-01-01");
+    expect(within(summary).getByText("Jan 31")).toHaveAttribute("title", "2026-01-31");
     expect(screen.getByTestId("import-ofx-count")).toHaveTextContent("4");
     // No mapping step: an OFX file has no columns to get wrong.
     expect(screen.queryByTestId("import-table")).not.toBeInTheDocument();
