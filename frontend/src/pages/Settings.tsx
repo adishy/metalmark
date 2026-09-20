@@ -488,9 +488,10 @@ function OwnersSection() {
   const owners = useOwners();
   const household = useHousehold();
   const create = useCreateOwner();
-  // Deleting an owner re-attributes ledger history, which the API restricts to
-  // household owners — so only offer the control to them.
-  const canDelete = household.data?.role === "owner";
+  // Creating, renaming and deleting owners are all household-shape writes that
+  // the API restricts to the owner role — a member may read the list (the owner
+  // pickers need it) but none of the controls that change it.
+  const canEdit = household.data?.role === "owner";
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<{ name: string; counts: OwnerReassignment } | null>(null);
@@ -498,6 +499,7 @@ function OwnersSection() {
 
   return (
     <div className="space-y-4">
+      {canEdit && (
       <Card title="Add owner">
         <form
           className="flex items-end gap-2"
@@ -521,6 +523,7 @@ function OwnersSection() {
           </p>
         )}
       </Card>
+      )}
 
       <Card title="Owners">
         <p className="text-xs text-slate-500">
@@ -533,7 +536,7 @@ function OwnersSection() {
               key={o.id}
               owner={o}
               owners={owners.data ?? []}
-              canDelete={canDelete}
+              canEdit={canEdit}
               onDeleted={(counts) => setDeleted({ name: o.name, counts })}
             />
           ))}
@@ -553,12 +556,12 @@ function OwnersSection() {
 function OwnerRow({
   owner,
   owners,
-  canDelete,
+  canEdit,
   onDeleted,
 }: {
   owner: Owner;
   owners: Owner[];
-  canDelete: boolean;
+  canEdit: boolean;
   onDeleted: (counts: OwnerReassignment) => void;
 }) {
   const update = useUpdateOwner();
@@ -576,13 +579,18 @@ function OwnerRow({
   return (
     <li className="space-y-2 rounded-lg bg-slate-800/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
       <div className="flex items-center gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-label={`Name of ${owner.name}`}
-          className="max-w-xs"
-          data-testid={`owner-rename-input-${owner.id}`}
-        />
+        {canEdit ? (
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label={`Name of ${owner.name}`}
+            className="max-w-xs"
+            data-testid={`owner-rename-input-${owner.id}`}
+          />
+        ) : (
+          // Read-only viewers get text, not a field that silently refuses to save.
+          <span className="text-sm" data-testid={`owner-name-${owner.id}`}>{owner.name}</span>
+        )}
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
             isShared ? "bg-slate-700 text-slate-300" : "bg-brand/15 text-brand"
@@ -592,6 +600,7 @@ function OwnerRow({
           {owner.kind}
         </span>
         <div className="flex-1" />
+        {canEdit && (
         <Button
           variant="secondary"
           className="px-2 py-1 text-xs"
@@ -601,7 +610,8 @@ function OwnerRow({
         >
           Rename
         </Button>
-        {!isShared && canDelete && (
+        )}
+        {!isShared && canEdit && (
           <Button
             variant="ghost"
             className="px-2 py-1 text-xs"

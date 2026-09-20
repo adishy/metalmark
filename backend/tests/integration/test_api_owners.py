@@ -246,7 +246,10 @@ async def test_delete_reassigns_rows_and_reports_the_counts(client):
     assert moved["effective_owner_id"] == shared["id"]
 
 
-async def test_delete_owner_requires_the_owner_role(client):
+async def test_owner_writes_require_the_owner_role(client):
+    """A member may read the owner list — the pickers and filters need it — but
+    every write is owner-only. Gating the delete alone left a one-way door: a
+    member could create an owner they had no way to remove."""
     await _signup(client)
     alex = (await client.post("/owners", json={"name": "Alex"})).json()
 
@@ -254,11 +257,16 @@ async def test_delete_owner_requires_the_owner_role(client):
 
     async with Client(create_app()) as member:
         await _signup(member, name="Beth")
-        # Members can list and create owners, but not re-attribute history.
         assert (await member.get("/owners")).status_code == 200
-        assert (await member.post("/owners", json={"name": "Carol"})).status_code == 201
-        denied = await member.delete(f"/owners/{alex['id']}")
-        assert denied.status_code == 403
+
+        assert (await member.post("/owners", json={"name": "Carol"})).status_code == 403
+        assert (await member.patch(
+            f"/owners/{alex['id']}", json={"name": "Not Alex"})).status_code == 403
+        assert (await member.delete(f"/owners/{alex['id']}")).status_code == 403
+
+        # None of the refusals changed anything.
+        names = [o["name"] for o in (await client.get("/owners")).json()]
+        assert names == ["Shared", "Alex"]
 
 
 async def test_unknown_owner_is_404_not_a_foreign_key_error(client):
@@ -512,3 +520,34 @@ async def test_owner_filters_are_accepted_everywhere_they_are_offered(client):
     # A malformed id is a 422, not a 500 from the uuid cast.
     assert (await client.get(
         "/transactions", params={"owner_id": "not-a-uuid"})).status_code == 422
+
+
+async def test_owner_patch_distinguishes_absent_from_null(client):
+    """Absent means "no change". Null is a client bug and says so — ``is not None``
+    used to turn it into a 200 that changed nothing while looking like it worked,
+    and neither field is nullable (``owners.sort`` is NOT NULL)."""
+    await _signup(client)
+    owner = (await client.post("/owners", json={"name": "Beth"})).json()
+
+    async def stored() -> dict:
+        return next(
+            o for o in (await client.get("/owners")).json() if o["id"] == owner["id"]
+        )
+
+    # absent everywhere: no change at all
+    resp = await client.patch(f"/owners/{owner['id']}", json={})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Beth"
+
+    # present: applied
+    resp = await client.patch(f"/owners/{owner['id']}", json={"name": "Bethany"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Bethany"
+
+    # explicit null: refused rather than silently ignored
+    for field in ("name", "sort"):
+        resp = await client.patch(f"/owners/{owner['id']}", json={field: None})
+        assert resp.status_code == 422, f"{field}=null should be a 422, got {resp.status_code}"
+
+    # and the refusals left the owner exactly as it was
+    assert (await stored())["name"] == "Bethany"

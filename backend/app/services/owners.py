@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Account, Owner, Transaction, TransactionSplit
+from app.schemas.owners import OwnerUpdate
+from app.schemas.patch import is_set
 from app.services.errors import LedgerError
 
 SHARED_OWNER_NAME = "Shared"
@@ -130,18 +132,24 @@ async def create_owner(
 
 
 async def update_owner(
-    session: AsyncSession, owner: Owner, *, name: str | None = None, sort: int | None = None
+    session: AsyncSession, owner_id: uuid.UUID, data: OwnerUpdate
 ) -> Owner:
     """Rename or reorder. The Shared owner may be renamed — "Shared" is a default,
-    not a reserved word — but never re-kinded or deleted."""
-    if name is not None:
-        name = name.strip()
+    not a reserved word — but never re-kinded or deleted.
+
+    ``is_set``, not ``is not None``: absent means "no change". ``OwnerUpdate``
+    refuses an explicit null for either field, so the two are distinguishable and
+    neither can be cleared by accident.
+    """
+    owner = await get_owner(session, owner_id)
+    if is_set(data, "name"):
+        name = data.name.strip()  # not None: OwnerUpdate rejects a null name
         await _reject_duplicate_name(
             session, household_id=owner.household_id, name=name, exclude_id=owner.id
         )
         owner.name = name
-    if sort is not None:
-        owner.sort = sort
+    if is_set(data, "sort"):
+        owner.sort = data.sort
     await _flush_new_owner(session, owner.name)
     return owner
 

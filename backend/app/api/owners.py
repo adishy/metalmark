@@ -21,19 +21,23 @@ async def list_owners(ctx: RequestContext = Depends(get_context)):
     return [OwnerOut.model_validate(o) for o in await svc.list_owners(ctx.session)]
 
 
+# All three owner writes are owner-only, for the same reason the delete always
+# was: they change how the household's history is sliced for everybody, and only
+# the owner role can undo them. Gating the delete alone left a one-way door — a
+# member could create owners they had no way to remove. Reads stay open to any
+# member, because the owner pickers and filters need the list.
 @router.post("", response_model=OwnerOut, status_code=201)
-async def create_owner(data: OwnerCreate, ctx: RequestContext = Depends(get_context)):
+async def create_owner(data: OwnerCreate, ctx: RequestContext = Depends(require_owner)):
+    """Create an owner. Household owner role required."""
     owner = await svc.create_owner(ctx.session, ctx.household_id, name=data.name, sort=data.sort)
     return OwnerOut.model_validate(owner)
 
 
 @router.patch("/{owner_id}", response_model=OwnerOut)
 async def update_owner(owner_id: uuid.UUID, data: OwnerUpdate,
-                       ctx: RequestContext = Depends(get_context)):
-    owner = await svc.get_owner(ctx.session, owner_id)
-    return OwnerOut.model_validate(
-        await svc.update_owner(ctx.session, owner, name=data.name, sort=data.sort)
-    )
+                       ctx: RequestContext = Depends(require_owner)):
+    """Rename or reorder an owner. Household owner role required."""
+    return OwnerOut.model_validate(await svc.update_owner(ctx.session, owner_id, data))
 
 
 @router.delete("/{owner_id}", response_model=OwnerDeleteResult)

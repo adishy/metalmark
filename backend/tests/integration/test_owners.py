@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from app.db import scoped_session
 from app.models import CategoryGroup
 from app.schemas.ledger import AccountCreate, AccountUpdate
+from app.schemas.owners import OwnerUpdate
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, owners, reports
 from app.services import transactions as txns
@@ -84,7 +85,7 @@ async def test_rename_onto_an_existing_name_is_rejected(household_factory):
         await owners.create_owner(s, hh, name="Alex")
         beth = await owners.create_owner(s, hh, name="Beth")
         with pytest.raises(LedgerError) as exc:
-            await owners.update_owner(s, beth, name="Alex")
+            await owners.update_owner(s, beth.id, OwnerUpdate(name="Alex"))
     assert exc.value.status == 409
 
 
@@ -93,7 +94,7 @@ async def test_renaming_an_owner_to_its_own_name_is_fine(household_factory):
     hh = await household_factory()
     async with scoped_session(household_id=hh) as s:
         beth = await owners.create_owner(s, hh, name="Beth")
-        await owners.update_owner(s, beth, name="Beth")
+        await owners.update_owner(s, beth.id, OwnerUpdate(name="Beth"))
         assert beth.name == "Beth"
 
 
@@ -101,7 +102,7 @@ async def test_shared_owner_may_be_renamed_but_not_deleted(household_factory):
     hh = await household_factory()
     async with scoped_session(household_id=hh) as s:
         shared = await owners.ensure_shared_owner(s, hh)
-        await owners.update_owner(s, shared, name="Household")
+        await owners.update_owner(s, shared.id, OwnerUpdate(name="Household"))
         assert shared.name == "Household"
         with pytest.raises(LedgerError) as exc:
             await owners.delete_owner(s, shared)
