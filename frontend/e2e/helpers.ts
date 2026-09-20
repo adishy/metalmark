@@ -36,7 +36,12 @@ export async function addOwner(page: Page, name: string): Promise<void> {
   await expect(page.getByTestId("settings-panel-owners")).toBeVisible();
   await page.getByTestId("owner-name").fill(name);
   await page.getByTestId("owner-save").click();
-  await expect(page.getByTestId("owner-list")).toContainText(name);
+  // The row renders the name in an always-editable inline-rename ``<input>``, so the
+  // name is a *value*, not text: ``toContainText`` reads only text nodes and can never
+  // match it, however long it waits. The field is found by its accessible name (which
+  // carries the owner's name) and asserted with ``toHaveValue``, which is what reads a
+  // value. Note ``getByDisplayValue`` is a *page* method — ``Locator`` does not have it.
+  await expect(page.getByLabel(`Name of ${name}`)).toHaveValue(name);
 }
 
 /** Create a manual account; returns the unique name used. */
