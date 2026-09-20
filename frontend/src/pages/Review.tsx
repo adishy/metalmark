@@ -69,7 +69,11 @@ export default function Review() {
   const remaining = items.length;
 
   return (
-    <div className="space-y-4">
+    // A deck is one card at a time, so it takes §9.1's narrowest width rather
+    // than the shell's 1280. At 864 px the card's `justify-between` put the
+    // merchant and the amount ~400 px apart with nothing between them; the cap
+    // is what stops the shell's new width from making that worse.
+    <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-medium">Review</h1>
         {/* The queue count changes on every decision, and nothing moves focus to

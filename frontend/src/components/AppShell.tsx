@@ -116,7 +116,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl flex-1 p-4">{children}</main>
+      {/* `max-w-7xl` is the **widest** case, not every case (§9.1): the shell
+          gives the room to the page that can use all of it — a ledger list, a
+          table, the Admin counters — and a page whose content is a form or a
+          single figure narrows itself with its own `mx-auto max-w-*`. The
+          alternative, the shell asking each page what width it wants, puts the
+          decision in one place and the number in twenty.
+
+          It was `max-w-4xl` (896 px) for every page at every viewport, which is
+          272 px of dead margin per side at 1440 and 512 px at 1920. §2.5 has
+          promised `lg:p-6` since the token layer landed and the shell never took
+          it; this is that gutter arriving, one breakpoint up where the extra
+          8 px is not worth the content it costs at 360. */}
+      <main className="mx-auto w-full max-w-7xl flex-1 p-4 lg:p-6">{children}</main>
 
       {/* Phone navigation. `aria-current` gives the screen reader what
           `font-semibold` gives the eye — the accent hue alone is a colour-only

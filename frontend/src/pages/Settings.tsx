@@ -116,7 +116,14 @@ export default function Settings() {
   }
 
   return (
-    <div className="space-y-4">
+    // §9.1 files Settings under form width — `max-w-2xl` (672 px), because a
+    // control stretched to 1280 px is a control nobody can scan down. §9.3 also
+    // gives it a rail, and the rail is *navigation*, not content, so the 672
+    // describes the panel: 896 (`max-w-4xl`) − 224 (`lg:w-56` rail) − 24
+    // (`gap-6`) = 648 px of panel, which is that number arrived at from the
+    // other side. Below `lg:` there is no rail and the cap is simply 896, which
+    // is where this page already was — the one page §9 did not need to widen.
+    <div className="mx-auto max-w-4xl space-y-4">
       <h1 className="text-lg font-medium">Settings</h1>
       <div
         className="flex flex-wrap gap-1 border-b border-border"

@@ -66,7 +66,9 @@ export default function Accounts() {
   const panelId = segmentPanelId(VIEW_TESTID, view);
 
   return (
-    <div className="space-y-6">
+    // `max-w-6xl`: §9.1's middle width, the one a two-up grid needs to stop
+    // being two stretched columns. `mx-auto` centres it in the wider shell.
+    <div className="mx-auto max-w-6xl space-y-6">
       {/* The page's one <h1> sits above both views: the tabs select what is
           below them, so a heading inside a panel would leave the investments
           view without one (§7.5). */}

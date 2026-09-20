@@ -365,7 +365,11 @@ export default function Reports() {
   );
 
   return (
-    <div className="space-y-6">
+    // `max-w-6xl` rather than the shell's `max-w-7xl`: §9.1 gives Reports the
+    // middle width because its content at `lg:` is a two-up grid, and a 1280 px
+    // pair of charts is two 620 px charts — the second column is not worth the
+    // stretch. `mx-auto` keeps the page centred inside the wider shell.
+    <div className="mx-auto max-w-6xl space-y-6">
       <h1 className="text-lg font-medium">Reports</h1>
 
       <div className="space-y-4 rounded-card bg-surface-raised p-4">

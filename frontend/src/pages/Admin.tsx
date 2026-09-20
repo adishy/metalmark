@@ -136,6 +136,8 @@ export default function Admin() {
   }
 
   return (
+    // Admin is tables and counters — §9.1's widest case, so no cap of its own
+    // and the shell's `max-w-7xl` is the cap.
     <div className="space-y-4">
       <header>
         {/* "Admin" is the eyebrow rather than the heading on purpose: the page

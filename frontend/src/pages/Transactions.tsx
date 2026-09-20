@@ -91,6 +91,8 @@ export default function Transactions() {
   const filtered = isFiltered(filter);
 
   return (
+    // No width cap of its own: a ledger list is §9.1's widest case, so it takes
+    // the whole shell column and `max-w-7xl` from `AppShell` is the cap.
     <div className="space-y-4">
       {/* flex-wrap: the title plus two actions do not fit at 360px, and an
           unwrapped header is what pushes the page into horizontal scroll (§5). */}
