@@ -105,6 +105,22 @@ def with_errlist(account_set: AccountSet, *entries: str) -> AccountSet:
     return dataclasses.replace(account_set, errlist=tuple(entries))
 
 
+def with_org_name(account_set: AccountSet, name: str) -> AccountSet:
+    """The institution renamed, at the level ``AccountSet.org_name`` reads.
+
+    The parser flattens ``org_name`` onto each account as well, from the
+    connection its ``conn_id`` points at. This changes **only** the connection, so
+    ``AccountSet.org_name`` moves while each account's ``external_key`` input does
+    not — which is what makes it useful for testing what the *connection* records.
+    A real rename moves both, and that is a separate question (the accounts would
+    rekey) deliberately not entangled with this one.
+    """
+    connections = tuple(
+        dataclasses.replace(c, org_name=name) for c in account_set.connections
+    )
+    return dataclasses.replace(account_set, connections=connections)
+
+
 def reidentified(account_set: AccountSet, *, salt: str = "b") -> AccountSet:
     """Every transaction gets a new id; amounts, payees and dates are untouched.
 
@@ -342,5 +358,6 @@ __all__ = [
     "shifted",
     "two_pendings_one_posting",
     "with_errlist",
+    "with_org_name",
     "with_transactions",
 ]

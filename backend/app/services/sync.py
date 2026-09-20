@@ -1197,6 +1197,7 @@ async def _close_run(
     counts: RunCounts | None = None,
     error: str | None = None,
     account_set: AccountSet | None = None,
+    connection_label: str | None = None,
     http_status: int | None = None,
 ) -> None:
     run = (
@@ -1218,6 +1219,17 @@ async def _close_run(
         run.pendings_expired = counts.pendings_expired
         run.transfers_matched = counts.transfers_matched
         run.rules_applied = counts.rules_applied
+    if connection_label is not None:
+        # Overwrites the value TX1 wrote, which was whatever the connection knew
+        # when the run opened — possibly nothing at all, on a connection's first
+        # sync. This one comes from the payload the run actually fetched, and the
+        # payload is the authority on what the institution is called; keeping the
+        # older value would label the run that *discovered* a rename with the name
+        # it just disproved, and the name would only catch up on the following run.
+        #
+        # The TX1 value is not redundant: it is what a run that *fails* keeps,
+        # because a failure has no payload to take a name from.
+        run.connection_label = connection_label
     if account_set is not None and account_set.stats is not None:
         run.http_ms = account_set.stats.http_ms
         run.bytes_fetched = account_set.stats.bytes_fetched
@@ -1349,9 +1361,28 @@ async def run_connection_sync(
                     session, household_id, connection, account_set, now=moment, log=log
                 )
                 await log.emit("info", "run.finished", status=status, **asdict(counts))
+
+                # The institution's name is only knowable from a payload — the
+                # claim endpoint is handed a token and a URL, and neither names a
+                # bank — so this is where the connection learns what it is, and it
+                # keeps up to date if the bridge ever calls the institution
+                # something else.
+                #
+                # Learned *before* the run closes, deliberately. This run was
+                # opened in an earlier transaction, when nothing yet knew the name,
+                # so its ``connection_label`` is NULL at that point; and since a
+                # run's ``connection_id`` is SET NULL on disconnect, that label is
+                # the only thing that still says where those transactions came
+                # from. Leaving it until after the close would strand the one run a
+                # person is looking at right after pasting a token. The label is
+                # written once and never revised (``_close_run``), so a rename here
+                # changes the *next* run's label and never relabels history.
+                if account_set.org_name:
+                    connection.org_name = account_set.org_name
+
                 await _close_run(
                     session, run_id, status=status, now=moment, counts=counts,
-                    account_set=account_set,
+                    account_set=account_set, connection_label=connection.org_name,
                 )
 
                 connection.last_synced_at = moment

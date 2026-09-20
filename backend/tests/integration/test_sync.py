@@ -949,6 +949,59 @@ async def test_run_events_are_ordered_and_numbered_from_zero(hh) -> None:
         assert events[-1].detail["txns_inserted"] == 12
 
 
+async def test_the_first_sync_teaches_the_connection_and_its_own_run_their_name(hh) -> None:
+    """A claim stores no institution name, because nothing knows one yet.
+
+    The claim endpoint is handed a token and a URL — neither says which bank is
+    behind them — so ``org_name`` is NULL until a payload arrives, and the first
+    fetch is where it is learned. Both halves are asserted here because only one
+    of them is obvious: the *connection* keeps the name for later, but the *run
+    row* is opened in an earlier transaction, before the fetch, and so was
+    written with a NULL label. Since a run's ``connection_id`` is SET NULL on
+    disconnect, that label is the only thing that would still say where those
+    transactions came from — and the run a person watches immediately after
+    pasting a token is exactly this one.
+    """
+    connection_id = await _make_connection(hh, org_name=None)
+    outcome = await _sync(
+        hh, connection_id, FakeProvider(script=scenarios.scenario(scenarios.demo()))
+    )
+
+    async with scoped_session(hh) as session:
+        connection = await _connection_row(session, connection_id)
+        run = await _run_row(session, outcome.run_id)
+    assert connection.org_name == "SimpleFIN Bridge"
+    assert run.connection_label == "SimpleFIN Bridge"
+
+
+async def test_a_later_rename_updates_the_connection_not_the_old_runs_label(hh) -> None:
+    """The label is a fact about a run, not a live join to the connection.
+
+    The connection follows the bank — it says what the institution is called now
+    — while each run keeps the name it was reported under. So a rename moves
+    forward and never backward, and the history stays readable as the sequence of
+    names the bank actually used.
+    """
+    connection_id = await _make_connection(hh, org_name=None)
+    first = await _sync(
+        hh, connection_id, FakeProvider(script=scenarios.scenario(scenarios.demo()))
+    )
+
+    renamed = scenarios.with_org_name(scenarios.demo(), "Renamed Bank")
+    second = await _sync(
+        hh, connection_id, FakeProvider(script=scenarios.scenario(renamed))
+    )
+
+    async with scoped_session(hh) as session:
+        first_label = (await _run_row(session, first.run_id)).connection_label
+        second_label = (await _run_row(session, second.run_id)).connection_label
+        connection = await _connection_row(session, connection_id)
+
+    assert first_label == "SimpleFIN Bridge"  # not relabelled
+    assert second_label == "Renamed Bank"
+    assert connection.org_name == "Renamed Bank"
+
+
 # ---- balances -------------------------------------------------------------
 
 

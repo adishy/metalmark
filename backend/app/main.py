@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -14,6 +15,7 @@ from app.api import (
     accounts,
     auth,
     categories,
+    connections,
     fx,
     health,
     household,
@@ -80,6 +82,29 @@ def create_app() -> FastAPI:
     async def _auth_error(_request: Request, exc: AuthError):
         return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_request: Request, exc: RequestValidationError):
+        """422 without echoing the request body back.
+
+        FastAPI's default handler includes ``input`` (the offending value) and
+        ``ctx`` (the exception it raised) per error. For most routes that is a
+        convenience; for ``POST /connections/claim`` it is a credential coming
+        back in a response — and one that lands in browser devtools, in any
+        client-side error reporter, and in whatever proxy logs the response. A
+        wrong-typed setup token would be echoed verbatim.
+
+        Stripping both fields globally rather than special-casing one route,
+        because the class of bug is "this endpoint happens to take a secret" and
+        the next endpoint with a secret should not have to remember. What is
+        kept — ``loc``, ``type``, ``msg`` — is what a form needs to point at the
+        offending field.
+        """
+        errors = [
+            {k: v for k, v in error.items() if k not in ("input", "ctx")}
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(accounts.router)
@@ -91,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(rules.router)
     app.include_router(imports.router)
     app.include_router(household.router)
+    app.include_router(connections.router)
     return app
 
 

@@ -157,7 +157,7 @@ jobs:
       - name: Protected endpoints require auth (401)
         run: |
           fail=0
-          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules /fx-rates; do
+          for path in /accounts /transactions /categories /reports/net-worth /owners /household /rules /fx-rates /connections /connections/runs /connections/jobs; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}")
             echo "GET ${path} -> ${code}"
             if [ "$code" != "401" ]; then

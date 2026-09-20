@@ -1806,6 +1806,399 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /connections:
+    get:
+      tags:
+      - connections
+      summary: List Connections
+      operationId: list_connections_connections_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConnectionOut'
+                title: Response List Connections Connections Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/defaults:
+    get:
+      tags:
+      - connections
+      summary: Connection Defaults
+      description: 'The cadence bounds, from the columns'' own constants.
+
+
+        A route rather than a constant in the client: the floor and ceiling are
+
+        enforced by a CHECK constraint, and a client that hard-codes them drifts into
+
+        offering an interval the database will refuse.'
+      operationId: connection_defaults_connections_defaults_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionDefaults'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/claim:
+    post:
+      tags:
+      - connections
+      summary: Claim Connection
+      description: 'Exchange a setup token for a stored connection.
+
+
+        The token is used once and never stored, echoed, or logged. On success the
+
+        household has a connection; on failure it has nothing, and the message says
+
+        why in the provider''s own sanitized words.'
+      operationId: claim_connection_connections_claim_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionClaim'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}:
+    patch:
+      tags:
+      - connections
+      summary: Update Connection
+      operationId: update_connection_connections__connection_id__patch
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Connection Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - connections
+      summary: Delete Connection
+      description: Disconnect. Accounts and transactions stay, and become manual.
+      operationId: delete_connection_connections__connection_id__delete
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Connection Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/{connection_id}/sync:
+    post:
+      tags:
+      - connections
+      summary: Trigger Sync
+      description: 'Queue a run. Returns the job, not the outcome — the work happens in the
+
+        worker, and the panel watches ``GET /sync/runs`` for what it did.
+
+
+        **202, not 200**: nothing has synced yet. A synchronous response would have
+
+        the HTTP call block for the length of a bank fetch, and the whole queue
+
+        exists so that it does not.'
+      operationId: trigger_sync_connections__connection_id__sync_post
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Connection Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncJobOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/jobs:
+    get:
+      tags:
+      - connections
+      summary: List Jobs
+      description: The queue. ``active_only`` is what the panel's live table asks for.
+      operationId: list_jobs_connections_jobs_get
+      parameters:
+      - name: active_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Active Only
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SyncJobOut'
+                title: Response List Jobs Connections Jobs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/jobs/{job_id}/cancel:
+    post:
+      tags:
+      - connections
+      summary: Cancel Job
+      description: 'Cancel a queued or running job.
+
+
+        Returns the job so the panel can render its terminal state directly. A job
+
+        that already finished is a 409: "cancelled" and "had already finished" are
+
+        different facts and the operator is owed the second one when it is true.'
+      operationId: cancel_job_connections_jobs__job_id__cancel_post
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Job Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncJobOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/runs:
+    get:
+      tags:
+      - connections
+      summary: List Runs
+      operationId: list_runs_connections_runs_get
+      parameters:
+      - name: connection_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SyncRunOut'
+                title: Response List Runs Connections Runs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /connections/runs/{run_id}:
+    get:
+      tags:
+      - connections
+      summary: Get Run
+      description: One run with its log — the panel's expanded row, in one request.
+      operationId: get_run_connections_runs__run_id__get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncRunDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AccountCreate:
@@ -2178,6 +2571,146 @@ components:
       - category_name
       - total
       title: CategorySpendRow
+    ConnectionClaim:
+      properties:
+        setup_token:
+          type: string
+          maxLength: 4096
+          minLength: 1
+          title: Setup Token
+      type: object
+      required:
+      - setup_token
+      title: ConnectionClaim
+      description: '``POST /connections/claim`` — the only route that accepts a credential.
+
+
+        The token is a body *field*, not a query parameter: query strings land in
+
+        access logs, in ``Referer`` headers, and in browser history, and a single-use
+
+        credential should appear in none of them.
+
+
+        Never echoed back. ``ConnectionOut`` has no field for it, so a response
+
+        cannot repeat it even by accident.'
+    ConnectionDefaults:
+      properties:
+        sync_interval_minutes:
+          type: integer
+          title: Sync Interval Minutes
+          default: 360
+        sync_interval_min_minutes:
+          type: integer
+          title: Sync Interval Min Minutes
+          default: 120
+        sync_interval_max_minutes:
+          type: integer
+          title: Sync Interval Max Minutes
+          default: 10080
+      type: object
+      title: ConnectionDefaults
+      description: 'The cadence floor, ceiling and default, so the UI''s slider needs no
+
+        hard-coded copy of them. Sent with the connection list rather than exposed as
+
+        its own route: it is configuration for the control that edits that list.'
+    ConnectionOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        provider:
+          type: string
+          title: Provider
+        org_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Org Name
+        status:
+          type: string
+          title: Status
+        last_synced_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Synced At
+        last_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Error
+        is_enabled:
+          type: boolean
+          title: Is Enabled
+        sync_interval_minutes:
+          type: integer
+          title: Sync Interval Minutes
+        next_sync_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Next Sync At
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - provider
+      - org_name
+      - status
+      - last_synced_at
+      - last_error
+      - is_enabled
+      - sync_interval_minutes
+      - next_sync_at
+      - created_at
+      title: ConnectionOut
+      description: 'A connection as the dashboard and the settings tab see it.
+
+
+        ``status`` and ``is_enabled`` are separate on purpose and the client must
+
+        render them as two things: health (``ok`` / ``auth_error`` / ``error``) is
+
+        what the *bank* is doing, and ``is_enabled`` is what the *user* did. A paused
+
+        connection showing "auth error" is a paused connection that also needs
+
+        reconnecting, and collapsing the two into one badge would lose one of them.'
+    ConnectionUpdate:
+      properties:
+        is_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Enabled
+        sync_interval_minutes:
+          anyOf:
+          - type: integer
+            maximum: 10080.0
+            minimum: 120.0
+          - type: 'null'
+          title: Sync Interval Minutes
+      type: object
+      title: ConnectionUpdate
+      description: 'The two knobs the control panel turns.
+
+
+        ``is_enabled`` is pause/resume and ``sync_interval_minutes`` is the cadence.
+
+        Absent means no change; neither has a "clear" semantics, because a nullable
+
+        pause flag or a nullable interval would both need a third state to mean
+
+        "inherit", and the columns give each exactly one meaning.'
     CsvCommitOut:
       properties:
         inserted:
@@ -3058,6 +3591,276 @@ components:
       - effective_owner_id
       - notes
       title: SplitOut
+    SyncJobOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        connection_id:
+          type: string
+          format: uuid
+          title: Connection Id
+        trigger:
+          type: string
+          title: Trigger
+        status:
+          type: string
+          title: Status
+        attempts:
+          type: integer
+          title: Attempts
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        not_before:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Not Before
+        claimed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Claimed At
+        heartbeat_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Heartbeat At
+        cancel_requested_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Cancel Requested At
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - id
+      - connection_id
+      - trigger
+      - status
+      - attempts
+      - created_at
+      - not_before
+      - claimed_at
+      - heartbeat_at
+      - cancel_requested_at
+      - started_at
+      - finished_at
+      - error
+      title: SyncJobOut
+      description: 'A queued or running job, for the panel''s live table.
+
+
+        ``heartbeat_at`` is exposed rather than hidden behind an "elapsed" figure:
+
+        the reaper''s clock is ``heartbeat_at < now() - reap_after``, so a job whose
+
+        heartbeat has stopped advancing is exactly what a stuck job looks like from
+
+        the outside, and the operator should be able to see the same signal.'
+    SyncRunDetail:
+      properties:
+        run:
+          $ref: '#/components/schemas/SyncRunOut'
+        events:
+          items:
+            $ref: '#/components/schemas/SyncRunEventOut'
+          type: array
+          title: Events
+      type: object
+      required:
+      - run
+      - events
+      title: SyncRunDetail
+      description: A run and its log together — one round trip for the expanded row.
+    SyncRunEventOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        seq:
+          type: integer
+          title: Seq
+        ts:
+          type: string
+          format: date-time
+          title: Ts
+        level:
+          type: string
+          title: Level
+        event:
+          type: string
+          title: Event
+        detail:
+          additionalProperties: true
+          type: object
+          title: Detail
+      type: object
+      required:
+      - id
+      - seq
+      - ts
+      - level
+      - event
+      - detail
+      title: SyncRunEventOut
+      description: 'One line of a run''s log.
+
+
+        ``detail`` is a JSONB blob that was sanitized at **write** time (ADR-0016),
+
+        so it is returned as-is — re-sanitizing on the way out would suggest the
+
+        stored form is untrusted, and the stored form is the one that matters. It is
+
+        typed ``dict`` rather than ``Any`` because the writer always emits an object
+
+        and a client should be able to index it without a null check.'
+    SyncRunOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        connection_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+        connection_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Connection Label
+        trigger:
+          type: string
+          title: Trigger
+        status:
+          type: string
+          title: Status
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        finished_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Finished At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        http_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Http Ms
+        http_status:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Http Status
+        bytes_fetched:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Bytes Fetched
+        accounts_seen:
+          type: integer
+          title: Accounts Seen
+        accounts_created:
+          type: integer
+          title: Accounts Created
+        accounts_remapped:
+          type: integer
+          title: Accounts Remapped
+        txns_rekeyed:
+          type: integer
+          title: Txns Rekeyed
+        txns_inserted:
+          type: integer
+          title: Txns Inserted
+        txns_updated:
+          type: integer
+          title: Txns Updated
+        txns_reconciled:
+          type: integer
+          title: Txns Reconciled
+        pendings_expired:
+          type: integer
+          title: Pendings Expired
+        transfers_matched:
+          type: integer
+          title: Transfers Matched
+        rules_applied:
+          type: integer
+          title: Rules Applied
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - id
+      - connection_id
+      - connection_label
+      - trigger
+      - status
+      - started_at
+      - finished_at
+      - duration_ms
+      - http_ms
+      - http_status
+      - bytes_fetched
+      - accounts_seen
+      - accounts_created
+      - accounts_remapped
+      - txns_rekeyed
+      - txns_inserted
+      - txns_updated
+      - txns_reconciled
+      - pendings_expired
+      - transfers_matched
+      - rules_applied
+      - error
+      title: SyncRunOut
+      description: 'One run''s counters and timings — the history row.
+
+
+        ``connection_label`` is what keeps this readable after the connection is
+
+        gone: ``connection_id`` is SET NULL on delete, so without the label a
+
+        disconnect would erase the institution''s name from its own history.'
     TagCreate:
       properties:
         name:
