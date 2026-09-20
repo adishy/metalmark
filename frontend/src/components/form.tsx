@@ -195,6 +195,29 @@ export function Button({
   );
 }
 
+/**
+ * The spinner half of a §4.1 loading button: keep the label, add this, set
+ * `aria-busy="true"`, disable. It was inline in the reference page, which meant
+ * every call site that needed one copied the class string — so they mostly
+ * didn't, and swapped the label to "Saving…" instead.
+ *
+ * `aria-hidden` is not decoration: a spinner is never the accessible name, and
+ * the button's own label is still there to be read.
+ *
+ * Under `prefers-reduced-motion` the global rule in index.css runs this once at
+ * 0.01ms, so it renders as a static ring. That is intended, not broken — the
+ * label, the disabled state and `aria-busy` all still say "working", so no
+ * information is carried by the motion alone.
+ */
+export function Spinner({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`size-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent ${className ?? ""}`}
+    />
+  );
+}
+
 /** Give a control a stable id derived from React's useId (SSR/hydration-safe). */
 export function useFieldId(prefix: string): string {
   const raw = useId();

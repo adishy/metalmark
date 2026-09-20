@@ -1045,9 +1045,10 @@ Run this list before shipping. Every item is checkable.
 4. **Keyboard.** Every action reachable without a mouse, including horizontal scroll
    containers (`tabIndex={0}`). Escape closes every overlay. Overlays trap focus and
    restore it to the trigger.
-5. **Headings.** Exactly one `<h1>` per page and no skipped levels. **Today only
-   Login and Signup have one** — all five app pages start at `<h2>`, so every
-   authenticated page skips a level. Fix by promoting each page's title to `<h1>`.
+5. **Headings.** Exactly one `<h1>` per page and no skipped levels. **Every page now
+   has exactly one**, including the five app pages, which used to start at `<h2>`
+   and so skipped a level under the shell. Sections below it are `<h2>`, not `<h3>`
+   chosen for its size.
 6. **Live regions for async results.** A status message must be announced without
    receiving focus. What counts is subtle: a results *list* is not a status message,
    but the message about it is. So:
@@ -1057,8 +1058,12 @@ Run this list before shipping. Every item is checkable.
    - Errors → `role="alert"`.
    - A dialog is **not** a status message (it takes focus) — do not give dialogs
      `role="status"`.
-   **There are currently zero live regions in the app**; every async result is
-   silent to a screen reader.
+   **These are now throughout the app** — the net-worth figure, the transactions
+   count and its empty state, the review queue's count and its error, the rule
+   builder's save, the CSV preview and import result, and every Settings
+   mutation. The regression to watch for is a *new* async result added without
+   one, which looks identical to a working feature until it is announced to
+   nobody.
 7. **Reduced motion.** The global CSS rule in §2.3 plus `useReducedMotion()` for
    framer-motion. Known case: `Review.tsx`'s card rotate and the drag-threshold
    flash.
@@ -1069,9 +1074,10 @@ Run this list before shipping. Every item is checkable.
    2-D **only inside its own container**; the exception does not extend to the rest of
    the page.
 10. **Touch targets** ≥44×44 px (§5).
-11. **Per-route `document.title`.** Currently hardcoded to "MetalMark" in
-    `index.html` for every route. Set it per page — it is the primary orientation cue
-    for a screen reader user and for a phone's tab switcher.
+11. **Per-route `document.title`.** Set in `AppShell.tsx` from the same route table
+    that builds the nav, so a new route cannot be added without one. It is the
+    primary orientation cue for a screen reader user and for a phone's tab
+    switcher.
 12. **`lang`** stays `en` on `<html>`.
 
 ---

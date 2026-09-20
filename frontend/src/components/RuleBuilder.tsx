@@ -17,7 +17,7 @@ import { useState, type ReactNode } from "react";
 import { useAccounts, useCategories, useOwners, useTags } from "@/api/hooks";
 import { useCreateRule, useUpdateRule, type Rule, type RuleActions, type RuleConditions } from "@/api/rules";
 import Dialog from "@/components/Dialog";
-import { Button, Checkbox, Field, Input, Select, requiredText, useFieldId, validAmount } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, Spinner, requiredText, useFieldId, validAmount } from "@/components/form";
 
 type Tri = "" | "true" | "false";
 
@@ -151,8 +151,9 @@ export default function RuleBuilder({
           <Button variant="secondary" onClick={onClose} data-testid="rule-cancel">
             Cancel
           </Button>
-          <Button onClick={save} disabled={saving} data-testid="rule-save">
-            {saving ? "Saving…" : "Save rule"}
+          <Button onClick={save} disabled={saving} aria-busy={saving} data-testid="rule-save">
+            {saving && <Spinner />}
+            Save rule
           </Button>
         </>
       }
@@ -413,10 +414,17 @@ function Checks({
   return (
     <fieldset className="space-y-1">
       <legend className="text-xs font-medium text-fg-muted">{legend}</legend>
+      {/* `max-h-40`, not `max-h-32`. The rows are now 44 px label targets
+          (§4.14), so the old 128 px well showed two whole rows and a third
+          sliced through the middle — which reads as a rendering fault rather
+          than as "there is more below". 160 px less the 16 px of padding fits
+          three whole rows (3×44 + 2×4 gap = 140) with a few pixels of the
+          fourth showing, which is the scroll affordance the sliced row was
+          accidentally standing in for. */}
       {items.length === 0 ? (
         <p className="text-xs text-fg-muted">{empty}</p>
       ) : (
-        <div className="flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-control bg-surface-raised/60 p-2">
+        <div className="flex max-h-40 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-control bg-surface-raised/60 p-2">
           {items.map((it) => (
             <Checkbox
               key={it.id}

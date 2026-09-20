@@ -42,6 +42,7 @@ import {
   Field,
   Input,
   Select,
+  Spinner,
   requiredText,
   useFieldId,
   validCurrency,
@@ -518,22 +519,38 @@ function HouseholdSection() {
           Anyone can create an account from the sign-up page and will join this household as a
           member. Members are managed here, not on the ledger: what owns money are the owners below.
         </p>
-        <table className="w-full text-sm" data-testid="members-table">
-          <thead>
-            <tr className="text-left text-xs text-fg-muted">
-              <th className="py-1">Name</th><th className="py-1">Email</th><th className="py-1">Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.data?.map((m) => (
-              <tr key={m.user_id} className="border-t border-border">
-                <td className="py-1.5">{m.display_name}</td>
-                <td className="py-1.5 text-fg-muted">{m.email}</td>
-                <td className="py-1.5">{m.role}</td>
+        {/* A real table, kept at phone width because the columns are the point
+            — so §4.7 applies: a scroll container that the keyboard can reach
+            (2.1.1), a caption, and scoped headers. Without `scope`, a screen
+            reader reads three cells and no idea which column they belong to. */}
+        <div
+          className="overflow-x-auto"
+          role="region"
+          aria-label="Household members"
+          tabIndex={0}
+        >
+          <table className="w-full text-sm" data-testid="members-table">
+            <caption className="sr-only">
+              Household members, with the email address and role of each
+            </caption>
+            <thead>
+              <tr className="text-left text-xs text-fg-muted">
+                <th scope="col" className="py-1">Name</th>
+                <th scope="col" className="py-1">Email</th>
+                <th scope="col" className="py-1">Role</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {members.data?.map((m) => (
+                <tr key={m.user_id} className="border-t border-border">
+                  <td className="py-1.5">{m.display_name}</td>
+                  <td className="py-1.5 text-fg-muted">{m.email}</td>
+                  <td className="py-1.5">{m.role}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </div>
   );
@@ -802,10 +819,12 @@ function RulesSection() {
           <Button
             variant="secondary"
             disabled={!isOwner || apply.isPending || !rules.data?.length}
+            aria-busy={apply.isPending}
             onClick={() => apply.mutate(undefined, { onSuccess: (r) => setApplied(r) })}
             data-testid="rule-apply"
           >
-            {apply.isPending ? "Applying…" : "Apply to existing"}
+            {apply.isPending && <Spinner />}
+            Apply to existing
           </Button>
           {!isOwner && (
             <span className="text-xs text-fg-muted">

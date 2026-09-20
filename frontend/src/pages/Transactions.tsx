@@ -16,6 +16,7 @@ import {
   Field,
   Input,
   Select,
+  Spinner,
   requiredText,
   useFieldId,
   validAmount,
@@ -24,6 +25,23 @@ import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import ImportDialog from "@/components/ImportDialog";
+
+/**
+ * Whether anything is actually narrowing the list. Used twice — once to offer
+ * "Clear filters" in the bar, once to offer it in the empty state — and it has
+ * to be one predicate, because the empty state uses it to decide whether the
+ * ledger is empty or merely filtered, and those two deserve different sentences.
+ *
+ * `?.length` rather than the bare truthiness the call sites used to do. The
+ * setters today clear to `undefined` rather than `[]`, so the two agree — but
+ * an empty array is truthy, so the shorter form is one refactor away from
+ * calling a cleared filter "active" and offering a Clear button for nothing.
+ */
+function isFiltered(f: TxnFilter): boolean {
+  return Boolean(
+    f.account_id?.length || f.category_id?.length || f.owner_id || f.start || f.end || f.search,
+  );
+}
 
 export default function Transactions() {
   const accounts = useAccounts();
@@ -62,6 +80,7 @@ export default function Transactions() {
   }, [tags.data]);
 
   const items = txns.data?.pages.flatMap((p) => p.items) ?? [];
+  const filtered = isFiltered(filter);
 
   return (
     <div className="space-y-4">
@@ -180,10 +199,24 @@ export default function Transactions() {
         {items.length === 0 && !txns.isLoading && (
           <li className="px-4">
             {/* The message *about* the results, not the list itself: a filter
-                change that empties the ledger is otherwise silent (§7.6). */}
-            <p role="status" aria-atomic="true" className="py-6 text-center text-sm text-fg-muted">
-              No transactions match.
+                change that empties the ledger is otherwise silent (§7.6).
+
+                Two sentences, not one: "no transactions match" is a claim about
+                the filters, and on a genuinely empty ledger nothing was
+                filtered, so it would be describing a cause that isn't there. */}
+            <p role="status" aria-atomic="true" className="pt-6 text-center text-sm text-fg-muted">
+              {filtered ? "No transactions match these filters." : "No transactions yet."}
             </p>
+            {/* §4.10's escape hatch, at the point of failure. The filter bar has
+                its own Clear, but it is off-screen above by the time the user
+                has scrolled here to find out why the list is empty. */}
+            {filtered && (
+              <div className="flex justify-center pb-6 pt-3">
+                <Button variant="secondary" onClick={() => setFilter({})} data-testid="empty-clear-filters">
+                  Clear filters
+                </Button>
+              </div>
+            )}
           </li>
         )}
       </ul>
@@ -193,10 +226,12 @@ export default function Transactions() {
           <Button
             variant="secondary"
             disabled={txns.isFetchingNextPage}
+            aria-busy={txns.isFetchingNextPage}
             onClick={() => txns.fetchNextPage()}
             data-testid="txn-load-more"
           >
-            {txns.isFetchingNextPage ? "Loading…" : "Load more"}
+            {txns.isFetchingNextPage && <Spinner />}
+            Load more
           </Button>
         </div>
       )}
@@ -341,12 +376,7 @@ function FilterBar({
         </Field>
       </div>
 
-      {(filter.account_id ||
-        filter.category_id ||
-        filter.owner_id ||
-        filter.start ||
-        filter.end ||
-        filter.search) && (
+      {isFiltered(filter) && (
         <Button
           variant="ghost"
           onClick={() => onChange({})}

@@ -12,7 +12,7 @@ import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Button, Checkbox, Field, Input, Select, Textarea, useFieldId } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, Spinner, Textarea, useFieldId } from "@/components/form";
 import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
 import { token, useChartTokens } from "@/theme/chartTokens";
@@ -268,10 +268,7 @@ export default function DesignSystem() {
         <div className="flex flex-wrap items-center gap-3">
           <Button disabled>Disabled</Button>
           <Button aria-busy="true" disabled>
-            <span
-              aria-hidden="true"
-              className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
-            />
+            <Spinner />
             Saving
           </Button>
         </div>

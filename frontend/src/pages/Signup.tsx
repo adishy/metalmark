@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
-import { Button, Field, Input } from "@/components/form";
+import { Button, Field, Input, Spinner } from "@/components/form";
 
 export default function Signup() {
   const { signup } = useAuth();
@@ -98,8 +98,16 @@ export default function Signup() {
             {error}
           </p>
         )}
-        <Button type="submit" disabled={busy} className="w-full" data-testid="signup-submit">
-          {busy ? "Creating account…" : "Create account"}
+        {/* Label kept while working — see the note in Login.tsx. */}
+        <Button
+          type="submit"
+          disabled={busy}
+          aria-busy={busy}
+          className="w-full"
+          data-testid="signup-submit"
+        >
+          {busy && <Spinner />}
+          Create account
         </Button>
         <p className="text-center text-xs text-fg-muted">
           Already have an account?{" "}

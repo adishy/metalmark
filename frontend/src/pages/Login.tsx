@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { ApiError } from "@/api/client";
-import { Button, Field, Input } from "@/components/form";
+import { Button, Field, Input, Spinner } from "@/components/form";
 
 export default function Login() {
   const { login } = useAuth();
@@ -70,8 +70,18 @@ export default function Login() {
             {error}
           </p>
         )}
-        <Button type="submit" disabled={busy} className="w-full" data-testid="login-submit">
-          {busy ? "Signing in…" : "Sign in"}
+        {/* Keeps its label while working (§4.1). "Signing in…" replaced the
+            label, which made the button's own name change underneath the user
+            and put the status where nothing announces it. */}
+        <Button
+          type="submit"
+          disabled={busy}
+          aria-busy={busy}
+          className="w-full"
+          data-testid="login-submit"
+        >
+          {busy && <Spinner />}
+          Sign in
         </Button>
         <p className="text-center text-xs text-fg-muted">
           No account yet?{" "}

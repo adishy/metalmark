@@ -18,7 +18,7 @@ import {
   type MappableField,
 } from "@/api/import";
 import Dialog from "@/components/Dialog";
-import { Button, Checkbox, Field, Input, Select, useFieldId } from "@/components/form";
+import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId } from "@/components/form";
 
 interface ImportDialogProps {
   onClose: () => void;
@@ -115,8 +115,14 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
         <Button variant="ghost" onClick={reset} data-testid="import-back">
           Choose a different file
         </Button>
-        <Button onClick={commit} disabled={!ready || commitMut.isPending} data-testid="import-commit">
-          {commitMut.isPending ? "Importing…" : "Import"}
+        <Button
+          onClick={commit}
+          disabled={!ready || commitMut.isPending}
+          aria-busy={commitMut.isPending}
+          data-testid="import-commit"
+        >
+          {commitMut.isPending && <Spinner />}
+          Import
         </Button>
       </>
     ) : (
@@ -189,15 +195,25 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
 
           <div>
             <p className="mb-1 text-xs font-medium text-fg-muted">Sample from your file</p>
+            {/* A wide CSV scrolls this sideways, so §4.7 applies: the region
+                has to be reachable by keyboard (2.1.1) and the headers scoped,
+                or the sample is a grid of unexplained cells to a screen
+                reader. */}
             <div
               className="overflow-x-auto rounded-control border border-border"
+              role="region"
+              aria-label="Sample rows from the file"
+              tabIndex={0}
               data-testid="import-table"
             >
               <table className="w-full text-left text-xs">
+                <caption className="sr-only">
+                  A sample of rows from the file, under the column headings as they appear in it
+                </caption>
                 <thead className="bg-surface-inset/60 text-fg-muted">
                   <tr>
                     {preview.headers.map((h) => (
-                      <th key={h} className="whitespace-nowrap px-2 py-1 font-medium">
+                      <th key={h} scope="col" className="whitespace-nowrap px-2 py-1 font-medium">
                         {h}
                       </th>
                     ))}
