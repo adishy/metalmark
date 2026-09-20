@@ -444,7 +444,13 @@ async def allocation(
         if v.unaccounted_cash_base:
             _add(CASH_SECURITY_TYPE, "Unaccounted cash", v.unaccounted_cash_base)
 
-    total = quantize_storage(sum(r["value_base"] for r in groups.values()))
+    # `ZERO`, not a bare `sum`: an empty portfolio has no groups, and `sum` over
+    # nothing returns the *int* 0, whose `.quantize` is an AttributeError. Which
+    # is a 500 on the allocation view for every household that has not opened an
+    # investment account yet — the emptiest possible case, and the one this is
+    # most likely to be read in. `values_by_account` below already spells it this
+    # way; this was the one sum in the module that did not.
+    total = quantize_storage(sum((r["value_base"] for r in groups.values()), ZERO))
     rows = []
     for row in groups.values():
         value = quantize_storage(row["value_base"])

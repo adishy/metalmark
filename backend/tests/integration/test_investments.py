@@ -449,6 +449,26 @@ async def test_allocation_aggregates_one_security_across_accounts(household_fact
         assert sum(r["percent"] for r in result["rows"]) == Decimal("100.0000")
 
 
+async def test_allocation_of_an_empty_portfolio_is_empty_not_an_error(household_factory):
+    """The case that is not a portfolio at all, and the first one anybody sees.
+
+    ``sum`` over nothing returns the *int* 0, and quantizing that is an
+    AttributeError — so this endpoint answered 500 for every household that had
+    not opened an investment account, on all four tabs the view offers, and the
+    frontend turned the failure into a JSON parse error because a 500 has no JSON
+    body. Both existing tests here seed a holding first, which is exactly the
+    shape of test that cannot see an empty-input bug.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        # All four: the tabs are the same query with a different key, and the
+        # crash was in the shared tail rather than in any one grouping.
+        for group_by in ("security", "type", "account", "currency"):
+            result = await inv.allocation(s, on=ON, base_ccy=BASE, group_by=group_by)
+            assert result["total_base"] == Decimal("0.0000"), group_by
+            assert result["rows"] == [], group_by
+
+
 async def test_allocation_by_type_puts_cash_in_its_own_group(household_factory):
     hh = await household_factory()
     async with scoped_session(household_id=hh) as s:
