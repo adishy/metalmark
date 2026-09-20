@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # a real property worth being able to switch off.
     open_signup: bool = Field(default=True, alias="METALMARK_OPEN_SIGNUP")
 
+    # Which aggregator a *new* claim uses. Deliberately not a global switch for
+    # sync: an existing connection carries its provider on its own row, so
+    # changing this never re-points a live connection at a different backend.
+    # Defaults to the real provider; set to "fake" for a credential-free demo.
+    simplefin_provider: str = Field(default="simplefin", alias="METALMARK_SIMPLEFIN_PROVIDER")
+
     secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")

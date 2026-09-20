@@ -12,9 +12,24 @@ point of running the spike.
 | `demo_capture.json` | **Captured**, verbatim. Trimmed only in *volume* (6 transactions per account, one holding), never in shape. |
 
 Everything else the tests need is **constructed** in `backend/tests/fakes/simplefin.py`
-by transforming the captured payload. Each constructed scenario carries a comment
-naming the assumption it encodes. The distinction matters: the capture proves the
-wire format, and the constructions encode our *behavioural* assumptions about it.
+by transforming the captured payload via the *production* parser
+(`app.services.simplefin.parse_accounts_payload`). Each constructed scenario carries
+a comment naming the assumption it encodes. The distinction matters: the capture
+proves the wire format, and the constructions encode our *behavioural* assumptions
+about it.
+
+Routing the constructions through the production parser is deliberate. A fake that
+built its DTOs by hand would agree with itself and prove nothing about the wire
+format; going through the real parser means the capture genuinely validates our
+reading of it.
+
+Three things the capture cannot show, so every test for them is constructed:
+
+| Not in the capture | Why |
+|---|---|
+| Pending transactions | The demo never emits `posted: 0`. |
+| Reconnects with changed ids | The demo's account ids are *stable* across a re-claim. |
+| Auth failures (`con.auth`) | The demo bridge will not produce a revoked credential on request. |
 
 ## How the capture was taken
 
@@ -70,7 +85,20 @@ implementation, so they are recorded here rather than rediscovered later.
    which is what the `(account_id, external_id)` unique index already enforces.
    `mcc` is also nullable despite being present on every row (6 of 170 are null).
 
-6. **The demo regenerates its data relative to *now*, so transaction ids and dates
+6. **`errlist` entries are objects, not strings** — `{"code": "...", "msg": "..."}`.
+   An earlier reading assumed a flat list of strings; a parser written to that
+   assumption would have put a Python dict's `repr` into the run log. Captured
+   verbatim, on HTTP 200:
+
+   ```json
+   {"code": "gen.api", "msg": "Requested date range exceeds limit of 90 days and was capped."}
+   ```
+
+   Only the two `gen.api` window warnings have been observed. `con.auth` and
+   `act.*` are documented codes that the demo bridge will not produce, so their
+   message wording is unverified — route on the **code prefix**, never on text.
+
+7. **The demo regenerates its data relative to *now*, so transaction ids and dates
    shift on every fetch.** Two fetches moments apart returned the same amounts,
    descriptions and payees, one day later, with every id re-minted. This is the
    id-instability case ADR-0022 said only a real capture could reveal — and it
