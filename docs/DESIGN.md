@@ -982,6 +982,9 @@ goes into its own `overflow-x-auto` region with `role="region"` and `tabIndex={0
 and `<input autocomplete>` on anything a password manager or the OS can fill
 (`email`, `current-password`, `new-password` — the login page already does this).
 
+The desktop counterpart to this section is **§9**. A rule that applies at both sizes
+belongs in §4, not in either one.
+
 ---
 
 ## 6. Money and numbers
@@ -1243,6 +1246,123 @@ Settings card.
   matches the stored preference.
 - A target-size test is cheap and worth having: assert every element matching
   `button, a, input, select` has a bounding box of at least 44×44.
+
+---
+
+## 9. Desktop rules
+
+Written because of a specific complaint, which is worth quoting because the diagnosis is
+in it: *"this just looks like a vaguely mobile UI adapted to a larger screen."* That was
+accurate, and the cause was one line — `AppShell.tsx` renders every page into
+`mx-auto w-full max-w-4xl p-4`, a **896 px** column. At 1440 px that is 272 px of dead
+margin per side; at 1920 px it is 512 px. §2.5 has documented a 24 px page gutter at `lg:`
+since the token layer landed, and the shell never adopted it.
+
+Widening that number is necessary and **not sufficient**. A phone list at 1280 px is still
+a phone list: it shows merchant and one meta line and hides category, account and owner
+behind a sheet, because at 360 px it had no choice. At 1280 px it has a choice, and *that*
+is what "better use of space" means — **stop hiding information behind a tap.** Space is
+spent on content, not on larger type and longer empty rows.
+
+**Breakpoint.** `lg` (1024 px) begins the desktop layout, and it is the only new one — §5's
+"only two matter, `sm` and `lg`" stands. Everything below is a `lg:` variant of a layout
+that already works at 360 px, never a second layout. **A page must not have two JSX trees
+branching on viewport**; that is how the two drift and the untested one rots. If a rule
+cannot be expressed as a class variant, it is not a desktop rule.
+
+### 9.1 Content width
+
+One global width is the bug. Width follows what the content *is*:
+
+| Content | Max width | Why |
+|---|---|---|
+| Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
+| Reports, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
+| Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
+
+The shell sets the **widest** case and pages narrow themselves; a page that needs less
+wraps its content rather than the shell asking it what it wants. `mx-auto` stays, so a
+narrow page is centred rather than pinned left.
+
+**Gutter.** `p-4` becomes `lg:p-6`, per §2.5. That is the whole of the shell change at
+this level: `max-w-4xl` → `max-w-7xl`, `p-4` → `lg:p-6`.
+
+### 9.2 The shell at `lg:`
+
+The phone tab bar is already `sm:hidden` and the nav already becomes a horizontal row in
+the header. The desktop shape keeps that — **a header with the nav in it** — rather than
+growing a second navigation in a left sidebar.
+
+The reason is the destination count. A sidebar pays for itself at fifteen destinations
+where a list down the side beats a wrapped row; at six it costs 240 px of every page's
+width to save one row of header, and it puts Settings and Admin — the two least-used
+items — in the most visually prominent column on the screen. §4.13's rule stands: replace
+a nav, or do not add one.
+
+**What the header gains at `lg:`** — nothing. It is already correct. The work is below it.
+
+### 9.3 What each page does with the room
+
+Four shapes, and they are the whole of it:
+
+- **Transactions — list and detail, side by side.** The list takes `lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]`
+  with the detail panel in the second column, shown when a row is selected and a quiet
+  empty state otherwise. This is the single biggest win: the phone's row → sheet → back
+  loop becomes one click with no navigation.
+- **Reports — two-up.** KPI row spans both columns; the charts pair two per row above
+  `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their meaning when
+  squeezed.
+- **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
+  their internal layout and simply stop being full-width.
+- **Settings — rail and content.** The tab list becomes a vertical rail in the first
+  column (`lg:w-56`), the active panel in the second. §4.14's roving tabindex and arrow
+  keys are unchanged; only the axis changes, and `aria-orientation` goes with it.
+
+### 9.4 The list row at `lg:`
+
+The phone row (§5) is merchant + one meta line + amount. At `lg:` the row gains **columns,
+not height**:
+
+- Category, account and owner stop being sheet-only and get their own columns, with the
+  account carrying its mark (§4.6).
+- The meta line becomes the columns; it does not stay *and* gain columns beside it.
+- `min-h-16` is a phone figure. At `lg:` a row may be `min-h-12` — but **44 px is still the
+  floor**, because §5's target rule is not a touch-only rule and one floor is easier to
+  keep than two.
+- A real header row appears above the list, naming the columns.
+
+**Density is information, never smaller type.** The type scale (§2.4) does not change at
+`lg:`. A desktop layout that buys space by shrinking 14 px text to 12 px has not used the
+space, it has spent the reader's eyesight on it.
+
+### 9.5 Pointer affordances
+
+A pointer has a hover state and a phone does not, which changes two things and only two:
+
+- **Rows and cards get a hover state** — `hover:bg-surface-inset`, the same token the
+  active nav item uses. Purely additive: it says "this is one target", and nothing is
+  reachable *only* by hovering.
+- **Destructive and rare actions may be hover-revealed** — a delete on a rule row, for
+  instance. They must still be focusable and reachable by keyboard (`focus-visible` shows
+  them, not only `hover:`), and they must not be the only route to an action someone needs.
+
+**Full timestamps and other detail belong here.** A pretty date (`Jan 02`) reveals its
+`YYYY-MM-DD` on hover via `title`. `title` is not an accessible name and is not available
+to a touch user, so the ISO value is *also* in the element's accessible text — hover is a
+convenience for the sighted mouse user, never the only way to reach the value.
+
+### 9.6 Overlays at `lg:`
+
+§4.8 already sanctions a right **slide-over** at ≥1024 px. §9 makes it the rule: a bottom
+sheet is a thumb affordance and there is no thumb; at `lg:` a detail or a form opens as a
+right slide-over, or in place per §9.3, and **never as a bottom sheet**. Dialogs (§4.8)
+are unchanged at every width.
+
+### 9.7 Test viewports
+
+§5's list gains its two desktop entries: **1280×800** and **1440×900**. The existing
+1280×800 was already in the list and was never asserted against; these two are what the
+`lg:` variants are checked at.
 
 ---
 
