@@ -4,7 +4,7 @@ import type {
   Account,
   AccountCreate,
   AccountUpdate,
-  CashFlowPoint,
+  CashFlowSeries,
   Category,
   CategoryGroup,
   FxRate,
@@ -148,7 +148,7 @@ export function useNetWorthSeries(start: string, end: string, ownerId?: string |
 export function useCashFlow(start: string, end: string, ownerId?: string | null) {
   return useQuery({
     queryKey: ["report-cash-flow", start, end, ownerId ?? null],
-    queryFn: () => api.get<CashFlowPoint[]>(reportUrl("/reports/cash-flow", start, end, ownerId)),
+    queryFn: () => api.get<CashFlowSeries>(reportUrl("/reports/cash-flow", start, end, ownerId)),
   });
 }
 

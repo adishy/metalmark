@@ -31,22 +31,31 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await page.getByTestId("nav-reports").click();
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
 
-  // Unfiltered: all three surfaces draw, and nothing claims an attribution.
+  // Unfiltered: all three surfaces draw, and nothing claims an attribution — with no
+  // filter there is no scoping to describe.
   await expect(page.getByTestId("net-worth-chart").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("spending-donut").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("net-worth-attribution")).toBeHidden();
+  await expect(page.getByTestId("cash-flow-attribution")).toBeHidden();
+  await expect(page.getByTestId("spending-attribution")).toBeHidden();
 
   // Filtered to one owner: still draws, and now says which scoping it used. Net
-  // worth is account-scoped while spending is row-scoped, so leaving that unsaid
-  // would be the UI implying the two views add up. They do not.
+  // worth is account-scoped while spending and cash flow are row-scoped, so leaving
+  // that unsaid would be the UI implying the two views add up. They do not.
   await page.getByTestId("owner-filter").getByRole("button", { name: ownerName, exact: true }).click();
   await expect(page.getByTestId("net-worth-chart").locator("canvas")).toBeVisible();
   await expect(page.getByTestId("net-worth-attribution")).toBeVisible();
   await expect(page.getByTestId("net-worth-attribution")).toContainText("account");
+  await expect(page.getByTestId("cash-flow-attribution")).toBeVisible();
+  await expect(page.getByTestId("cash-flow-attribution")).toContainText("row");
+  await expect(page.getByTestId("spending-attribution")).toBeVisible();
+  await expect(page.getByTestId("spending-attribution")).toContainText("row");
 
-  // Back to the whole household: the caveat goes away with the filter.
+  // Back to the whole household: the caveats go away with the filter.
   await page.getByTestId("owner-filter-all").click();
   await expect(page.getByTestId("net-worth-attribution")).toBeHidden();
+  await expect(page.getByTestId("cash-flow-attribution")).toBeHidden();
+  await expect(page.getByTestId("spending-attribution")).toBeHidden();
   await expect(page.getByTestId("cash-flow-chart").locator("canvas")).toBeVisible();
 });

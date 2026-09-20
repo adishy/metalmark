@@ -243,7 +243,7 @@ def month_flow(income=False):
     r = c.get("/reports/cash-flow", params={"start": day(-40), "end": day(1)})
     if r.status_code != 200:
         return None
-    row = next((m for m in r.json() if m["month"] == MONTH), None)
+    row = next((m for m in r.json()["points"] if m["month"] == MONTH), None)
     return float(row["income"] if income else row["expense"]) if row else 0.0
 
 
@@ -407,6 +407,10 @@ check("net worth accepts an owner filter", r.status_code == 200, f"{r.status_cod
 for path in ("/reports/cash-flow", "/reports/spending"):
     r = c.get(path, params={"start": day(-30), "end": day(0), "owner_id": alice})
     check(f"{path} with owner filter", r.status_code == 200, f"{r.status_code} {body(r, 200)}")
+    # Both scope rows, unlike net worth above, and the payload now says so — otherwise
+    # a client has no way to know these two do not add up with the account-scoped one.
+    reported = r.json().get("attribution") if r.status_code == 200 else None
+    check(f"{path} declares row attribution", reported == "row", f"attribution={reported!r}")
 
 # ---------------------------------------------------------------- signup joins the household
 section("open signup joins the existing household")

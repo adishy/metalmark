@@ -1403,10 +1403,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CashFlowPoint'
-                title: Response Cash Flow Reports Cash Flow Get
+                $ref: '#/components/schemas/CashFlowSeries'
         '422':
           description: Validation Error
           content:
@@ -2034,6 +2031,25 @@ components:
       - expense
       - net
       title: CashFlowPoint
+    CashFlowSeries:
+      properties:
+        base_currency:
+          type: string
+          title: Base Currency
+        points:
+          items:
+            $ref: '#/components/schemas/CashFlowPoint'
+          type: array
+          title: Points
+        attribution:
+          type: string
+          title: Attribution
+          default: row
+      type: object
+      required:
+      - base_currency
+      - points
+      title: CashFlowSeries
     CategoryCreate:
       properties:
         group_id:
@@ -2950,6 +2966,10 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Total
+        attribution:
+          type: string
+          title: Attribution
+          default: row
       type: object
       required:
       - base_currency

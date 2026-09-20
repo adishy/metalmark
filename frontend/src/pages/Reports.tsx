@@ -62,7 +62,7 @@ export default function Reports() {
       legend: { top: 0, textStyle: { color: "#94a3b8" } },
       xAxis: {
         type: "category",
-        data: cashFlow.data?.map((p) => p.month) ?? [],
+        data: cashFlow.data?.points.map((p) => p.month) ?? [],
         axisLine: { lineStyle: { color: "#475569" } },
       },
       yAxis: { type: "value", axisLine: { lineStyle: { color: "#475569" } }, splitLine: { lineStyle: { color: "#1e293b" } } },
@@ -72,7 +72,7 @@ export default function Reports() {
           type: "bar",
           stack: "cash-flow",
           itemStyle: { color: INCOME_COLOR },
-          data: cashFlow.data?.map((p) => Number(p.income)) ?? [],
+          data: cashFlow.data?.points.map((p) => Number(p.income)) ?? [],
         },
         {
           name: "Expense",
@@ -81,7 +81,7 @@ export default function Reports() {
           itemStyle: { color: EXPENSE_COLOR },
           // Expenses are summed as positive magnitudes by some backends and as
           // negatives by others; plot them downward either way.
-          data: cashFlow.data?.map((p) => -Math.abs(Number(p.expense))) ?? [],
+          data: cashFlow.data?.points.map((p) => -Math.abs(Number(p.expense))) ?? [],
         },
         {
           name: "Net",
@@ -89,7 +89,7 @@ export default function Reports() {
           smooth: true,
           lineStyle: { color: "#14b8a6" },
           itemStyle: { color: "#14b8a6" },
-          data: cashFlow.data?.map((p) => Number(p.net)) ?? [],
+          data: cashFlow.data?.points.map((p) => Number(p.net)) ?? [],
         },
       ],
     }),
@@ -120,7 +120,7 @@ export default function Reports() {
 
   const hasSpending = (spending.data?.rows.length ?? 0) > 0;
   const hasSeries = (nw.data?.points.length ?? 0) > 0;
-  const hasCashFlow = (cashFlow.data?.length ?? 0) > 0;
+  const hasCashFlow = (cashFlow.data?.points.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -163,6 +163,12 @@ export default function Reports() {
         ) : (
           <p className="text-sm text-slate-500">No cash flow in range.</p>
         )}
+        {ownerFilter && cashFlow.data && (
+          <p className="mt-2 text-xs text-slate-500" data-testid="cash-flow-attribution">
+            Attribution: {cashFlow.data.attribution} — each entry counts under the owner it is
+            assigned to, so this reads the household's postings rather than one owner's accounts.
+          </p>
+        )}
       </section>
 
       <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-spending">
@@ -180,6 +186,12 @@ export default function Reports() {
             </li>
           ))}
         </ul>
+        {ownerFilter && spending.data && (
+          <p className="mt-2 text-xs text-slate-500" data-testid="spending-attribution">
+            Attribution: {spending.data.attribution} — this counts entries, not accounts, so it does
+            not add up with the net worth figures above for the same owner.
+          </p>
+        )}
       </section>
     </div>
   );

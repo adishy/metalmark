@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from app.deps import RequestContext, get_context
 from app.schemas.reports import (
     CashFlowPoint,
+    CashFlowSeries,
     NetWorthSeries,
     SpendingReport,
 )
@@ -33,17 +34,17 @@ async def net_worth_series(
     )
 
 
-@router.get("/cash-flow", response_model=list[CashFlowPoint])
+@router.get("/cash-flow", response_model=CashFlowSeries)
 async def cash_flow(
     start: date,
     end: date,
     owner_id: uuid.UUID | None = Query(default=None),
     ctx: RequestContext = Depends(get_context),
 ):
-    _base, out = await reports.cash_flow_series(
+    base, out = await reports.cash_flow_series(
         ctx.session, ctx.household_id, start, end, owner_id
     )
-    return [CashFlowPoint(**p) for p in out]
+    return CashFlowSeries(base_currency=base, points=[CashFlowPoint(**p) for p in out])
 
 
 @router.get("/spending", response_model=SpendingReport)

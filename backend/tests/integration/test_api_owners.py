@@ -507,6 +507,33 @@ async def test_net_worth_response_declares_its_attribution(client):
     assert body["delta_net_worth"] == "0.0000"
 
 
+async def test_every_report_declares_which_question_its_owner_filter_answered(client):
+    """The three reports share an ``owner_id`` and mean different things by it.
+
+    Net worth scopes *accounts*; cash-flow and spending scope *entries*. Nothing in
+    the request says which, and the figures are not additive across the two
+    readings, so each payload has to carry its own answer (ADR-0026). Cash-flow was
+    a bare JSON array, which left it nowhere to say so.
+    """
+    await _signup(client)
+    await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2026-01-01",
+    })
+    window = {"start": "2026-01-01", "end": "2026-01-31"}
+
+    nw = (await client.get("/reports/net-worth", params=window)).json()
+    cf = (await client.get("/reports/cash-flow", params=window)).json()
+    spending = (await client.get("/reports/spending", params=window)).json()
+
+    assert (nw["attribution"], cf["attribution"], spending["attribution"]) == (
+        "account", "row", "row",
+    )
+    # The envelope is also what finally names the currency the points are in.
+    assert cf["base_currency"] == nw["base_currency"]
+    assert isinstance(cf["points"], list)
+
+
 async def test_owner_filters_are_accepted_everywhere_they_are_offered(client):
     await _signup(client)
     alex = (await client.post("/owners", json={"name": "Alex"})).json()

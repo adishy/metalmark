@@ -134,10 +134,19 @@ export interface CashFlowPoint {
   net: Money;
 }
 
+export interface CashFlowSeries {
+  base_currency: string;
+  points: CashFlowPoint[];
+  /** Every entry stands on its own owner — the mirror of net worth's "account". */
+  attribution: "row";
+}
+
 export interface SpendingReport {
   base_currency: string;
   rows: { category_id: UUID | null; category_name: string; total: Money }[];
   total: Money;
+  /** Same row-level reading as cash flow. */
+  attribution: "row";
 }
 
 export interface Member {
