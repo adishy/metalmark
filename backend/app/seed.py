@@ -68,6 +68,11 @@ DEMO_OPENING = {
 DEMO_FX_RATE = {"opening": Decimal("0.90"), "latest": Decimal("0.85")}
 
 # One month's ordinary activity on the checking account, as (day, amount, category).
+DEMO_UNFILED = [
+    (1, Decimal("-38.20"), "Corner Pharmacy"),
+    (2, Decimal("-11.50"), "Ride share"),
+    (4, Decimal("-64.00"), "Hardware store"),
+]
 DEMO_MONTHLY = [
     (1, Decimal("5200"), "Salary", "Paycheque"),
     (5, Decimal("-420"), "Groceries", "Supermarket"),
@@ -163,13 +168,21 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
                                     rate_date=today, rate=DEMO_FX_RATE["latest"])
 
     running = {"checking": DEMO_OPENING["checking"], "savings": DEMO_OPENING["savings"]}
+    # Every row that gets created, so the closing log reports a number it
+    # actually counted rather than one it estimated from the loop bounds — which
+    # quietly stopped matching the moment the transfer pairs were added.
+    recorded: list = []
 
-    async def record(account, key, when: date, amount: Decimal, category: str,
+    async def record(account, key, when: date, amount: Decimal, category: str | None,
                      description: str, owner_id=None):
+        # No category is a meaningful input, not a missing one: the service reads
+        # it as "nothing has filed this yet" and files it for review.
         txn = await txn_svc.create_transaction(session, household_id, TransactionCreate(
             account_id=account.id, amount=amount, transacted_at=_at(when),
-            description=description, category_id=cats[category.lower()], owner_id=owner_id))
+            description=description,
+            category_id=cats[category.lower()] if category else None, owner_id=owner_id))
         running[key] += amount
+        recorded.append(txn)
         return txn
 
     split_candidate = None
@@ -212,6 +225,26 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
         await ledger_svc.update_account(session, savings.id, AccountUpdate(
             current_balance=running["savings"], balance_date=last_day))
 
+    # A few rows as a bank feed actually delivers them: the money moved and
+    # nothing has filed it yet. `create_transaction` derives review_status from
+    # whether a category was supplied (services/transactions.py), so leaving the
+    # category off is the whole of it — and is why the queue was empty before,
+    # since every other seeded row carries one.
+    #
+    # Dated inside the current month, and folded into `running` like every other
+    # row. Both matter: dated any earlier and they would land behind a month-end
+    # snapshot that has already been written, and the series would report a
+    # currency revaluation that is really just a transaction it could not see.
+    first_of_month = date(today.year, today.month, 1)
+    for days_back, amount, description in DEMO_UNFILED:
+        await record(checking, "checking", max(first_of_month, today - timedelta(days=days_back)),
+                     amount, None, description, owner_id=shared)
+    # The loop above already snapshotted checking at `today`; the rows just added
+    # are dated on or before it, so the snapshot has to be taken again or it
+    # under-reports by exactly these three.
+    await ledger_svc.update_account(session, checking.id, AccountUpdate(
+        current_balance=running["checking"], balance_date=today))
+
     if split_candidate is not None:
         # One charge split across two owners, which is the shape the row-scoped
         # report filters exist for: the parent belongs to Shared, the children to
@@ -221,8 +254,9 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
             SplitIn(amount=Decimal("-60"), category_id=cats["dining"], owner_id=mine),
         ])
 
-    log.info("seed.demo_ledger", household=str(household_id),
-             accounts=4, transactions=len(months) * (len(DEMO_MONTHLY) + 1),
+    log.info("seed.demo_ledger", household=str(household_id), accounts=4,
+             transactions=len(recorded),
+             unfiled=sum(1 for t in recorded if t.review_status == "needs_review"),
              card=str(card.id), euro=str(euro.id))
     return {
         "start": opening_date,
