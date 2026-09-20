@@ -7,6 +7,12 @@ from app.models.identity import (  # noqa: F401
     Session,
     User,
 )
+from app.models.investments import (  # noqa: F401
+    Holding,
+    InvestmentTransaction,
+    Security,
+    SecurityPrice,
+)
 from app.models.ledger import (  # noqa: F401
     Account,
     AccountConnection,
@@ -29,6 +35,10 @@ __all__ = [
     "HouseholdMember",
     "Session",
     "User",
+    "Holding",
+    "InvestmentTransaction",
+    "Security",
+    "SecurityPrice",
     "Account",
     "AccountConnection",
     "BalanceSnapshot",
