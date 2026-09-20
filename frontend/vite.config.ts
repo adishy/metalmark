@@ -13,8 +13,8 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       manifest: {
-        name: "Kestrel",
-        short_name: "Kestrel",
+        name: "metalmark",
+        short_name: "metalmark",
         description: "Self-hosted personal finance",
         theme_color: "#0f172a",
         background_color: "#0f172a",

@@ -33,7 +33,7 @@ export default function Login() {
         data-testid="login-form"
       >
         <div className="text-center">
-          <h1 className="text-2xl font-semibold text-brand">Kestrel</h1>
+          <h1 className="text-2xl font-semibold text-brand">metalmark</h1>
           <p className="text-sm text-slate-400">Sign in to your household</p>
         </div>
         <label className="block text-sm">

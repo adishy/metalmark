@@ -15,7 +15,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-full flex-col">
       <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
         <div className="flex items-center gap-6">
-          <span className="text-lg font-semibold text-brand">Kestrel</span>
+          <span className="text-lg font-semibold text-brand">metalmark</span>
           <nav className="hidden gap-1 sm:flex">
             {NAV.map((n) => (
               <NavLink
