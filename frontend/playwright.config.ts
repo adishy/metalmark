@@ -17,8 +17,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: {
     timeout: 10_000,
-    // Small tolerance for AA/subpixel differences; baselines are Linux-generated.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.01 },
+    // Baselines are generated in the pinned Playwright container, so rendering
+    // is deterministic run-to-run; this only absorbs a few AA/subpixel pixels.
+    // Keep it small — a 1% ratio previously waved through a visible text change.
+    toHaveScreenshot: { maxDiffPixels: 100 },
   },
   use: {
     baseURL: BASE_URL,
