@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,8 +38,13 @@ class Household(UUIDPkMixin, TimestampMixin, Base):
 
 
 class HouseholdMember(TimestampMixin, Base):
+    """One row per (household, user). The composite primary key below *is* the
+    uniqueness — a separate UniqueConstraint over the same two columns would be a
+    duplicate index, and it was: ``create_all`` dropped it as redundant when it
+    built the table, but alembic's comparison did not, so ``alembic check``
+    reported phantom drift on every database, fresh or migrated."""
+
     __tablename__ = "household_members"
-    __table_args__ = (UniqueConstraint("household_id", "user_id"),)
 
     household_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), primary_key=True
