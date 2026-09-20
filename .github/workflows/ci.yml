@@ -191,6 +191,12 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       COMPOSE_PROJECT_NAME: metalmark
+      # Makes `sync.spec.ts` runnable at all. Without it the claim endpoint calls
+      # the real bridge, so the sync vertical could only be exercised by a human
+      # with a real bank credential — in a job that must never hold one, and whose
+      # results would then be real financial data in a CI log. The fake is refused
+      # outright when METALMARK_ENV is not test/dev, and this stack is `dev`.
+      METALMARK_SIMPLEFIN_PROVIDER: fake
     steps:
       - uses: actions/checkout@v7
 

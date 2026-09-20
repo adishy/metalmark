@@ -8,9 +8,14 @@ It complements the other suites rather than repeating them. Playwright covers th
 paths a *user* clicks; this covers the ones that are easier to state precisely as
 HTTP — the ownership chain and its filters, the split-sum invariant, what a
 transfer link does to cash flow and revaluation, rule provenance and idempotency,
-CSV re-import and near-duplicates, and the signup/household rules. The pytest
-suite covers the same services in-process against a throwaway database; this is
-the check that the same things are true of the assembled app.
+CSV re-import and near-duplicates, the signup/household rules, and the bank-sync
+vertical end to end. The pytest suite covers the same services in-process against
+a throwaway database; this is the check that the same things are true of the
+assembled app.
+
+The bank-sync section is the one that can SKIP rather than pass: it needs a stack
+started with ``METALMARK_SIMPLEFIN_PROVIDER=fake``, which is a launch-time
+property no request can change. It says so, loudly, and the footer counts it.
 
 Prerequisites: a running stack whose database has been migrated and seeded. Run
 it through ``scripts/verify.sh walkthrough``, which documents every gate.
@@ -26,6 +31,7 @@ import io
 import json
 import os
 import sys
+import time
 import uuid
 
 import httpx
@@ -34,7 +40,7 @@ BASE = os.environ.get("WALKTHROUGH_BASE_URL", "http://localhost:8000")
 EMAIL = os.environ.get("WALKTHROUGH_EMAIL", "owner@example.com")
 PASSWORD = os.environ.get("WALKTHROUGH_PASSWORD", "devpassword123")
 RUN = uuid.uuid4().hex[:6]
-ok = bad = 0
+ok = bad = skipped = 0
 
 
 def check(name, cond, detail=""):
@@ -46,6 +52,20 @@ def check(name, cond, detail=""):
         bad += 1
         print(f"  FAIL  {name}  {detail}")
     return cond
+
+
+def skip(name, detail=""):
+    """A check that did not run, because this stack cannot answer it.
+
+    Not a silent `return`: a gate that asserted nothing must not read as a gate
+    that passed everything, so it prints where a PASS would have, and the footer
+    counts it. There is exactly one user of this — see the bank-sync section —
+    and the condition is a property of how the stack was *started*, which no
+    request can change.
+    """
+    global skipped
+    skipped += 1
+    print(f"  SKIP  {name}  {detail}")
 
 
 def section(t):
@@ -442,5 +462,174 @@ if r.status_code == 201:
     emails = [m.get("email") for m in r.json()] if r.status_code == 200 else []
     check("the new member appears on the roster", email in emails, f"{emails}")
 
-print(f"\n{'=' * 60}\n{ok} passed, {bad} failed   (run id {RUN})\n{'=' * 60}")
+# ---------------------------------------------------------------- bank sync
+section("bank sync: claim, run, and the idempotency bar")
+
+
+def runs_for(connection_id):
+    r = c.get("/connections/runs", params={"connection_id": connection_id, "limit": 10})
+    return r.json() if r.status_code == 200 else []
+
+
+def wait_for_run(connection_id, previous=None, deadline_s=90.0):
+    """The newest **settled** run for a connection, once it is not `previous`.
+
+    A run is ``ok|partial|error|cancelled|running`` and only ``running`` means
+    "not yet". Polled rather than slept on, because the work happens in another
+    container and the queue is drained on the worker's own tick — nothing this
+    process does is observable as an event, so there is nothing to wait *on*.
+    """
+    end = time.monotonic() + deadline_s
+    while time.monotonic() < end:
+        runs = runs_for(connection_id)
+        if runs and runs[0]["id"] != previous and runs[0]["status"] != "running":
+            return runs[0]
+        time.sleep(1.0)
+    return None
+
+
+# M1a was manual. This is the M2 vertical over real HTTP: claim a bank, watch a
+# run appear, read its log back, and prove a second sync writes nothing.
+# Playwright walks the same path through the UI (`e2e/sync.spec.ts`); what this
+# adds is the assertions that are about *values* rather than about what a screen
+# shows — the counters, the event trail, and the refusals the API promises.
+#
+# It needs the stack started with the fake provider, which is a property of how
+# the process was launched and not something a request can ask for:
+#
+#     METALMARK_SIMPLEFIN_PROVIDER=fake docker compose up -d --build
+#
+# Without it the claim is handed to the live bridge, which correctly refuses a
+# token that is not one — a right answer to a question this file did not mean to
+# ask, so it SKIPs and names the command rather than failing. CI exports the
+# variable for the whole job, so CI asserts.
+r = c.post("/connections/claim", json={"setup_token": f"walkthrough-{RUN}"}, headers=C)
+if r.status_code != 201 or (r.json().get("provider") != "fake"):
+    skip("bank sync vertical",
+         f"claim -> {r.status_code} {body(r, 120)}. Start the stack with "
+         f"METALMARK_SIMPLEFIN_PROVIDER=fake to assert it.")
+else:
+    conn = r.json()
+    cid = conn["id"]
+    check("a claimed bank is healthy and unpaused",
+          conn["status"] == "ok" and conn["is_enabled"] is True,
+          f"status={conn['status']} enabled={conn['is_enabled']} provider={conn['provider']}")
+
+    # The claim response is the one place a credential is in scope, so it is the
+    # one worth asserting structurally. `access_url_encrypted` is the column that
+    # holds the ciphertext of a Basic-auth URL (`schemas/connections.py`), and the
+    # rule there is that the field does not *exist* on the way out rather than
+    # that it is nulled — a key named here would be a key somebody fills in later.
+    check("the claim response carries no credential",
+          not any("access" in k or "token" in k for k in conn), f"keys={sorted(conn)}")
+
+    # The cadence bounds are the API's, not the select's: the panel can only offer
+    # what its list contains, so this is where they are exercised as refusals.
+    r = c.patch(f"/connections/{cid}", json={"sync_interval_minutes": 30}, headers=C)
+    check("below the cadence floor is refused", r.status_code == 422, f"{r.status_code}")
+    r = c.patch(f"/connections/{cid}", json={"sync_interval_minutes": 20160}, headers=C)
+    check("above the cadence ceiling is refused", r.status_code == 422, f"{r.status_code}")
+
+    # Park the cadence at its ceiling *before* syncing by hand. A claim sets
+    # `next_sync_at` to now, so the cron is otherwise entitled to enqueue a run of
+    # its own partway through this section, and the "newest run" read back below
+    # would then be the cron's rather than the one this triggered.
+    r = c.patch(f"/connections/{cid}", json={"sync_interval_minutes": 10080}, headers=C)
+    check("the interval round-trips",
+          r.status_code == 200 and r.json().get("sync_interval_minutes") == 10080,
+          f"{r.status_code} {body(r, 120)}")
+
+    r = c.post(f"/connections/{cid}/sync", headers=C)
+    # 202, not 200: nothing has synced yet, and a synchronous response would block
+    # the request for the length of a bank fetch. The queue exists so that it does
+    # not, so the status code is the assertion that the queue is in the path.
+    check("sync-now queues a job", r.status_code == 202, f"{r.status_code} {body(r, 120)}")
+    job = r.json() if r.status_code == 202 else {}
+
+    first = wait_for_run(cid)
+    if check("the worker ran it and the run is readable", first is not None,
+             f"run={first['id'][:8]} status={first['status']}" if first else
+             "no settled run within 90s — is the worker container up?"):
+        check("the run succeeded", first["status"] == "ok",
+              f"status={first['status']} error={first.get('error')}")
+        # The fetch's own telemetry is `—` here, and that is the assertion rather
+        # than a gap in it: `FetchStats` is filled by `SimpleFinProvider` from the
+        # response it read, and the fake makes no request, so it reports none of it
+        # (`http_status` is the *failure* code the panel chips beside a run, so a
+        # run with nothing to complain about has nothing to put there either).
+        # Asserting 200 would assert that the fake went to the network — the one
+        # thing it exists not to do. The success path is pinned against a scripted
+        # response in `tests/integration/test_sync.py`, which needs no bank.
+        check("a scripted provider records no fetch telemetry",
+              first["http_status"] is None and first["http_ms"] is None
+              and first["bytes_fetched"] is None,
+              f"http_status={first['http_status']} http_ms={first['http_ms']} "
+              f"bytes={first['bytes_fetched']}")
+        # Deliberately not "inserted > 0". The ledger is shared, so on a database
+        # where another connection already synced this capture the correct count
+        # is zero — ADR-0009 keys an account on institution + name, not on the
+        # connection, so a second connection reporting the same accounts is a
+        # reconnect. What must hold everywhere is that every account the provider
+        # reported was created or matched, which is what this asserts; the insert
+        # guarantee that is environment-independent is the second run below.
+        check("the payload resolved into accounts",
+              first["accounts_seen"] > 0
+              and first["accounts_created"] + first["accounts_remapped"] > 0,
+              f"seen={first['accounts_seen']} created={first['accounts_created']} "
+              f"remapped={first['accounts_remapped']}")
+
+        d = c.get(f"/connections/runs/{first['id']}")
+        detail = d.json() if d.status_code == 200 else {}
+        events = detail.get("events", [])
+        names = [e["event"] for e in events]
+        seqs = [e["seq"] for e in events]
+        # `window.computed` is the run's first statement of fact — the window it
+        # decided to ask the bridge for, which is the thing a wrong run gets wrong
+        # and the reason it is logged before the fetch rather than after.
+        check("the run carries a log from window.computed to run.finished",
+              d.status_code == 200 and names[:1] == ["window.computed"] and "run.finished" in names,
+              f"{d.status_code} {names}")
+        # `seq` exists because `ts` cannot order this: Postgres `now()` is the
+        # *transaction* timestamp, so every event in one ingest shares it exactly
+        # (`services/connections.py::list_run_events`). Monotonic and unique is
+        # the whole contract this order is built on.
+        check("the log's order is total", seqs == sorted(seqs) and len(set(seqs)) == len(seqs),
+              f"seq={seqs[:12]}")
+        # The token this walked in with is the one secret in scope. It is not the
+        # real credential — that never reaches this process — but a leak is a
+        # leak, and this is the run's own log and the connection row: the two
+        # places ADR-0016 names.
+        blob = json.dumps(detail) + json.dumps(c.get(f"/connections").json())
+        check("no trace of the setup token in the run log or the connection list",
+              f"walkthrough-{RUN}" not in blob, f"{len(blob)} bytes searched")
+
+        # The headline property of the whole workstream: syncing the same data
+        # again inserts nothing and updates nothing. A re-run that reports work is
+        # either duplicating history or rewriting fields a human owns.
+        r = c.post(f"/connections/{cid}/sync", headers=C)
+        check("the second sync queues too", r.status_code == 202, f"{r.status_code}")
+        second = wait_for_run(cid, previous=first["id"])
+        if check("the second run lands", second is not None,
+                 f"run={second['id'][:8]} status={second['status']}" if second else
+                 "no second run within 90s"):
+            check("re-syncing the same data writes nothing",
+                  second["txns_inserted"] == 0 and second["txns_updated"] == 0,
+                  f"inserted={second['txns_inserted']} updated={second['txns_updated']} "
+                  f"reconciled={second['txns_reconciled']}")
+
+    # Cancelling is a race — the job this targets has certainly finished by now —
+    # and the API promises one of two answers rather than a fixed one, so this
+    # asserts the *refusal* half. The other half (a job that is genuinely still
+    # queued disappears) needs a job held open, which is what the panel's e2e
+    # covers and what a sync that finishes in milliseconds cannot be made to do.
+    if job:
+        r = c.post(f"/connections/jobs/{job['id']}/cancel", headers=C)
+        check("cancelling a finished job is refused, not silently accepted",
+              r.status_code == 409 and "already finished" in body(r, 200).lower(),
+              f"{r.status_code} {body(r, 120)}")
+
+summary = f"{ok} passed, {bad} failed"
+if skipped:
+    summary += f", {skipped} skipped"
+print(f"\n{'=' * 60}\n{summary}   (run id {RUN})\n{'=' * 60}")
 sys.exit(1 if bad else 0)

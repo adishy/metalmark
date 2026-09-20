@@ -136,8 +136,12 @@ gate_contract() {
   # GET only, deliberately. /import is absent because its routes are all POSTs
   # (a GET there is a 404, not a 401, so it proves nothing); the multipart routes
   # are covered in-process by backend/tests/integration/test_imports.py.
+  # Kept identical to the list in .github/workflows/ci.yml — the whole point of
+  # this file is that a green run here and a green run there mean the same thing,
+  # and a path added to one of them is the drift that quietly breaks that.
   for path in /accounts /transactions /categories /reports/net-worth /owners \
-              /household /rules /fx-rates; do
+              /household /rules /fx-rates \
+              /connections /connections/runs /connections/jobs; do
     # `|| true`: on a refused connection curl exits non-zero and `set -e` would
     # abort the whole run instead of reporting the gate as failed.
     code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}" || true)

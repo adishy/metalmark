@@ -38,6 +38,11 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-metalmark_app_dev_only_change_me}
       METALMARK_DEFAULT_BASE_CURRENCY: ${METALMARK_DEFAULT_BASE_CURRENCY:-USD}
       METALMARK_SECRET_KEY_FILE: /run/secrets/metalmark_secret_key
+      # Which provider the *claim* endpoint uses. Only the claim: an existing
+      # connection carries its provider on its own row, so the worker dispatches
+      # on that and does not read this. Defaults to the real one — the fake is a
+      # deliberate opt-in, refused outright when METALMARK_ENV is not test/dev.
+      METALMARK_SIMPLEFIN_PROVIDER: ${METALMARK_SIMPLEFIN_PROVIDER:-simplefin}
     secrets:
       - metalmark_secret_key
     volumes:
