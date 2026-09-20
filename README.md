@@ -22,9 +22,37 @@ reporting (Sankey cash flow, category breakdowns, net worth over time).
 | Robustness | **Transactions are decoupled from connections** — removing/re-adding a connection never destroys history | Directly fixes Monarch's flaky-reconnect + duplicate-transaction pain. |
 | Correctness | **Test harness is first-class**: red-green TDD, unit + integration (real Postgres, mock SimpleFIN) + e2e (Playwright), realistic fixtures, CI gates | User's hard requirement; financial correctness is non-negotiable. |
 
+## Run it locally (container-first)
+
+Requires Docker + Docker Compose. Everything runs in containers; nothing is exposed beyond localhost.
+
+```bash
+cp .env.example .env                     # dev defaults are fine
+# a dev secret key already lives at secrets/kestrel_secret_key (gitignored)
+
+docker compose up -d --build             # db + api + worker + web
+docker compose run --rm api alembic upgrade head          # create schema + app role + RLS
+docker compose run --rm \
+  -e KESTREL_SEED_EMAIL=owner@example.com \
+  -e KESTREL_SEED_PASSWORD=devpassword123 \
+  -e KESTREL_SEED_HOUSEHOLD=Home \
+  api python -m app.seed --demo          # first household + owner + default categories
+```
+
+Then open **http://localhost:5173** and sign in with `owner@example.com` / `devpassword123`.
+The API is at http://localhost:8000 (`/healthz`, `/docs`). The Vite dev server proxies `/api` → the API.
+
+Run the backend test suite (real Postgres via the `db` service, isolated `kestrel_test` DB):
+
+```bash
+docker compose run --rm -e KESTREL_TEST_PG_HOST=db -e KESTREL_SECRET_KEY=test-secret api pytest -q
+```
+
+Python dependencies are managed with **uv** (`backend/uv.lock`); the image installs from the lock.
+
 ## Stack (boring on purpose)
 
-- **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, Pydantic v2.
+- **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, Pydantic v2. Deps via **uv**.
 - **DB:** PostgreSQL 16. Money as `NUMERIC` + Python `Decimal` — **never float**.
 - **Background work:** a small worker container: APScheduler for cron polls + a Postgres-backed
   `sync_jobs` queue for on-demand "Sync now". **No Redis** at this scale.

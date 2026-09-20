@@ -48,3 +48,5 @@ load-bearing choice.
 | [0021](0021-investment-balance-source.md) | Investment balance source: derived vs stated + reconciling plug | Accepted |
 | [0022](0022-derisk-sync-p0-spike.md) | De-risk sync early: P0 SimpleFIN spike + Phase-1 vertical slice | Accepted |
 | [0023](0023-phase1-split-1a-1b.md) | Split Phase 1 into 1a/1b; carve FX into its own module | Accepted |
+| [0024](0024-uv-for-python-deps.md) | uv for Python dependency management | Accepted |
+| [0025](0025-rls-implementation-mechanism.md) | RLS mechanism: per-transaction GUC, fail-closed, child policies | Accepted |
