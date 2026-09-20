@@ -170,6 +170,14 @@ export function useInvalidateLedger() {
     qc.invalidateQueries({ queryKey: ["report-net-worth"] });
     qc.invalidateQueries({ queryKey: ["report-cash-flow"] });
     qc.invalidateQueries({ queryKey: ["report-spending"] });
+    // The investments read side. These are in this list for the same reason the
+    // reports are: a sync or an import can create an investment account, bring in
+    // trades, or land a price — and the panel stays mounted while it does, so
+    // without this it keeps serving what it fetched when the page was opened and
+    // there is no refetch-on-focus to rescue it (`main.tsx` turns that off).
+    qc.invalidateQueries({ queryKey: ["portfolio"] });
+    qc.invalidateQueries({ queryKey: ["allocation"] });
+    qc.invalidateQueries({ queryKey: ["holdings"] });
   };
 }
 

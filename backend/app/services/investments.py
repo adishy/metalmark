@@ -117,6 +117,17 @@ class AccountValuation:
     #: which is the authoritative number there, not Σ(holdings). ``None`` for a
     #: ``derived`` one, where Σ(holdings) *is* the balance.
     stated_balance_account: Decimal | None = None
+    #: The same balance converted to base: the number ``value_portfolio`` counts
+    #: this account at. ``None`` for a ``derived`` account, and ``None`` for a
+    #: ``stated`` one whose balance has no rate to convert it with.
+    #:
+    #: That second ``None`` is the reason this exists rather than being left to a
+    #: caller to reconstruct. It is the only signal that separates "the provider's
+    #: balance converted to zero" from "there was no rate" — because
+    #: ``unaccounted_cash_base`` is ``0`` in both cases, the total adds nothing in
+    #: both cases, and a frontend given only those two cannot tell a household
+    #: that its balance is missing from the total rather than worth nothing.
+    stated_balance_base: Decimal | None = None
 
     @property
     def balance_account(self) -> Decimal:
@@ -337,6 +348,7 @@ async def value_account(
             base_ccy=base_ccy,
         )
         if stated is not None:
+            valuation.stated_balance_base = quantize_storage(stated)
             valuation.unaccounted_cash_base = quantize_storage(
                 stated - valuation.market_value_base
             )

@@ -78,6 +78,13 @@ def _valuation_out(v: svc.AccountValuation) -> dict:
         "balance_account": v.balance_account,
         "market_value_account": v.market_value_account,
         "market_value_base": v.market_value_base,
+        # Passed through as null rather than defaulted: a null is the client's only
+        # way to know the account's stated balance is *absent* from the total
+        # rather than zero, and `or ZERO` here would throw that away. Contrast
+        # `unaccounted_cash_base` below, where zero is the honest reading of the
+        # plug when no rate was found — the two are opposite cases and the
+        # frontend needs to see the difference.
+        "stated_balance_base": v.stated_balance_base,
         "unaccounted_cash_base": v.unaccounted_cash_base or svc.ZERO,
         "holdings": [h.__dict__ for h in v.holdings],
         # Counts, matching the allocation endpoint. The offending positions are

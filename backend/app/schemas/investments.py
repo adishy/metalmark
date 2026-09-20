@@ -260,6 +260,13 @@ class AccountValuationOut(BaseModel):
     balance_account: Decimal
     market_value_account: Decimal
     market_value_base: Decimal
+    #: The ``stated`` balance in base — what this account contributes to
+    #: ``total_base``. ``None`` for a ``derived`` account (Σ(holdings) is the
+    #: balance) and for a ``stated`` one with no rate to convert its balance:
+    #: in that second case the account contributes nothing to the total, and
+    #: ``unaccounted_cash_base`` is ``0``, so this field is the only thing that
+    #: tells the two apart. A consumer must not render ``$0.00`` for a null.
+    stated_balance_base: Decimal | None = None
     unaccounted_cash_base: Decimal
     holdings: list[HoldingValueOut]
     #: Counts. The positions themselves are in ``holdings`` with ``reason`` set.

@@ -14,15 +14,38 @@ import { Button, Checkbox, Field, Input, Select, useFieldId, validAmount, validC
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
+import InvestmentsView from "@/components/InvestmentsView";
+import SegmentedControl, { segmentPanelId, segmentTabId, type Segment } from "@/components/SegmentedControl";
 
 const TYPES: AccountType[] = ["depository", "credit", "investment", "loan", "other"];
 // A balance date is a calendar day where the user is, so it comes from the local
 // clock — ``toISOString()`` would roll it back a day for anyone east of UTC.
 const today = () => todayIso();
 
+/*
+ * Two views of one destination.
+ *
+ * The investments view is a *second view* rather than a sixth tab because the
+ * phone tab bar is capped at five and the cap is real (DESIGN.md §4.13): a sixth
+ * target is no longer thumb-reachable, and a destination with no room in the bar
+ * becomes a section inside an existing one. Accounts already owns the
+ * household's balances; a portfolio is the same subject at a different depth.
+ *
+ * Balances is the default, so every existing path — the net-worth header, the
+ * owner filter, "Add account" — is exactly where it was.
+ */
+const VIEWS = [
+  { id: "balances", label: "Balances" },
+  { id: "investments", label: "Investments" },
+] as const;
+
+type ViewId = (typeof VIEWS)[number]["id"];
+const VIEW_TESTID = "accounts-view";
+
 export default function Accounts() {
   const owners = useOwners();
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [view, setView] = useState<ViewId>("balances");
   // The filter scopes the list and the header together: an owner's net worth is
   // the sum of that owner's accounts, so a filtered list with an unfiltered
   // total would read as a bug.
@@ -38,99 +61,133 @@ export default function Accounts() {
     return m;
   }, [owners.data]);
 
+  const panelId = segmentPanelId(VIEW_TESTID, view);
+
   return (
     <div className="space-y-6">
-      <section className="rounded-card bg-surface-raised p-6" data-testid="net-worth">
-        <p className="text-sm text-fg-muted">
-          Net worth
-          {ownerFilter && ` · ${ownerName.get(ownerFilter) ?? "owner"}`}
-        </p>
-        <p className="text-3xl font-semibold">
-          {netWorth.data
-            ? formatMoney(netWorth.data.net_worth, netWorth.data.base_currency)
-            : "—"}
-        </p>
-        {netWorth.data && (
-          <div className="mt-2 flex gap-6 text-sm text-fg-muted">
-            <span>Assets {formatMoney(netWorth.data.assets, netWorth.data.base_currency)}</span>
-            <span>
-              Liabilities {formatMoney(netWorth.data.liabilities, netWorth.data.base_currency)}
-            </span>
-          </div>
-        )}
-        {netWorth.data && netWorth.data.unconverted_currencies.length > 0 && (
-          // The words carry the warning; role="status" is what makes it heard
-          // when the query lands and a rate turns out to be missing (§6.4).
-          <p className="mt-2 text-sm text-warning" role="status" data-testid="no-rate-warning">
-            No FX rate for: {netWorth.data.unconverted_currencies.join(", ")}
-          </p>
-        )}
-      </section>
+      {/* The page's one <h1> sits above both views: the tabs select what is
+          below them, so a heading inside a panel would leave the investments
+          view without one (§7.5). */}
+      <h1 className="text-lg font-medium">Accounts</h1>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-medium">Accounts</h1>
-          <Button onClick={() => setOpen((v) => !v)} data-testid="add-account">
-            Add account
-          </Button>
-        </div>
+      <SegmentedControl
+        label="Accounts view"
+        segments={VIEWS as readonly Segment<ViewId>[]}
+        value={view}
+        onChange={setView}
+        testid={VIEW_TESTID}
+      />
 
-        <OwnerFilterChips
-          owners={owners.data ?? []}
-          value={ownerFilter}
-          onChange={setOwnerFilter}
-        />
-
-        {open && (
-          <AddAccountForm
-            owners={owners.data ?? []}
-            pending={create.isPending}
-            error={create.isError ? (create.error as Error).message : null}
-            onSubmit={(b) => create.mutate(b, { onSuccess: () => setOpen(false) })}
+      <div
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={segmentTabId(VIEW_TESTID, view)}
+        data-testid={panelId}
+        className="space-y-6"
+      >
+        {view === "investments" ? (
+          <InvestmentsView
+            ownerName={ownerFilter ? (ownerName.get(ownerFilter) ?? "that owner") : null}
           />
-        )}
-
-        <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="account-list">
-          {accounts.data?.map((a) => (
-            <li key={a.id} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="font-medium">
-                  {a.name}
-                  {a.is_hidden && <span className="ml-2 text-xs text-fg-muted">(hidden)</span>}
-                </p>
-                <p className="text-xs text-fg-muted">
-                  {a.type} · {a.currency}
-                  {a.institution && ` · ${a.institution}`}
-                  <span data-testid={`account-owner-${a.id}`}>
-                    {` · ${ownerName.get(a.owner_id) ?? "owner"}`}
+        ) : (
+          <>
+            <section className="rounded-card bg-surface-raised p-6" data-testid="net-worth">
+              <p className="text-sm text-fg-muted">
+                Net worth
+                {ownerFilter && ` · ${ownerName.get(ownerFilter) ?? "owner"}`}
+              </p>
+              <p className="text-3xl font-semibold">
+                {netWorth.data
+                  ? formatMoney(netWorth.data.net_worth, netWorth.data.base_currency)
+                  : "—"}
+              </p>
+              {netWorth.data && (
+                <div className="mt-2 flex gap-6 text-sm text-fg-muted">
+                  <span>Assets {formatMoney(netWorth.data.assets, netWorth.data.base_currency)}</span>
+                  <span>
+                    Liabilities {formatMoney(netWorth.data.liabilities, netWorth.data.base_currency)}
                   </span>
-                  {!a.is_asset && (
-                    <span className="ml-1 rounded bg-negative/20 px-1.5 py-0.5 text-negative">
-                      liability
-                    </span>
-                  )}
+                </div>
+              )}
+              {netWorth.data && netWorth.data.unconverted_currencies.length > 0 && (
+                // The words carry the warning; role="status" is what makes it heard
+                // when the query lands and a rate turns out to be missing (§6.4).
+                <p className="mt-2 text-sm text-warning" role="status" data-testid="no-rate-warning">
+                  No FX rate for: {netWorth.data.unconverted_currencies.join(", ")}
                 </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={a.is_asset ? "text-fg" : "text-negative"}>
-                  {formatMoney(a.current_balance, a.currency)}
-                </span>
-                <Button
-                  variant="ghost"
-                  className="px-2 py-1"
-                  onClick={() => setEditing(a)}
-                  data-testid={`account-edit-${a.id}`}
-                >
-                  Edit
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                {/* `<h2>`, not the page's `<h1>`: the heading for "Accounts" is above
+                    the view switcher now, and a second `<h1>` on one page is the
+                    heading-order failure §7.5 names. */}
+                <h2 className="text-lg font-medium">Balances</h2>
+                <Button onClick={() => setOpen((v) => !v)} data-testid="add-account">
+                  Add account
                 </Button>
               </div>
-            </li>
-          ))}
-          {accounts.data?.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-fg-muted">No accounts yet.</li>
-          )}
-        </ul>
-      </section>
+
+              <OwnerFilterChips
+                owners={owners.data ?? []}
+                value={ownerFilter}
+                onChange={setOwnerFilter}
+              />
+
+              {open && (
+                <AddAccountForm
+                  owners={owners.data ?? []}
+                  pending={create.isPending}
+                  error={create.isError ? (create.error as Error).message : null}
+                  onSubmit={(b) => create.mutate(b, { onSuccess: () => setOpen(false) })}
+                />
+              )}
+
+              <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="account-list">
+                {accounts.data?.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="font-medium">
+                        {a.name}
+                        {a.is_hidden && <span className="ml-2 text-xs text-fg-muted">(hidden)</span>}
+                      </p>
+                      <p className="text-xs text-fg-muted">
+                        {a.type} · {a.currency}
+                        {a.institution && ` · ${a.institution}`}
+                        <span data-testid={`account-owner-${a.id}`}>
+                          {` · ${ownerName.get(a.owner_id) ?? "owner"}`}
+                        </span>
+                        {!a.is_asset && (
+                          <span className="ml-1 rounded bg-negative/20 px-1.5 py-0.5 text-negative">
+                            liability
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={a.is_asset ? "text-fg" : "text-negative"}>
+                        {formatMoney(a.current_balance, a.currency)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        className="px-2 py-1"
+                        onClick={() => setEditing(a)}
+                        data-testid={`account-edit-${a.id}`}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+                {accounts.data?.length === 0 && (
+                  <li className="px-4 py-6 text-center text-sm text-fg-muted">No accounts yet.</li>
+                )}
+              </ul>
+            </section>
+          </>
+        )}
+      </div>
 
       {editing && <EditAccountDialog account={editing} onClose={() => setEditing(null)} />}
     </div>

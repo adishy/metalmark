@@ -326,3 +326,25 @@ green, CI green, pushed. `reset` between mutating gates.
 - **Investment lots / FIFO / specific-lot** — ADR-0020 defers this out of v1.
 - **Automatic security-price fetch** — prices are manual in v1 (README's deferrable list); the staleness
   display is what makes that honest.
+- **Quantity, cost basis and gain/loss on the investments view** — found while building the read UI, and
+  worth its own decision rather than a quiet join. ARCHITECTURE.md §4 names the summed row as "(quantity,
+  total market value, cost basis, gain/loss)"; market value, % allocation and the four group-by toggles
+  shipped, and these three did not, for three separate reasons — the third is the one that would be wrong to
+  guess at:
+  1. `/investments/allocation` (the endpoint behind the view's groupable rows) returns value, share and a
+     position *count* only — there is no summed-quantity, cost-basis or gain field to render, at any
+     grouping.
+  2. `cost_basis` does exist on `Holding` (`manual_cost_basis` behind it), so a gain/loss column could be
+     joined onto the holdings list — but only for `group_by=security`. A *group* row ("ETF", "Type:
+     mutual_fund") has no cost basis to subtract, and a quantity summed across *accounts* mixes different
+     securities and means nothing. Summing is a decision about which positions count, and the allocation
+     endpoint is the right place to make it, not the client.
+  3. **`cost_basis` is recorded in the security's own quote currency, and turning it into a base-currency
+     gain needs an FX rate at each acquisition date — a per-lot rate this schema does not store and
+     ADR-0032 does not define an accounting policy for.** Converting at today's rate instead silently
+     books a currency move as investment performance, which is precisely the confusion ADR-0032's four-term
+     identity exists to prevent (the same money would land in `market_appreciation` and in
+     `currency_revaluation`, counted twice and explained by neither).
+  Until there is an ADR for (3), the view shows position value, share and price age and says nothing about
+  gain — a "gain/loss" whose currency policy nobody wrote down is worse than its absence.
+  `InvestmentsView.tsx`'s header records the same points where the gap was hit.

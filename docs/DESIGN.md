@@ -799,6 +799,16 @@ Four distinct states, never conflated. Distinguishing them is the whole point.
   use `isFetching` for a subtle top-of-list indicator and keep showing the old rows.
 - Every `isError` branch renders the API's message in `text-negative` with a retry —
   the current pattern in `AddTxnForm` is right; make it universal.
+- **A supplementary read's failure is said out loud too.** When a view's main read
+  succeeded and a second one that only *annotates* it did not, the content stays —
+  it is still true — but the missing annotation is named and the retry offered.
+  Nothing appearing is indistinguishable from nothing to appear: a household with no
+  override to show and a request that never arrived render identically unless one of
+  them says so. `PortfolioHoldings` is the worked instance (the ADR-0034 override line
+  comes from `/investments/holdings`; the values do not). Styled `text-warning`, not
+  `text-negative` — the figure on screen is not wrong, it is incomplete — and with a
+  `ghost` `Button` rather than the `QueryError` card, which would claim the whole
+  section failed.
 
 ### 4.12 Destructive-action confirmation
 

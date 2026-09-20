@@ -115,6 +115,19 @@ test.describe("target size (SC 2.5.8)", () => {
       await measure(path);
     }
 
+    // /accounts carries two views and mounts one, so the route sweep above only
+    // ever measures the balances one — the same gap the Settings walk below
+    // exists to close. The investments view brings controls the balances view
+    // does not have at all: the group-by tab strip and the view switcher itself.
+    // The seeded ledger has no investment accounts, so what is measured here is
+    // the empty states plus those controls; a holding row's own controls would
+    // need the demo seed to be broader (see the note on data above).
+    await page.goto("/accounts");
+    await expect(page.getByTestId("accounts-view-balances")).toBeVisible();
+    await page.getByTestId("accounts-view-investments").click();
+    await expect(page.getByTestId("investments-view")).toBeVisible();
+    await measure("/accounts#investments");
+
     await page.goto("/settings");
     await expect(page.locator("main")).toBeVisible();
     for (const tab of SETTINGS_TABS) {

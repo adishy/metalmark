@@ -413,3 +413,159 @@ export interface SplitIn {
   owner_id?: UUID | null;
   notes?: string | null;
 }
+
+// ---- investments (ADR-0011/0020/0032/0033/0034) ----
+//
+// The read side: the consolidated allocation and the valued portfolio. Writes
+// (securities, prices, holdings, investment transactions) are not typed here yet
+// because nothing consumes them — see `frontend/src/api/investments.ts`.
+//
+// Every number below is a decimal string, and the two scales are different:
+// amounts are `NUMERIC(19,4)`, while quantities and prices are `NUMERIC(19,8)`
+// because a price of `$0.00000412` is a real quote that four decimals round to
+// zero. Nothing here is a JS number, by design (ADR-0005).
+
+/** How the allocation groups its rows. The server accepts exactly these four
+ *  (`ALLOCATION_GROUPS` in app/schemas/investments.py). */
+export type AllocationGroup = "security" | "type" | "account" | "currency";
+
+/**
+ * Why a position could not be valued. Both are reported and **never** folded
+ * into a total as zero (ADR-0032 §5): "we cannot value this" and "this is worth
+ * nothing" must not render identically. They are two values because they have
+ * two different fixes — enter a price, or enter an FX rate.
+ */
+export type UnpricedReason = "no_price" | "no_rate";
+
+/**
+ * Where a position's quantity came from (ADR-0034). `history` when recorded
+ * trades exist and are therefore authoritative; `manual` when the stored scalar
+ * is all there is.
+ */
+export type QuantitySource = "history" | "manual";
+
+export interface AllocationRow {
+  /** A UUID or a vocabulary token, always a string — the grouping is a wire
+   *  vocabulary and `key`'s JSON type must not depend on `group_by`. */
+  key: string;
+  label: string;
+  value_base: Money;
+  /** Share of `total_base`, at 4 dp. */
+  percent: Money;
+  /** How many positions make up this row. A 3% line that is one holding and a
+   *  3% line that is thirty read very differently. */
+  holdings: number;
+}
+
+export interface Allocation {
+  as_of: string;
+  base_currency: string;
+  group_by: AllocationGroup;
+  /** Excludes every position that could not be valued — which is what
+   *  `unpriced_positions` and `no_rate_positions` are there to say. */
+  total_base: Money;
+  rows: AllocationRow[];
+  /** Counts, not lists. The rows cannot show a position with no price, so these
+   *  are what stop a total quietly missing 30% of the portfolio. */
+  unpriced_positions: number;
+  no_rate_positions: number;
+  max_stale_days: number | null;
+}
+
+export interface HoldingValue {
+  /** **Null for a position that exists only as recorded trades** (ADR-0034).
+   *  `account_id` and `security_id` identify it instead. */
+  holding_id: UUID | null;
+  account_id: UUID;
+  security_id: UUID;
+  name: string;
+  ticker: string | null;
+  security_type: string;
+  quantity: Money;
+  /** Null iff `reason` is set. Zero is a real price for a written-off position;
+   *  "no price" is the absence of a row. */
+  price: Money | null;
+  price_date: string | null;
+  price_currency: string | null;
+  /** `quantity × price`, in the security's own quote currency. */
+  value_native: Money | null;
+  value_account: Money | null;
+  value_base: Money | null;
+  /** Days between the valuation date and the price used. Null when there is no
+   *  price at all, which is a stronger statement than "very stale". */
+  stale_days: number | null;
+  /** `value_base` is null **iff** this is set. */
+  reason: UnpricedReason | null;
+}
+
+export interface AccountValuation {
+  account_id: UUID;
+  name: string;
+  currency: string;
+  /** `derived`: Σ(holdings). `stated`: the account's own balance, with any
+   *  remainder over the holdings reported as `unaccounted_cash_base`
+   *  (ADR-0021). */
+  balance_source: string;
+  balance_account: Money;
+  market_value_account: Money;
+  market_value_base: Money;
+  /** The `stated` balance in base — **what this account contributes to the
+   *  portfolio total**. Null for a `derived` account (Σ(holdings) is its
+   *  balance) and for a `stated` one whose balance had no rate to convert it:
+   *  the account then contributes nothing to the total, and
+   *  `unaccounted_cash_base` is `"0"` in that case too, so **this field is the
+   *  only way to tell an unconvertible balance from a zero one**. Never render
+   *  a null as `$0.00`. */
+  stated_balance_base: Money | null;
+  unaccounted_cash_base: Money;
+  holdings: HoldingValue[];
+  /** The positions themselves are in `holdings` with `reason` set. */
+  unpriced: number;
+  no_rate: number;
+  oldest_price_date: string | null;
+  max_stale_days: number | null;
+  is_fully_valued: boolean;
+}
+
+export interface Portfolio {
+  as_of: string;
+  base_currency: string;
+  /** Counts a `stated` account at its stated balance and a `derived` one at
+   *  Σ(holdings) — the same rule net worth uses. */
+  total_base: Money;
+  accounts: AccountValuation[];
+}
+
+export interface Security {
+  id: UUID;
+  name: string;
+  ticker: string | null;
+  security_type: string;
+  /** The currency the security is *quoted* in, which is half of its identity. */
+  currency: string;
+  is_manual: boolean;
+}
+
+/**
+ * A position as recorded, before valuation (ADR-0034).
+ *
+ * `id`, `manual_quantity` and `manual_cost_basis` are null for a position that
+ * exists only as recorded trades: it is a real position with no row behind it,
+ * and nobody typed anything.
+ */
+export interface Holding {
+  id: UUID | null;
+  account_id: UUID;
+  security_id: UUID;
+  security: Security;
+  /** The **effective** position — derived from history when any exists. */
+  quantity: Money;
+  cost_basis: Money | null;
+  quantity_source: QuantitySource;
+  basis_source: QuantitySource;
+  /** What a human typed, even when history overrode it. This is the field that
+   *  makes "you entered 10; three trades say 0" sayable. */
+  manual_quantity: Money | null;
+  manual_cost_basis: Money | null;
+  as_of: string | null;
+}

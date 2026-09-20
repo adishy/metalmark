@@ -3159,6 +3159,12 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Market Value Base
+        stated_balance_base:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Stated Balance Base
         unaccounted_cash_base:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
