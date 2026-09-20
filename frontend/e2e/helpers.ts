@@ -47,7 +47,7 @@ export async function addOwner(page: Page, name: string): Promise<void> {
 /** Create a manual account; returns the unique name used. */
 export async function addAccount(
   page: Page,
-  opts: { name: string; balance: string; currency?: string; type?: string },
+  opts: { name: string; balance: string; currency?: string; type?: string; owner?: string },
 ): Promise<void> {
   await page.getByTestId("add-account").click();
   const form = page.getByTestId("add-account-form");
@@ -56,6 +56,10 @@ export async function addAccount(
   await form.getByTestId("account-type").selectOption(opts.type ?? "depository");
   await form.getByTestId("account-currency").fill(opts.currency ?? "USD");
   await form.getByTestId("account-balance").fill(opts.balance);
+  // Left alone, the picker is unset and the account lands on Shared.
+  if (opts.owner) {
+    await form.getByTestId("account-owner").selectOption({ label: opts.owner });
+  }
   await form.getByTestId("account-save").click();
   await expect(form).toBeHidden();
 }
