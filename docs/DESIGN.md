@@ -841,6 +841,12 @@ bar. Anything that changes the header or tab-bar height must change those too.
   This is how `/admin` is a nav destination without becoming a sixth tab.
   Prefer a fifth item over a sixth tab: if a new destination has no room in the
   bar, its phone path is a section inside Settings, not a squeezed tab.
+  **Investments is the first worked instance**, and it is not inside Settings:
+  `Accounts` already owns the household's balances, and a portfolio is the same
+  subject at a different depth, so the two are a `SegmentedControl` (§4.14) at the
+  top of one page rather than two destinations. The rule is "a section inside an
+  existing one", and which existing one is a judgement about subject matter, not
+  a default to Settings.
 - Each item: `min-h-11` plus `pb-[env(safe-area-inset-bottom)]`. The current
   `py-3 text-xs` computes to 40 px and sits under the home indicator without the
   inset.
@@ -910,6 +916,61 @@ Details that are load-bearing:
   belong in a `<fieldset>` with a `<legend>`, not a sequence of loose labels.
 - **A hint is not a label.** `hint` renders a second line in `text-fg-muted`; the
   label still has to say what the control does on its own.
+
+---
+
+### 4.15 Account marks
+
+Every account is drawn by `src/components/AccountMark.tsx` — a monogram answering
+"which account is this credit or debit from?" without a fetch. It appears wherever a
+transaction's account is shown: the transactions list, a review card, the transaction
+detail sheet.
+
+- **Initials carry the identity**: up to two letters from the account's own name
+  ("Chase Checking" → CC, "Chase Savings" → CS), skipping words that carry no identity
+  ("Bank of America" → BA, not BO). Two accounts at one institution must stay apart.
+- **Colour reinforces, never informs.** The fill is one of the ten `--chart-N` tokens:
+  a curated hue for a handful of institutions people actually have (Chase, Amex, Citi,
+  Capital One, Wells Fargo, Discover, Fidelity, Vanguard) and a hash of the name
+  otherwise. Colour is never the only signal (§7, item 8) — the initials are always
+  there.
+- **No network, ever.** No favicon service and no per-institution request: which banks
+  this household uses is not something to leak to a third party (ADR-0002). The mark is
+  computed, so the same account gives the same mark in every session and on every
+  machine; nothing in it reads the clock, a random source, or the environment.
+- **Size**: `sm` 20 px in a list row, `md` 24 px in a card or sheet, `rounded-full`
+  (§2.6). Initials are `text-xs` — the floor §2.4 sets, and the largest that fits two
+  letters in 20 px. `text-accent-fg` on every fill is at least 4.5:1 in both themes,
+  pinned by test rather than asserted here.
+- **Accessibly**: `role="img"` and an `aria-label` of the account name (plus the
+  institution, when the name does not already say it), and a `title` for the pointer.
+  The initials are `aria-hidden`, so a screen reader hears "Chase Checking" and not
+  "C C".
+
+---
+
+### 4.16 The app mark
+
+MetalMark is named for the metalmark butterfly (Riodinidae). The mark is a metalmark
+on a rounded slate tile: a teal-rimmed field, pale wings, a dark body and antennae,
+and vein banding in the field colour. It is generated, not drawn by hand —
+`scripts/metalmark-mark.mjs` emits the SVG and `scripts/generate-icons.mjs`
+(`npm run icons`) renders the set into `public/`. Regenerate rather than replace a
+binary, and commit the output.
+
+- **Three variants, for three masks**: rounded for the favicon and PWA "any" icons;
+  square for `apple-touch-icon` (iOS applies its own mask, and rounding twice leaks
+  the page background at the corners); scaled to 0.84 inside a full-bleed square for
+  the `maskable` icons, so a circular or squircle launcher mask never clips a wing.
+- **Reads at 16 px and at 512 px.** Rendered from a 1024 px master and halved down, so
+  the 16 px icon has no ringing; the silhouette is the one thing that survives, which
+  is why the wings are pale on a dark field rather than the reverse.
+- **Works on light and dark chrome.** The tile's own rim is what keeps the edge visible
+  against a dark browser; nothing relies on the page background.
+- **Its colours are literal hex, deliberately.** The mark is served standalone as
+  `favicon.svg`, where no CSS variable from the app is in scope, so it cannot use the
+  token block. Those five values are the mark's own palette, defined in
+  `scripts/metalmark-mark.mjs` and outside `src/` (design-lint does not scan `scripts/`).
 
 ---
 
@@ -1095,6 +1156,51 @@ currencies.
   differ from the sum of the displayed rows by a cent. When it does, say so in one
   muted line beneath the total rather than hiding it — an unexplained one-cent gap is
   exactly the kind of thing this app exists to make trustworthy.
+
+---
+
+### 6.6 Dates
+
+A date is rendered by `src/components/datetime.tsx`. Nothing else turns a date into
+text — no `toLocaleDateString`, no `toLocaleTimeString`, no hand-rolled slicing.
+
+**The ISO form is never the visible text.** `YYYY-MM-DD` (and the full instant, for a
+moment) belongs in the `title` attribute and in `<time datetime>`; what a person reads
+is one of five fixed styles from `src/lib/dates.ts`:
+
+| style | renders | where it is used |
+| --- | --- | --- |
+| `long` | `Jan 02 2026` | a detail line with room: admin run history, an interest rate's effective date |
+| `medium` | `Jan 02` | the default. A date that needs no year: a review card, a chart axis |
+| `weekday` | `Mon` | where the weekday is the point |
+| `compact` | `Today` / `Yesterday` / `Jan 02` | a list row, where recency is what the reader scans for |
+| `relative` | `2 h ago` / `in 2 h` | a machine-driven timestamp only: last synced, next sync, a job run |
+
+The day is zero-padded (`Jan 02`, never `Jan 2`), so a column of dates stays a column
+under tabular figures (§6.3).
+
+**Two frames, and picking the wrong one is the bug.**
+
+- A **calendar day** (`transacted_at`, a report point's `date`, an interest
+  `rate_date`) is a day, not a moment. It is read from the value's own date part and
+  **never converted**, so a transaction dated 2026-09-20 is the 20th wherever the
+  reader is standing. Render it with `<Day>`.
+- An **instant** (`last_synced_at`, `started_at`, a sync event's `ts`) is a moment, and
+  means the viewer's own clock. Render it with `<Instant>`.
+
+The type is the enforcement: `relative` is not a valid style for a calendar day, so
+`formatDay(..., "relative")` does not compile.
+
+Two helpers sit outside that table because they are not dates:
+
+- `formatMonth` renders the reports API's `YYYY-MM` key as `Jan` (or `Jan 2026`), for
+  the cash-flow axis.
+- `formatTime` renders `HH:MM(:SS)`, fixed 24-hour and zero-padded, for a run's event
+  log, where two events can share a minute.
+
+**No "Tomorrow".** "Today" and "Yesterday" are named; a future date renders as a date.
+Nothing in the ledger is legitimately dated ahead, and naming it would be a kindness to
+a typo.
 
 ---
 
