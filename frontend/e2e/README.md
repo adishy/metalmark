@@ -15,6 +15,8 @@ stack (`docker compose up -d`). The config does **not** start a `webServer`.
 |------|--------|
 | `happy-path.spec.ts` | login → net worth shown → add account (list + net-worth reflect it) → add categorized Groceries expense (in list) → Reports render (`report-net-worth`, `spending-donut`) |
 | `review.spec.ts` | add an **uncategorized** txn → it enters the `needs_review` queue → approve via button, and separately via the **keyboard** (`ArrowRight`) swipe path → card leaves the deck |
+| `usable-m1a.spec.ts` | edit a txn's merchant and **owner** and filter the ledger by that owner (incl. the inherited-owner badge) → split a txn by amount → add/delete a category → add an FX rate |
+| `reports.spec.ts` | the three ECharts surfaces actually mount (jsdom has no canvas, so vitest cannot cover them) → the **owner filter** re-scopes them → the net-worth **attribution caveat** appears with the filter and goes away without it |
 | `visual.spec.ts` | `toHaveScreenshot` of the static **login page** |
 
 Tests are **repeatable without a DB reset**: every run creates uniquely-named
