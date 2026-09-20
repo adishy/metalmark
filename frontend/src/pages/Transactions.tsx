@@ -10,6 +10,7 @@ import {
 } from "@/api/hooks";
 import type { Account, Category, Owner, Transaction, TransactionCreate } from "@/api/types";
 import { formatDate, formatMoney } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 import {
   Button,
   Field,
@@ -22,6 +23,7 @@ import {
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
+import ImportDialog from "@/components/ImportDialog";
 
 export default function Transactions() {
   const accounts = useAccounts();
@@ -32,6 +34,7 @@ export default function Transactions() {
   const txns = useInfiniteTransactions(filter);
   const create = useCreateTransaction();
   const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Transaction | null>(null);
 
   const catName = useMemo(() => {
@@ -64,9 +67,19 @@ export default function Transactions() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Transactions</h2>
-        <Button onClick={() => setOpen((v) => !v)} data-testid="add-transaction">
-          Add transaction
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* A whole statement at once, next to adding one row by hand. */}
+          <Button
+            variant="secondary"
+            onClick={() => setImporting(true)}
+            data-testid="import-csv"
+          >
+            Import CSV
+          </Button>
+          <Button onClick={() => setOpen((v) => !v)} data-testid="add-transaction">
+            Add transaction
+          </Button>
+        </div>
       </div>
 
       {open && (
@@ -157,6 +170,14 @@ export default function Transactions() {
             {txns.isFetchingNextPage ? "Loading…" : "Load more"}
           </Button>
         </div>
+      )}
+
+      {importing && (
+        <ImportDialog
+          onClose={() => setImporting(false)}
+          accounts={accounts.data ?? []}
+          categories={categories.data ?? []}
+        />
       )}
 
       {selected && (
@@ -328,7 +349,7 @@ function AddTxnForm({
   const [merchant, setMerchant] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [owner, setOwner] = useState<string | null>(null);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayIso());
   const [errs, setErrs] = useState<Record<string, string | null>>({});
 
   // What an unset owner inherits: the owning account's own owner.
