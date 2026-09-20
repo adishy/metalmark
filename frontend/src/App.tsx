@@ -14,7 +14,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-slate-400" data-testid="loading">
+      <div className="flex h-full items-center justify-center text-fg-muted" data-testid="loading">
         Loading…
       </div>
     );

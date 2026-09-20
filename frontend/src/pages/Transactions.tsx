@@ -101,12 +101,12 @@ export default function Transactions() {
         onChange={setFilter}
       />
 
-      <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-900" data-testid="txn-list">
+      <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="txn-list">
         {items.map((t) => (
           <li key={t.id}>
             <button
               type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-slate-800/60"
+              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-inset/60"
               onClick={() => setSelected(t)}
               data-testid={`txn-row-${t.id}`}
             >
@@ -114,19 +114,19 @@ export default function Transactions() {
                 <p className="truncate font-medium">
                   {t.merchant || t.description || "(no description)"}
                   {t.is_split_parent && (
-                    <span className="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-300">
+                    <span className="ml-2 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
                       split
                     </span>
                   )}
                 </p>
-                <p className="truncate text-xs text-slate-500">
+                <p className="truncate text-xs text-fg-muted">
                   {formatDate(t.transacted_at)}
                   {t.category_id && ` · ${catName.get(t.category_id) ?? ""}`}
                   {/* The effective owner is what reports actually bucket by, so
                       that is what the row shows; a muted style marks the ones
                       that only inherit it from their account. */}
                   <span
-                    className={t.owner_id ? "text-slate-300" : "italic text-slate-600"}
+                    className={t.owner_id ? "text-fg" : "italic text-fg-muted"}
                     title={
                       t.owner_id
                         ? "Owner set on this transaction"
@@ -141,21 +141,21 @@ export default function Transactions() {
                 {t.tag_ids.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {t.tag_ids.map((id) => (
-                      <span key={id} className="rounded bg-brand/15 px-1.5 py-0.5 text-xs text-brand">
+                      <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
                         {tagName.get(id) ?? "tag"}
                       </span>
                     ))}
                   </div>
                 )}
               </div>
-              <span className={Number(t.amount) < 0 ? "text-slate-100" : "text-emerald-400"}>
+              <span className={Number(t.amount) < 0 ? "text-fg" : "text-positive"}>
                 {formatMoney(t.amount, t.currency)}
               </span>
             </button>
           </li>
         ))}
         {items.length === 0 && !txns.isLoading && (
-          <li className="px-4 py-6 text-center text-sm text-slate-500">No transactions match.</li>
+          <li className="px-4 py-6 text-center text-sm text-fg-muted">No transactions match.</li>
         )}
       </ul>
 
@@ -221,7 +221,7 @@ function FilterBar({
   };
 
   return (
-    <div className="space-y-3 rounded-2xl bg-slate-900 p-4" data-testid="txn-filter-bar">
+    <div className="space-y-3 rounded-card bg-surface-raised p-4" data-testid="txn-filter-bar">
       <OwnerFilterChips
         owners={owners}
         value={filter.owner_id ?? null}
@@ -229,7 +229,7 @@ function FilterBar({
       />
 
       <div>
-        <p className="mb-1 text-xs font-medium text-slate-400">Accounts</p>
+        <p className="mb-1 text-xs font-medium text-fg-muted">Accounts</p>
         <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
           {accounts.map((a) => {
             const on = selectedAccounts.has(a.id);
@@ -241,8 +241,8 @@ function FilterBar({
                 aria-pressed={on}
                 className={`rounded-full border px-3 py-1 text-xs ${
                   on
-                    ? "border-brand bg-brand/20 text-brand"
-                    : "border-slate-700 text-slate-400 hover:text-slate-200"
+                    ? "border-accent bg-accent/20 text-accent"
+                    : "border-border-strong text-fg-muted hover:text-fg"
                 }`}
                 data-testid={`filter-account-${a.id}`}
               >
@@ -250,7 +250,7 @@ function FilterBar({
               </button>
             );
           })}
-          {accounts.length === 0 && <span className="text-xs text-slate-500">No accounts</span>}
+          {accounts.length === 0 && <span className="text-xs text-fg-muted">No accounts</span>}
         </div>
       </div>
 
@@ -318,7 +318,7 @@ function FilterBar({
         filter.search) && (
         <button
           type="button"
-          className="text-xs text-slate-400 underline hover:text-slate-200"
+          className="text-xs text-fg-muted underline hover:text-fg"
           onClick={() => onChange({})}
           data-testid="filter-clear"
         >
@@ -372,7 +372,7 @@ function AddTxnForm({
 
   return (
     <form
-      className="grid grid-cols-1 gap-3 rounded-2xl bg-slate-900 p-4 sm:grid-cols-2"
+      className="grid grid-cols-1 gap-3 rounded-card bg-surface-raised p-4 sm:grid-cols-2"
       data-testid="add-txn-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -418,7 +418,7 @@ function AddTxnForm({
         inheritFrom={inheritFrom}
         testid="txn-owner"
       />
-      {error && <p className="text-sm text-red-400 sm:col-span-2">{error}</p>}
+      {error && <p className="text-sm text-negative sm:col-span-2">{error}</p>}
       <Button type="submit" disabled={pending} className="sm:col-span-2" data-testid="txn-save">
         Save
       </Button>

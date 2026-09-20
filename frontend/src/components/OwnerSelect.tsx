@@ -82,7 +82,7 @@ export default function OwnerSelect({
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="text-xs text-slate-400 underline hover:text-slate-200"
+          className="text-xs text-fg-muted underline hover:text-fg"
           data-testid={`${testid}-new`}
         >
           + New owner
@@ -109,9 +109,9 @@ export default function OwnerSelect({
           </Button>
         </div>
       )}
-      {err && <p className="text-xs text-red-400">{err}</p>}
+      {err && <p className="text-xs text-negative">{err}</p>}
       {create.isError && (
-        <p className="text-xs text-red-400" data-testid={`${testid}-new-error`}>
+        <p className="text-xs text-negative" data-testid={`${testid}-new-error`}>
           {(create.error as Error).message}
         </p>
       )}

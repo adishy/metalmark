@@ -2,7 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The palette. Values are "R G B" triplets (not hex) so Tailwind's opacity
+ * modifiers work — see tailwind.config.js.
+ *
+ * Light is the default (`:root`) and dark overrides it under `.dark`, because
+ * `darkMode: "class"` makes the class the single source of truth. The class is
+ * set before first paint by the inline script in index.html; the two must agree
+ * on the storage key (`metalmark-theme`).
+ *
+ * Every value is picked against the *worst* background it is actually used on,
+ * not its typical one. Ratios are tabulated in docs/DESIGN.md §2.1. The three
+ * that are easy to get wrong:
+ *   - `fg-muted` is the floor. Slate-500 fails in both themes (3.07 light /
+ *     3.75 dark), which is what this replaced.
+ *   - `border-strong` is a control boundary, so it must clear 3:1 (1.4.11) —
+ *     4.34:1 light, 3.07:1 dark. `border` is decorative and has no minimum.
+ *   - `accent` flips *value*, not just shade: teal-500 is 7.17:1 on the dark
+ *     surface but 2.49:1 on white, so light uses teal-700.
+ */
 :root {
+  --surface: 248 250 252; /* slate-50   */
+  --surface-raised: 255 255 255; /* white      */
+  --surface-inset: 241 245 249; /* slate-100  */
+  --border: 226 232 240; /* slate-200  */
+  --border-strong: 100 116 139; /* slate-500  */
+  --fg: 15 23 42; /* slate-900  */
+  --fg-muted: 71 85 105; /* slate-600  */
+  --accent: 15 118 110; /* teal-700   */
+  --accent-fg: 255 255 255;
+  --positive: 4 120 87; /* emerald-700 */
+  --negative: 185 28 28; /* red-700    */
+  --warning: 180 83 9; /* amber-700  */
+  --danger: 185 28 28; /* red-700    */
+  --focus: 15 118 110; /* teal-700   */
+
+  /* Categorical series. Ordered so neighbouring slices differ in lightness as
+     well as hue. All >= 5.02:1 on the light surface (1.4.11 needs 3:1). */
+  --chart-1: 15 118 110;
+  --chart-2: 3 105 161;
+  --chart-3: 79 70 229;
+  --chart-4: 190 24 93;
+  --chart-5: 180 83 9;
+  --chart-6: 4 120 87;
+  --chart-7: 185 28 28;
+  --chart-8: 109 40 217;
+  --chart-9: 29 78 216;
+  --chart-10: 194 65 12;
+}
+
+.dark {
+  --surface: 2 6 23; /* slate-950  */
+  --surface-raised: 15 23 42; /* slate-900  */
+  --surface-inset: 30 41 59; /* slate-800  */
+  --border: 30 41 59; /* slate-800  */
+  --border-strong: 100 116 139; /* slate-500  */
+  --fg: 241 245 249; /* slate-100  */
+  --fg-muted: 148 163 184; /* slate-400  */
+  --accent: 45 212 191; /* teal-400   */
+  --accent-fg: 2 6 23; /* slate-950  */
+  --positive: 52 211 153; /* emerald-400 */
+  --negative: 248 113 113; /* red-400    */
+  --warning: 251 191 36; /* amber-400  */
+  --danger: 185 28 28; /* same fill in both themes */
+  --focus: 45 212 191; /* teal-400   */
+
+  /* Same ten hues, lifted for a dark surface. All >= 6.76:1. */
+  --chart-1: 20 184 166;
+  --chart-2: 56 189 248;
+  --chart-3: 129 140 248;
+  --chart-4: 244 114 182;
+  --chart-5: 251 191 36;
+  --chart-6: 52 211 153;
+  --chart-7: 248 113 113;
+  --chart-8: 167 139 250;
+  --chart-9: 96 165 250;
+  --chart-10: 251 146 60;
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
   color-scheme: dark;
 }
 
@@ -13,7 +94,40 @@ body,
 }
 
 body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+  @apply bg-surface text-fg antialiased;
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  @apply font-sans;
+  /* Money alignment cannot be forgotten at a call site. System UI fonts ship
+     tabular figures, which is why this is a one-liner and not a webfont. */
+  font-variant-numeric: tabular-nums;
+  /* Removes the ~300ms double-tap-zoom delay on every interactive element. */
+  touch-action: manipulation;
+}
+
+/* One focus treatment for the whole app, so it cannot be forgotten per
+   component. focus-visible only, so a mouse click never paints a ring. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--focus));
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* Placeholder colour is otherwise the UA default, chosen for the UA's own
+   background rather than ours, and nothing in the app set it. */
+::placeholder {
+  color: rgb(var(--fg-muted));
+  opacity: 1; /* Firefox dims placeholders on top of the colour. */
+}
+
+/* The CSS half of reduced-motion. It does not reach JS-driven transforms, so
+   framer-motion components must also call useReducedMotion() (DESIGN.md §2.8). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,20 +1,39 @@
 // Reusable, accessible form primitives. Every control is paired with a visible
 // <label> tied via htmlFor/id. Inputs render an inline error region tied via
-// aria-describedby. Styling matches the app's slate/teal dark theme.
+// aria-describedby. Styling comes from the design tokens (docs/DESIGN.md §4).
 import {
+  cloneElement,
   forwardRef,
+  isValidElement,
   useId,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type ReactElement,
   type ReactNode,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
 
+/*
+ * `min-h-11` (44 px) is the target floor, not the text box's natural height:
+ * `px-3 py-2 text-sm` computes to 36 px and is below both our floor and
+ * WCAG 2.5.5. `text-base` (16 px) is not a style choice either — iOS Safari
+ * zooms the whole viewport when a control under 16 px takes focus, and the page
+ * never zooms back out.
+ */
 const CONTROL =
-  "w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand disabled:opacity-50";
+  "w-full min-h-11 rounded-control border border-border-strong bg-surface-inset px-3 text-base text-fg " +
+  "outline-none placeholder:text-fg-muted focus:border-accent " +
+  "disabled:opacity-50 aria-[invalid=true]:border-negative";
 
-/** Label + control + optional inline error. Wrap any control with it. */
+/**
+ * Label + control + optional hint or inline error.
+ *
+ * The error wiring is done by cloning the child rather than by asking all ~60
+ * call sites to pass `aria-describedby` themselves: every one of them already
+ * follows `<Field htmlFor={id}><Input id={id} /></Field>`, so threading it here
+ * makes the association impossible to omit rather than merely conventional.
+ */
 export function Field({
   label,
   htmlFor,
@@ -32,16 +51,46 @@ export function Field({
   className?: string;
   children: ReactNode;
 }) {
+  // Hint and error share one slot: an error replaces the hint rather than
+  // stacking a second line beneath it.
+  const describedBy = error ? `${htmlFor}-error` : hint ? `${htmlFor}-hint` : undefined;
+
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<Record<string, unknown>>, {
+        "aria-describedby": describedBy,
+        "aria-invalid": error ? true : undefined,
+        // The real attribute, not just the asterisk: a screen reader announces
+        // "required" from this, and the asterisk alone is decorative.
+        ...(required ? { required: true } : {}),
+      })
+    : children;
+
   return (
     <div className={`space-y-1 ${className ?? ""}`}>
-      <label htmlFor={htmlFor} className="block text-xs font-medium text-slate-400">
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-fg-muted">
         {label}
-        {required && <span className="ml-0.5 text-red-400">*</span>}
+        {required && (
+          <span aria-hidden="true" className="ml-0.5 text-negative">
+            *
+          </span>
+        )}
       </label>
-      {children}
-      {hint && !error && <p className="text-xs text-slate-500">{hint}</p>}
+      {control}
+      {hint && !error && (
+        <p id={`${htmlFor}-hint`} className="text-xs text-fg-muted">
+          {hint}
+        </p>
+      )}
       {error && (
-        <p id={`${htmlFor}-error`} className="text-xs text-red-400" data-testid={`${htmlFor}-error`}>
+        // role="alert" so it is announced without moving focus (WCAG 4.1.3).
+        // An inline error that only changes colour is silent.
+        <p
+          id={`${htmlFor}-error`}
+          role="alert"
+          className="text-sm text-negative"
+          data-testid={`${htmlFor}-error`}
+        >
+          <span aria-hidden="true">⚠ </span>
           {error}
         </p>
       )}
@@ -74,12 +123,22 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-brand text-slate-950 hover:brightness-110",
-  secondary: "bg-slate-700 text-slate-100 hover:bg-slate-600",
-  ghost: "text-slate-300 hover:bg-slate-800",
-  danger: "bg-red-500/90 text-white hover:bg-red-500",
+  primary: "bg-accent text-accent-fg hover:opacity-90",
+  secondary: "border border-border-strong bg-surface-inset text-fg hover:bg-surface-raised",
+  ghost: "text-fg-muted hover:bg-surface-inset hover:text-fg",
+  // `danger` is a theme-independent fill (6.47:1 against white in both themes).
+  // It belongs *inside a confirmation only* — never as the first thing a user
+  // sees, and never competing with the primary action (§4.1).
+  danger: "bg-danger text-white hover:opacity-90",
 };
 
+const BUTTON =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-control px-4 text-sm font-medium " +
+  "transition-colors duration-state disabled:opacity-50 disabled:pointer-events-none";
+
+// No default `type` here, deliberately. `<Button type="submit">` is used inside
+// eight forms across the app; defaulting to `type="button"` would quietly turn
+// every one of them into a button that does nothing.
 export function Button({
   variant = "primary",
   className,
@@ -87,10 +146,7 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
   return (
-    <button
-      className={`inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition disabled:opacity-50 ${VARIANTS[variant]} ${className ?? ""}`}
-      {...props}
-    >
+    <button className={`${BUTTON} ${VARIANTS[variant]} ${className ?? ""}`} {...props}>
       {children}
     </button>
   );

@@ -29,51 +29,51 @@ export default function Login() {
     <div className="flex h-full items-center justify-center p-4">
       <form
         onSubmit={submit}
-        className="w-full max-w-sm space-y-4 rounded-2xl bg-slate-900 p-8 shadow-xl"
+        className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8 shadow-xl"
         data-testid="login-form"
       >
         <div className="text-center">
-          <h1 className="text-2xl font-semibold text-brand">MetalMark</h1>
-          <p className="text-sm text-slate-400">Sign in to your household</p>
+          <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
+          <p className="text-sm text-fg-muted">Sign in to your household</p>
         </div>
         <label className="block text-sm">
-          <span className="text-slate-400">Email</span>
+          <span className="text-fg-muted">Email</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 outline-none focus:border-brand"
+            className="mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent"
             autoComplete="username"
             data-testid="email"
           />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-400">Password</span>
+          <span className="text-fg-muted">Password</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 outline-none focus:border-brand"
+            className="mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent"
             autoComplete="current-password"
             data-testid="password"
           />
         </label>
         {error && (
-          <p className="text-sm text-red-400" data-testid="login-error">
+          <p className="text-sm text-negative" data-testid="login-error">
             {error}
           </p>
         )}
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-lg bg-brand py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-50"
+          className="w-full rounded-control bg-accent py-2 font-medium text-accent-fg hover:brightness-110 disabled:opacity-50"
           data-testid="login-submit"
         >
           {busy ? "Signing in…" : "Sign in"}
         </button>
-        <p className="text-center text-xs text-slate-400">
+        <p className="text-center text-xs text-fg-muted">
           No account yet?{" "}
-          <Link to="/signup" className="text-brand underline" data-testid="login-to-signup">
+          <Link to="/signup" className="text-accent underline" data-testid="login-to-signup">
             Create an account
           </Link>
         </p>

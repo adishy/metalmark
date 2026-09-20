@@ -40,8 +40,8 @@ export default function Accounts() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl bg-slate-900 p-6" data-testid="net-worth">
-        <p className="text-sm text-slate-400">
+      <section className="rounded-card bg-surface-raised p-6" data-testid="net-worth">
+        <p className="text-sm text-fg-muted">
           Net worth
           {ownerFilter && ` · ${ownerName.get(ownerFilter) ?? "owner"}`}
         </p>
@@ -51,7 +51,7 @@ export default function Accounts() {
             : "—"}
         </p>
         {netWorth.data && (
-          <div className="mt-2 flex gap-6 text-sm text-slate-400">
+          <div className="mt-2 flex gap-6 text-sm text-fg-muted">
             <span>Assets {formatMoney(netWorth.data.assets, netWorth.data.base_currency)}</span>
             <span>
               Liabilities {formatMoney(netWorth.data.liabilities, netWorth.data.base_currency)}
@@ -59,7 +59,7 @@ export default function Accounts() {
           </div>
         )}
         {netWorth.data && netWorth.data.unconverted_currencies.length > 0 && (
-          <p className="mt-2 text-sm text-amber-400" data-testid="no-rate-warning">
+          <p className="mt-2 text-sm text-warning" data-testid="no-rate-warning">
             No FX rate for: {netWorth.data.unconverted_currencies.join(", ")}
           </p>
         )}
@@ -88,29 +88,29 @@ export default function Accounts() {
           />
         )}
 
-        <ul className="divide-y divide-slate-800 rounded-2xl bg-slate-900" data-testid="account-list">
+        <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="account-list">
           {accounts.data?.map((a) => (
             <li key={a.id} className="flex items-center justify-between px-4 py-3">
               <div>
                 <p className="font-medium">
                   {a.name}
-                  {a.is_hidden && <span className="ml-2 text-xs text-slate-500">(hidden)</span>}
+                  {a.is_hidden && <span className="ml-2 text-xs text-fg-muted">(hidden)</span>}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-fg-muted">
                   {a.type} · {a.currency}
                   {a.institution && ` · ${a.institution}`}
                   <span data-testid={`account-owner-${a.id}`}>
                     {` · ${ownerName.get(a.owner_id) ?? "owner"}`}
                   </span>
                   {!a.is_asset && (
-                    <span className="ml-1 rounded bg-red-500/20 px-1.5 py-0.5 text-red-300">
+                    <span className="ml-1 rounded bg-negative/20 px-1.5 py-0.5 text-negative">
                       liability
                     </span>
                   )}
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <span className={a.is_asset ? "text-slate-100" : "text-red-400"}>
+                <span className={a.is_asset ? "text-fg" : "text-negative"}>
                   {formatMoney(a.current_balance, a.currency)}
                 </span>
                 <Button
@@ -125,7 +125,7 @@ export default function Accounts() {
             </li>
           ))}
           {accounts.data?.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-slate-500">No accounts yet.</li>
+            <li className="px-4 py-6 text-center text-sm text-fg-muted">No accounts yet.</li>
           )}
         </ul>
       </section>
@@ -178,7 +178,7 @@ function AddAccountForm({
 
   return (
     <form
-      className="grid grid-cols-1 gap-3 rounded-2xl bg-slate-900 p-4 sm:grid-cols-2"
+      className="grid grid-cols-1 gap-3 rounded-card bg-surface-raised p-4 sm:grid-cols-2"
       data-testid="add-account-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -219,7 +219,7 @@ function AddAccountForm({
       <Field label="Institution" htmlFor={ids.institution}>
         <Input id={ids.institution} value={institution} onChange={(e) => setInstitution(e.target.value)} data-testid="account-institution" />
       </Field>
-      {error && <p className="text-sm text-red-400 sm:col-span-2" data-testid="account-form-error">{error}</p>}
+      {error && <p className="text-sm text-negative sm:col-span-2" data-testid="account-form-error">{error}</p>}
       <Button type="submit" disabled={pending} className="sm:col-span-2" data-testid="account-save">
         Save
       </Button>
@@ -303,15 +303,15 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
           <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="edit-account-balance-date" />
         </Field>
         <OwnerSelect value={owner} onChange={setOwner} testid="edit-account-owner" />
-        <label className="flex items-center gap-2 text-sm text-slate-300">
+        <label className="flex items-center gap-2 text-sm text-fg">
           <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} data-testid="edit-account-hidden" />
           Hidden (exclude from net worth views)
         </label>
-        {update.isError && <p className="text-sm text-red-400">{(update.error as Error).message}</p>}
+        {update.isError && <p className="text-sm text-negative">{(update.error as Error).message}</p>}
 
         {confirmDel && (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm" data-testid="account-delete-confirm">
-            <p className="text-red-200">Delete “{account.name}” and its transactions? This cannot be undone.</p>
+          <div className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm" data-testid="account-delete-confirm">
+            <p className="text-negative">Delete “{account.name}” and its transactions? This cannot be undone.</p>
             <div className="mt-2 flex gap-2">
               <Button variant="secondary" onClick={() => setConfirmDel(false)}>Keep</Button>
               <Button

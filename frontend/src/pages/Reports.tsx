@@ -8,19 +8,12 @@ import { isoDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
+import { useChartTokens } from "@/theme/chartTokens";
 
 function yearRange(): { start: string; end: string } {
   const year = new Date().getFullYear();
   return { start: isoDay(new Date(year, 0, 1)), end: isoDay(new Date(year, 11, 31)) };
 }
-
-const DONUT_COLORS = [
-  "#14b8a6", "#38bdf8", "#818cf8", "#f472b6", "#fbbf24",
-  "#34d399", "#f87171", "#a78bfa", "#60a5fa", "#fb923c",
-];
-
-const INCOME_COLOR = "#34d399";
-const EXPENSE_COLOR = "#f87171";
 
 export default function Reports() {
   const { start, end } = useMemo(yearRange, []);
@@ -31,54 +24,70 @@ export default function Reports() {
   const spending = useSpending(start, end, ownerFilter);
   const ccy = nw.data?.base_currency ?? "USD";
 
+  // Read from the CSS variables rather than a hardcoded palette, so a theme
+  // switch repaints these. `t` is memoised per theme, so it is a stable dep.
+  const t = useChartTokens();
+
   const nwOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 20, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis" },
+      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
       xAxis: {
         type: "category",
         data: nw.data?.points.map((p) => p.date) ?? [],
-        axisLine: { lineStyle: { color: "#475569" } },
+        axisLine: { lineStyle: { color: t.axis } },
+        axisLabel: { color: t.label },
       },
-      yAxis: { type: "value", axisLine: { lineStyle: { color: "#475569" } }, splitLine: { lineStyle: { color: "#1e293b" } } },
+      yAxis: {
+        type: "value",
+        axisLine: { lineStyle: { color: t.axis } },
+        axisLabel: { color: t.label },
+        splitLine: { lineStyle: { color: t.split } },
+      },
       series: [
         {
           type: "line",
           smooth: true,
           areaStyle: { opacity: 0.15 },
-          lineStyle: { color: "#14b8a6" },
-          itemStyle: { color: "#14b8a6" },
+          lineStyle: { color: t.accent },
+          itemStyle: { color: t.accent },
           data: nw.data?.points.map((p) => Number(p.net_worth)) ?? [],
         },
       ],
     }),
-    [nw.data],
+    [nw.data, t],
   );
 
   const cashFlowOption: EChartsOption = useMemo(
     () => ({
       grid: { top: 30, right: 16, bottom: 30, left: 60 },
-      tooltip: { trigger: "axis" },
-      legend: { top: 0, textStyle: { color: "#94a3b8" } },
+      tooltip: { trigger: "axis", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
+      legend: { top: 0, textStyle: { color: t.label } },
       xAxis: {
         type: "category",
         data: cashFlow.data?.points.map((p) => p.month) ?? [],
-        axisLine: { lineStyle: { color: "#475569" } },
+        axisLine: { lineStyle: { color: t.axis } },
+        axisLabel: { color: t.label },
       },
-      yAxis: { type: "value", axisLine: { lineStyle: { color: "#475569" } }, splitLine: { lineStyle: { color: "#1e293b" } } },
+      yAxis: {
+        type: "value",
+        axisLine: { lineStyle: { color: t.axis } },
+        axisLabel: { color: t.label },
+        splitLine: { lineStyle: { color: t.split } },
+      },
       series: [
         {
           name: "Income",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: INCOME_COLOR },
+          itemStyle: { color: t.positive },
           data: cashFlow.data?.points.map((p) => Number(p.income)) ?? [],
         },
         {
           name: "Expense",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: EXPENSE_COLOR },
+          itemStyle: { color: t.negative },
           // Expenses are summed as positive magnitudes by some backends and as
           // negatives by others; plot them downward either way.
           data: cashFlow.data?.points.map((p) => -Math.abs(Number(p.expense))) ?? [],
@@ -87,27 +96,28 @@ export default function Reports() {
           name: "Net",
           type: "line",
           smooth: true,
-          lineStyle: { color: "#14b8a6" },
-          itemStyle: { color: "#14b8a6" },
+          lineStyle: { color: t.accent },
+          itemStyle: { color: t.accent },
           data: cashFlow.data?.points.map((p) => Number(p.net)) ?? [],
         },
       ],
     }),
-    [cashFlow.data],
+    [cashFlow.data, t],
   );
 
   const donutOption: EChartsOption = useMemo(
     () => ({
-      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-      legend: { bottom: 0, textStyle: { color: "#94a3b8" }, type: "scroll" },
-      color: DONUT_COLORS,
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)", backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.fg } },
+      legend: { bottom: 0, textStyle: { color: t.label }, type: "scroll" },
+      color: t.series,
       series: [
         {
           type: "pie",
           radius: ["45%", "70%"],
           center: ["50%", "45%"],
-          itemStyle: { borderColor: "#0f172a", borderWidth: 2 },
-          label: { color: "#e2e8f0" },
+          // The gap between slices is the card behind them, not a fixed navy.
+          itemStyle: { borderColor: t.surface, borderWidth: 2 },
+          label: { color: t.label },
           data: (spending.data?.rows ?? []).map((r) => ({
             name: r.category_name,
             value: Number(r.total),
@@ -115,18 +125,45 @@ export default function Reports() {
         },
       ],
     }),
-    [spending.data],
+    [spending.data, t],
   );
 
   const hasSpending = (spending.data?.rows.length ?? 0) > 0;
   const hasSeries = (nw.data?.points.length ?? 0) > 0;
   const hasCashFlow = (cashFlow.data?.points.length ?? 0) > 0;
 
+  // Accessible names state the finding, not the chart type: a screen-reader user
+  // cannot see the shape being described, so "line chart" would say nothing.
+  // These complement the `<ul>` under the donut, which is the real text
+  // equivalent — a chart is never the only way to read a value (§2.9).
+  const nwLabel = nw.data
+    ? `Net worth changed by ${formatMoney(nw.data.delta_net_worth, ccy)} year to date, ` +
+      `from cash flow of ${formatMoney(nw.data.net_cash_flow, ccy)} and currency revaluation ` +
+      `of ${formatMoney(nw.data.currency_revaluation, ccy)}.`
+    : "Net worth over time.";
+
+  const cfPoints = cashFlow.data?.points ?? [];
+  const cfLabel = cfPoints.length
+    ? `Income and expenses across ${cfPoints.length} months, netting to ` +
+      `${formatMoney(cfPoints.reduce((a, p) => a + Number(p.net), 0), ccy)}.`
+    : "Income and expenses by month.";
+
+  const spendRows = spending.data?.rows ?? [];
+  const spendTotal = spendRows.reduce((a, r) => a + Number(r.total), 0);
+  const top = spendRows.reduce<(typeof spendRows)[number] | null>(
+    (best, r) => (best === null || Number(r.total) > Number(best.total) ? r : best),
+    null,
+  );
+  const donutLabel = top
+    ? `Spending by category, ${formatMoney(spendTotal, ccy)} across ${spendRows.length} ` +
+      `categories. Largest: ${top.category_name} at ${formatMoney(top.total, ccy)}.`
+    : "Spending by category.";
+
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-medium">Reports</h2>
+      <h1 className="text-lg font-medium">Reports</h1>
 
-      <div className="rounded-2xl bg-slate-900 p-4">
+      <div className="rounded-card bg-surface-raised p-4">
         <OwnerFilterChips
           owners={owners.data ?? []}
           value={ownerFilter}
@@ -134,12 +171,12 @@ export default function Reports() {
         />
       </div>
 
-      <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-net-worth">
-        <p className="text-sm text-slate-400">Net worth change (YTD)</p>
+      <section className="rounded-card bg-surface-raised p-6" data-testid="report-net-worth">
+        <p className="text-sm text-fg-muted">Net worth change (YTD)</p>
         {nw.data && (
           <>
             <p className="text-2xl font-semibold">{formatMoney(nw.data.delta_net_worth, ccy)}</p>
-            <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-400">
+            <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm text-fg-muted">
               <span>Cash flow {formatMoney(nw.data.net_cash_flow, ccy)}</span>
               <span data-testid="revaluation">
                 Currency revaluation {formatMoney(nw.data.currency_revaluation, ccy)}
@@ -147,36 +184,36 @@ export default function Reports() {
             </div>
           </>
         )}
-        {hasSeries && <Chart option={nwOption} testid="net-worth-chart" />}
+        {hasSeries && <Chart option={nwOption} label={nwLabel} testid="net-worth-chart" />}
         {ownerFilter && nw.data && (
-          <p className="mt-2 text-xs text-slate-500" data-testid="net-worth-attribution">
+          <p className="mt-2 text-xs text-fg-muted" data-testid="net-worth-attribution">
             Attribution: {nw.data.attribution} — ownership is held by whole accounts, so this series
             sums the accounts assigned to this owner rather than the transactions posted to them.
           </p>
         )}
       </section>
 
-      <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-cash-flow">
-        <p className="mb-2 text-sm text-slate-400">Income vs expense (YTD)</p>
+      <section className="rounded-card bg-surface-raised p-6" data-testid="report-cash-flow">
+        <p className="mb-2 text-sm text-fg-muted">Income vs expense (YTD)</p>
         {hasCashFlow ? (
-          <Chart option={cashFlowOption} testid="cash-flow-chart" />
+          <Chart option={cashFlowOption} label={cfLabel} testid="cash-flow-chart" />
         ) : (
-          <p className="text-sm text-slate-500">No cash flow in range.</p>
+          <p className="text-sm text-fg-muted">No cash flow in range.</p>
         )}
         {ownerFilter && cashFlow.data && (
-          <p className="mt-2 text-xs text-slate-500" data-testid="cash-flow-attribution">
+          <p className="mt-2 text-xs text-fg-muted" data-testid="cash-flow-attribution">
             Attribution: {cashFlow.data.attribution} — each entry counts under the owner it is
             assigned to, so this reads the household's postings rather than one owner's accounts.
           </p>
         )}
       </section>
 
-      <section className="rounded-2xl bg-slate-900 p-6" data-testid="report-spending">
-        <p className="mb-2 text-sm text-slate-400">Spending by category (YTD)</p>
+      <section className="rounded-card bg-surface-raised p-6" data-testid="report-spending">
+        <p className="mb-2 text-sm text-fg-muted">Spending by category (YTD)</p>
         {hasSpending ? (
-          <Chart option={donutOption} testid="spending-donut" />
+          <Chart option={donutOption} label={donutLabel} testid="spending-donut" />
         ) : (
-          <p className="text-sm text-slate-500">No spending in range.</p>
+          <p className="text-sm text-fg-muted">No spending in range.</p>
         )}
         <ul className="mt-3 space-y-1">
           {spending.data?.rows.map((r) => (
@@ -187,7 +224,7 @@ export default function Reports() {
           ))}
         </ul>
         {ownerFilter && spending.data && (
-          <p className="mt-2 text-xs text-slate-500" data-testid="spending-attribution">
+          <p className="mt-2 text-xs text-fg-muted" data-testid="spending-attribution">
             Attribution: {spending.data.attribution} — this counts entries, not accounts, so it does
             not add up with the net worth figures above for the same owner.
           </p>

@@ -36,21 +36,21 @@ export default function Signup() {
   };
 
   const input =
-    "mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 outline-none focus:border-brand";
+    "mt-1 w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 outline-none focus:border-accent";
 
   return (
     <div className="flex h-full items-center justify-center p-4">
       <form
         onSubmit={submit}
-        className="w-full max-w-sm space-y-4 rounded-2xl bg-slate-900 p-8 shadow-xl"
+        className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8 shadow-xl"
         data-testid="signup-form"
       >
         <div className="text-center">
-          <h1 className="text-2xl font-semibold text-brand">MetalMark</h1>
-          <p className="text-sm text-slate-400">Create your account</p>
+          <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
+          <p className="text-sm text-fg-muted">Create your account</p>
         </div>
         <label className="block text-sm">
-          <span className="text-slate-400">Email</span>
+          <span className="text-fg-muted">Email</span>
           <input
             type="email"
             value={email}
@@ -61,7 +61,7 @@ export default function Signup() {
           />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-400">Display name</span>
+          <span className="text-fg-muted">Display name</span>
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
@@ -71,7 +71,7 @@ export default function Signup() {
           />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-400">Password</span>
+          <span className="text-fg-muted">Password</span>
           <input
             type="password"
             value={password}
@@ -82,33 +82,33 @@ export default function Signup() {
           />
         </label>
         <label className="block text-sm">
-          <span className="text-slate-400">Household name</span>
+          <span className="text-fg-muted">Household name</span>
           <input
             value={household}
             onChange={(e) => setHousehold(e.target.value)}
             className={input}
             data-testid="signup-household"
           />
-          <span className="mt-1 block text-xs text-slate-500">
+          <span className="mt-1 block text-xs text-fg-muted">
             Optional. Ignored if the household already exists on this instance.
           </span>
         </label>
         {error && (
-          <p className="text-sm text-red-400" data-testid="signup-error">
+          <p className="text-sm text-negative" data-testid="signup-error">
             {error}
           </p>
         )}
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-lg bg-brand py-2 font-medium text-slate-950 hover:brightness-110 disabled:opacity-50"
+          className="w-full rounded-control bg-accent py-2 font-medium text-accent-fg hover:brightness-110 disabled:opacity-50"
           data-testid="signup-submit"
         >
           {busy ? "Creating account…" : "Create account"}
         </button>
-        <p className="text-center text-xs text-slate-400">
+        <p className="text-center text-xs text-fg-muted">
           Already have an account?{" "}
-          <Link to="/login" className="text-brand underline" data-testid="signup-to-login">
+          <Link to="/login" className="text-accent underline" data-testid="signup-to-login">
             Sign in
           </Link>
         </p>

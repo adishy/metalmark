@@ -129,7 +129,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
     <Dialog open onClose={onClose} title="Import CSV" testid="import-dialog" footer={footer}>
       {error && (
         <p
-          className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400"
+          className="mb-3 rounded-control bg-negative/10 px-3 py-2 text-sm text-negative"
           data-testid="import-error"
         >
           {error}
@@ -148,13 +148,13 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => onFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-slate-100"
+              className="w-full rounded-control border border-border-strong bg-surface-inset px-3 py-2 text-sm text-fg file:mr-3 file:rounded file:border-0 file:bg-surface-inset file:px-2 file:py-1 file:text-fg"
               data-testid="import-file"
             />
           </Field>
-          {previewMut.isPending && <p className="text-sm text-slate-400">Reading the file…</p>}
+          {previewMut.isPending && <p className="text-sm text-fg-muted">Reading the file…</p>}
           {accounts.length === 0 && (
-            <p className="text-sm text-amber-400" data-testid="import-no-accounts">
+            <p className="text-sm text-warning" data-testid="import-no-accounts">
               Add an account first — an import has to land somewhere.
             </p>
           )}
@@ -179,13 +179,13 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
           </Field>
 
           <div>
-            <p className="mb-1 text-xs font-medium text-slate-400">Sample from your file</p>
+            <p className="mb-1 text-xs font-medium text-fg-muted">Sample from your file</p>
             <div
-              className="overflow-x-auto rounded-lg border border-slate-800"
+              className="overflow-x-auto rounded-control border border-border"
               data-testid="import-table"
             >
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-800/60 text-slate-400">
+                <thead className="bg-surface-inset/60 text-fg-muted">
                   <tr>
                     {preview.headers.map((h) => (
                       <th key={h} className="whitespace-nowrap px-2 py-1 font-medium">
@@ -196,7 +196,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
                 </thead>
                 <tbody>
                   {preview.sample.map((row, i) => (
-                    <tr key={i} className="border-t border-slate-800 text-slate-300">
+                    <tr key={i} className="border-t border-border text-fg">
                       {preview.headers.map((h, j) => (
                         <td key={h} className="whitespace-nowrap px-2 py-1">
                           {row[j] ?? ""}
@@ -210,7 +210,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium text-slate-400">
+            <p className="mb-1 text-xs font-medium text-fg-muted">
               Which column is which — correct anything the headers got wrong
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -240,7 +240,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
                 );
               })}
             </div>
-            <p className="mt-1 text-xs text-slate-500" data-testid="import-ready-hint">
+            <p className="mt-1 text-xs text-fg-muted" data-testid="import-ready-hint">
               {ready
                 ? "A date column and an amount column are mapped."
                 : "A date column and an amount (or debit/credit) column are required."}
@@ -269,7 +269,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
             </Field>
             <label
               htmlFor={ids.dayfirst}
-              className="mt-1 flex items-start gap-2 text-xs text-slate-300"
+              className="mt-1 flex items-start gap-2 text-xs text-fg"
             >
               <input
                 id={ids.dayfirst}
@@ -281,7 +281,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
               />
               <span>
                 Read ambiguous dates as day-first (dd/mm/yyyy)
-                <span className="block text-slate-500">
+                <span className="block text-fg-muted">
                   Only decides values like 05/03/2026, which are dates both ways.
                 </span>
               </span>
@@ -292,7 +292,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
 
       {step === "done" && result && (
         <div className="space-y-3" data-testid="import-result">
-          <p className="text-sm text-slate-200">
+          <p className="text-sm text-fg">
             Imported <strong data-testid="import-inserted">{result.inserted}</strong>
             {result.skipped > 0 && (
               <>
@@ -303,7 +303,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
             {result.suspects > 0 && (
               <>
                 {" · "}
-                <strong className="text-amber-400" data-testid="import-suspects">
+                <strong className="text-warning" data-testid="import-suspects">
                   {result.suspects}
                 </strong>{" "}
                 possible duplicate{result.suspects === 1 ? "" : "s"} flagged for review
@@ -313,11 +313,11 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
 
           {result.errors.length > 0 && (
             <div data-testid="import-errors">
-              <p className="text-xs font-medium text-slate-400">
+              <p className="text-xs font-medium text-fg-muted">
                 {result.errors.length} row{result.errors.length === 1 ? "" : "s"} could not be read
                 and {result.errors.length === 1 ? "was" : "were"} left out:
               </p>
-              <ul className="mt-1 max-h-48 space-y-1 overflow-y-auto text-xs text-red-400">
+              <ul className="mt-1 max-h-48 space-y-1 overflow-y-auto text-xs text-negative">
                 {result.errors.map((e) => (
                   <li key={e.line}>
                     Line {e.line}: {e.message}

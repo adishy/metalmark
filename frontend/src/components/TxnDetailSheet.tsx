@@ -152,14 +152,14 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
         {/* An inheriting row's owner comes from its account, so name the owner
             the user is actually looking at rather than leaving it implied. */}
         {!owner && (
-          <p className="text-xs text-slate-500" data-testid="detail-owner-effective">
+          <p className="text-xs text-fg-muted" data-testid="detail-owner-effective">
             Effective owner: {ownerName.get(account?.owner_id ?? "") ?? "—"}
             {account && ` (from ${account.name})`}
           </p>
         )}
 
         <div>
-          <p className="mb-1 text-xs font-medium text-slate-400">Tags</p>
+          <p className="mb-1 text-xs font-medium text-fg-muted">Tags</p>
           <div className="flex flex-wrap gap-2" data-testid="detail-tags">
             {tags.map((t) => {
               const on = tagIds.includes(t.id);
@@ -170,7 +170,7 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
                   onClick={() => toggleTag(t.id)}
                   aria-pressed={on}
                   className={`rounded-full border px-3 py-1 text-xs ${
-                    on ? "border-brand bg-brand/20 text-brand" : "border-slate-700 text-slate-400 hover:text-slate-200"
+                    on ? "border-accent bg-accent/20 text-accent" : "border-border-strong text-fg-muted hover:text-fg"
                   }`}
                   data-testid={`detail-tag-${t.id}`}
                 >
@@ -178,7 +178,7 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
                 </button>
               );
             })}
-            {tags.length === 0 && <span className="text-xs text-slate-500">No tags yet.</span>}
+            {tags.length === 0 && <span className="text-xs text-fg-muted">No tags yet.</span>}
           </div>
         </div>
 
@@ -194,7 +194,7 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
           <Textarea id={ids.notes} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} data-testid="detail-notes" />
         </Field>
 
-        {update.isError && <p className="text-sm text-red-400">{(update.error as Error).message}</p>}
+        {update.isError && <p className="text-sm text-negative">{(update.error as Error).message}</p>}
 
         <TransferSection
           txn={txn}
@@ -214,8 +214,8 @@ function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }:
         />
 
         {confirmDel && (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm" data-testid="txn-delete-confirm">
-            <p className="text-red-200">Delete this transaction? This cannot be undone.</p>
+          <div className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm" data-testid="txn-delete-confirm">
+            <p className="text-negative">Delete this transaction? This cannot be undone.</p>
             <div className="mt-2 flex gap-2">
               <Button variant="secondary" onClick={() => setConfirmDel(false)}>Keep</Button>
               <Button
@@ -292,11 +292,11 @@ function TransferSection({
     const crossCurrency =
       counterpart !== undefined && counterpart.currency !== txn.currency;
     return (
-      <div className="rounded-lg border border-brand/40 bg-brand/5 p-3" data-testid="transfer-section">
+      <div className="rounded-control border border-accent/40 bg-accent/5 p-3" data-testid="transfer-section">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-slate-200">
+          <p className="text-sm font-medium text-fg">
             Transfer
-            <span className="ml-2 text-xs text-slate-400">
+            <span className="ml-2 text-xs text-fg-muted">
               excluded from cash flow and spending
             </span>
           </p>
@@ -319,51 +319,51 @@ function TransferSection({
         </div>
 
         {transfer.isLoading && (
-          <p className="mt-2 text-xs text-slate-500">Loading the other leg…</p>
+          <p className="mt-2 text-xs text-fg-muted">Loading the other leg…</p>
         )}
         {transfer.isError && (
-          <p className="mt-2 text-sm text-red-400">{(transfer.error as Error).message}</p>
+          <p className="mt-2 text-sm text-negative">{(transfer.error as Error).message}</p>
         )}
 
         {counterpart && (
           <button
             type="button"
             onClick={() => onNavigate(counterpart)}
-            className="mt-2 w-full rounded-lg bg-slate-800/60 p-2 text-left hover:bg-slate-800"
+            className="mt-2 w-full rounded-control bg-surface-inset/60 p-2 text-left hover:bg-surface-inset"
             data-testid="transfer-counterpart"
           >
-            <p className="text-sm text-slate-200">{label(counterpart)}</p>
-            <p className="text-xs text-slate-500">
+            <p className="text-sm text-fg">{label(counterpart)}</p>
+            <p className="text-xs text-fg-muted">
               {formatDate(counterpart.transacted_at)} · {accountName(counterpart.account_id)}
             </p>
-            <p className="mt-1 text-sm text-slate-100">
+            <p className="mt-1 text-sm text-fg">
               {formatMoney(counterpart.amount, counterpart.currency)}
             </p>
           </button>
         )}
         {!transfer.isLoading && !transfer.isError && !counterpart && (
-          <p className="mt-2 text-xs text-slate-500">The other leg of this transfer is missing.</p>
+          <p className="mt-2 text-xs text-fg-muted">The other leg of this transfer is missing.</p>
         )}
 
         {counterpart && (
           <p
-            className={`mt-2 text-xs ${cost !== null ? "font-medium text-amber-300" : "text-slate-500"}`}
+            className={`mt-2 text-xs ${cost !== null ? "font-medium text-warning" : "text-fg-muted"}`}
             data-testid="transfer-fx-cost"
           >
             {residualText(crossCurrency, cost, base)}
           </p>
         )}
         {unlink.isError && (
-          <p className="mt-2 text-sm text-red-400">{(unlink.error as Error).message}</p>
+          <p className="mt-2 text-sm text-negative">{(unlink.error as Error).message}</p>
         )}
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-slate-800 p-3" data-testid="transfer-section">
+    <div className="rounded-control border border-border p-3" data-testid="transfer-section">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-200">Transfer</p>
+        <p className="text-sm font-medium text-fg">Transfer</p>
         {!matching ? (
           <Button
             variant="secondary"
@@ -374,7 +374,7 @@ function TransferSection({
             Match a transfer
           </Button>
         ) : (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-fg-muted">
             opposite sign, another account, within 5 days
           </span>
         )}
@@ -383,10 +383,10 @@ function TransferSection({
       {matching && (
         <div className="mt-3 space-y-2">
           {candidates.isLoading && (
-            <p className="text-xs text-slate-500">Looking for the other leg…</p>
+            <p className="text-xs text-fg-muted">Looking for the other leg…</p>
           )}
           {candidates.isError && (
-            <p className="text-sm text-red-400">{(candidates.error as Error).message}</p>
+            <p className="text-sm text-negative">{(candidates.error as Error).message}</p>
           )}
 
           {candidates.data?.items.map((c) => {
@@ -406,23 +406,23 @@ function TransferSection({
                     },
                   )
                 }
-                className="w-full rounded-lg bg-slate-800/60 p-2 text-left hover:bg-slate-800 disabled:opacity-50"
+                className="w-full rounded-control bg-surface-inset/60 p-2 text-left hover:bg-surface-inset disabled:opacity-50"
                 data-testid={`transfer-candidate-${other.id}`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="min-w-0 truncate text-sm text-slate-200">{label(other)}</p>
-                  <p className="shrink-0 text-sm text-slate-100">
+                  <p className="min-w-0 truncate text-sm text-fg">{label(other)}</p>
+                  <p className="shrink-0 text-sm text-fg">
                     {formatMoney(other.amount, other.currency)}
                   </p>
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-fg-muted">
                   {formatDate(other.transacted_at)} · {legsApart(c.days_apart)} ·{" "}
                   {accountName(other.account_id)}
                 </p>
                 {/* The price of this choice, before the user makes it. */}
                 <p
                   className={`mt-1 text-xs ${
-                    c.fx_cost_base !== null ? "font-medium text-amber-300" : "text-slate-500"
+                    c.fx_cost_base !== null ? "font-medium text-warning" : "text-fg-muted"
                   }`}
                   data-testid={`transfer-candidate-cost-${other.id}`}
                 >
@@ -436,12 +436,12 @@ function TransferSection({
           })}
 
           {candidates.data && candidates.data.items.length === 0 && (
-            <p className="text-xs text-slate-500" data-testid="transfer-no-candidates">
+            <p className="text-xs text-fg-muted" data-testid="transfer-no-candidates">
               Nothing in this household looks like the other leg.
             </p>
           )}
           {link.isError && (
-            <p className="text-sm text-red-400">{(link.error as Error).message}</p>
+            <p className="text-sm text-negative">{(link.error as Error).message}</p>
           )}
 
           <Button
@@ -533,22 +533,22 @@ function SplitEditor({
     );
 
   return (
-    <div className="rounded-lg border border-slate-800 p-3" data-testid="split-editor">
+    <div className="rounded-control border border-border p-3" data-testid="split-editor">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-200">Split</p>
+        <p className="text-sm font-medium text-fg">Split</p>
         {!open ? (
           <Button variant="secondary" className="px-2 py-1 text-xs" onClick={() => setOpen(true)} data-testid="split-open">
             Split transaction
           </Button>
         ) : (
-          <span className="text-xs text-slate-500">Total {formatMoney(String(target), currency)}</span>
+          <span className="text-xs text-fg-muted">Total {formatMoney(String(target), currency)}</span>
         )}
       </div>
 
       {open && (
         <div className="mt-3 space-y-3">
           {rows.map((r, i) => (
-            <div key={i} className="space-y-2 rounded-lg bg-slate-800/60 p-2" data-testid={`split-row-${i}`}>
+            <div key={i} className="space-y-2 rounded-control bg-surface-inset/60 p-2" data-testid={`split-row-${i}`}>
               <div className="grid grid-cols-2 gap-2">
                 <input
                   aria-label={`Split ${i + 1} amount`}
@@ -556,14 +556,14 @@ function SplitEditor({
                   inputMode="decimal"
                   placeholder="Amount"
                   onChange={(e) => setRow(i, { amount: e.target.value })}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+                  className="rounded-control border border-border-strong bg-surface-inset px-2 py-1.5 text-sm"
                   data-testid={`split-amount-${i}`}
                 />
                 <select
                   aria-label={`Split ${i + 1} category`}
                   value={r.category_id}
                   onChange={(e) => setRow(i, { category_id: e.target.value })}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+                  className="rounded-control border border-border-strong bg-surface-inset px-2 py-1.5 text-sm"
                   data-testid={`split-category-${i}`}
                 >
                   <option value="">Uncategorized</option>
@@ -584,7 +584,7 @@ function SplitEditor({
                 <button
                   type="button"
                   onClick={() => removeRow(i)}
-                  className="mt-5 rounded-lg border border-slate-700 px-2 py-1.5 text-sm text-slate-400 hover:text-red-300"
+                  className="mt-5 rounded-control border border-border-strong px-2 py-1.5 text-sm text-fg-muted hover:text-negative"
                   data-testid={`split-remove-${i}`}
                 >
                   Remove
@@ -598,13 +598,13 @@ function SplitEditor({
           </Button>
 
           <p
-            className={`text-xs ${balanced ? "text-emerald-400" : "text-amber-400"}`}
+            className={`text-xs ${balanced ? "text-positive" : "text-warning"}`}
             data-testid="split-sum"
           >
             Splits sum {formatMoney(String(sum), currency)} — must equal {formatMoney(String(target), currency)}
           </p>
 
-          {replace.isError && <p className="text-sm text-red-400">{(replace.error as Error).message}</p>}
+          {replace.isError && <p className="text-sm text-negative">{(replace.error as Error).message}</p>}
 
           <div className="flex gap-2">
             <Button

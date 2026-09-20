@@ -63,7 +63,7 @@ export default function Settings() {
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-medium">Settings</h2>
-      <div className="flex flex-wrap gap-1 border-b border-slate-800" role="tablist">
+      <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -71,7 +71,7 @@ export default function Settings() {
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`rounded-t-lg px-3 py-2 text-sm ${
-              tab === t.id ? "border-b-2 border-brand text-white" : "text-slate-400 hover:text-white"
+              tab === t.id ? "border-b-2 border-accent text-fg" : "text-fg-muted hover:text-fg"
             }`}
             data-testid={`settings-tab-${t.id}`}
           >
@@ -95,8 +95,8 @@ export default function Settings() {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-3 rounded-2xl bg-slate-900 p-4">
-      <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+    <section className="space-y-3 rounded-card bg-surface-raised p-4">
+      <h3 className="text-sm font-semibold text-fg">{title}</h3>
       {children}
     </section>
   );
@@ -212,18 +212,18 @@ function CategoriesSection() {
           {groups.data?.map((g) => (
             <li key={g.id}>
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-slate-300">
-                  {g.name} <span className="text-xs text-slate-500">({g.type})</span>
+                <p className="text-sm font-medium text-fg">
+                  {g.name} <span className="text-xs text-fg-muted">({g.type})</span>
                 </p>
                 <button
-                  className="text-xs text-slate-500 hover:text-red-300"
+                  className="text-xs text-fg-muted hover:text-negative"
                   onClick={() => delGroup.mutate(g.id)}
                   data-testid={`group-delete-${g.id}`}
                 >
                   Delete group
                 </button>
               </div>
-              <ul className="mt-1 divide-y divide-slate-800 rounded-lg bg-slate-800/40">
+              <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
                   <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <span className="flex items-center gap-2">
@@ -231,7 +231,7 @@ function CategoriesSection() {
                       {c.name}
                     </span>
                     <button
-                      className="text-xs text-slate-500 hover:text-red-300"
+                      className="text-xs text-fg-muted hover:text-negative"
                       onClick={() => delCat.mutate(c.id)}
                       data-testid={`category-delete-${c.id}`}
                     >
@@ -240,7 +240,7 @@ function CategoriesSection() {
                   </li>
                 ))}
                 {(byGroup.get(g.id) ?? []).length === 0 && (
-                  <li className="px-3 py-2 text-xs text-slate-500">No categories.</li>
+                  <li className="px-3 py-2 text-xs text-fg-muted">No categories.</li>
                 )}
               </ul>
             </li>
@@ -292,11 +292,11 @@ function TagsSection() {
       <Card title="Tags">
         <ul className="flex flex-wrap gap-2" data-testid="tag-list">
           {tags.data?.map((t) => (
-            <li key={t.id} className="flex items-center gap-2 rounded-full bg-slate-800 px-3 py-1 text-sm">
+            <li key={t.id} className="flex items-center gap-2 rounded-full bg-surface-inset px-3 py-1 text-sm">
               <span className="inline-block h-3 w-3 rounded-full" style={{ background: t.color ?? "#64748b" }} />
               {t.name}
               <button
-                className="text-slate-500 hover:text-red-300"
+                className="text-fg-muted hover:text-negative"
                 onClick={() => delTag.mutate(t.id)}
                 aria-label={`Delete ${t.name}`}
                 data-testid={`tag-delete-${t.id}`}
@@ -305,7 +305,7 @@ function TagsSection() {
               </button>
             </li>
           ))}
-          {tags.data?.length === 0 && <li className="text-xs text-slate-500">No tags yet.</li>}
+          {tags.data?.length === 0 && <li className="text-xs text-fg-muted">No tags yet.</li>}
         </ul>
       </Card>
     </div>
@@ -336,7 +336,7 @@ function CurrenciesSection() {
   return (
     <div className="space-y-4">
       <Card title="Add FX rate">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-muted">
           One unit of <strong>base</strong> equals <strong>rate</strong> units of <strong>quote</strong>
           {" "}(e.g. 1 USD = 0.92 EUR).
         </p>
@@ -379,18 +379,18 @@ function CurrenciesSection() {
             <Button type="submit" disabled={upsert.isPending} data-testid="fx-save">Add rate</Button>
           </div>
         </form>
-        {upsert.isError && <p className="text-sm text-red-400">{(upsert.error as Error).message}</p>}
+        {upsert.isError && <p className="text-sm text-negative">{(upsert.error as Error).message}</p>}
       </Card>
 
       <Card title="FX rates">
-        <ul className="divide-y divide-slate-800" data-testid="fx-list">
+        <ul className="divide-y divide-border" data-testid="fx-list">
           {rates.data?.map((r) => (
             <li key={r.id} className="flex justify-between px-1 py-2 text-sm">
               <span>1 {r.base_currency} = {r.rate} {r.quote_currency}</span>
-              <span className="text-slate-500">{formatDate(r.rate_date)}</span>
+              <span className="text-fg-muted">{formatDate(r.rate_date)}</span>
             </li>
           ))}
-          {rates.data?.length === 0 && <li className="py-2 text-xs text-slate-500">No rates yet.</li>}
+          {rates.data?.length === 0 && <li className="py-2 text-xs text-fg-muted">No rates yet.</li>}
         </ul>
       </Card>
     </div>
@@ -417,13 +417,13 @@ function HouseholdSection() {
     <div className="space-y-4">
       <Card title="Household">
         <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2" data-testid="household-info">
-          <div><dt className="text-slate-500">Name</dt><dd>{household.data?.name ?? "—"}</dd></div>
+          <div><dt className="text-fg-muted">Name</dt><dd>{household.data?.name ?? "—"}</dd></div>
           <div>
-            <dt className="text-slate-500">Base currency</dt>
-            <dd>{household.data?.base_currency ?? "—"} <span className="text-xs text-slate-500">(immutable)</span></dd>
+            <dt className="text-fg-muted">Base currency</dt>
+            <dd>{household.data?.base_currency ?? "—"} <span className="text-xs text-fg-muted">(immutable)</span></dd>
           </div>
-          <div><dt className="text-slate-500">Timezone</dt><dd>{household.data?.timezone ?? "—"}</dd></div>
-          <div><dt className="text-slate-500">Your role</dt><dd>{household.data?.role ?? me?.role}</dd></div>
+          <div><dt className="text-fg-muted">Timezone</dt><dd>{household.data?.timezone ?? "—"}</dd></div>
+          <div><dt className="text-fg-muted">Your role</dt><dd>{household.data?.role ?? me?.role}</dd></div>
         </dl>
 
         {isOwner && (
@@ -451,27 +451,27 @@ function HouseholdSection() {
             </Button>
           </form>
         )}
-        {update.isError && <p className="text-sm text-red-400">{(update.error as Error).message}</p>}
+        {update.isError && <p className="text-sm text-negative">{(update.error as Error).message}</p>}
       </Card>
 
       <Card title="Members">
         {/* Signup is open, so there is nothing to invite: a new person creates
             their own account and lands in this household. */}
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-muted">
           Anyone can create an account from the sign-up page and will join this household as a
           member. Members are managed here, not on the ledger: what owns money are the owners below.
         </p>
         <table className="w-full text-sm" data-testid="members-table">
           <thead>
-            <tr className="text-left text-xs text-slate-500">
+            <tr className="text-left text-xs text-fg-muted">
               <th className="py-1">Name</th><th className="py-1">Email</th><th className="py-1">Role</th>
             </tr>
           </thead>
           <tbody>
             {members.data?.map((m) => (
-              <tr key={m.user_id} className="border-t border-slate-800">
+              <tr key={m.user_id} className="border-t border-border">
                 <td className="py-1.5">{m.display_name}</td>
-                <td className="py-1.5 text-slate-400">{m.email}</td>
+                <td className="py-1.5 text-fg-muted">{m.email}</td>
                 <td className="py-1.5">{m.role}</td>
               </tr>
             ))}
@@ -518,7 +518,7 @@ function OwnersSection() {
           <Button type="submit" disabled={create.isPending} data-testid="owner-save">Add owner</Button>
         </form>
         {create.isError && (
-          <p className="text-sm text-red-400" data-testid="owner-error">
+          <p className="text-sm text-negative" data-testid="owner-error">
             {(create.error as Error).message}
           </p>
         )}
@@ -526,7 +526,7 @@ function OwnersSection() {
       )}
 
       <Card title="Owners">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-muted">
           Owners are what accounts, transactions and splits are assigned to. Shared is the default
           and the fallback when an owner is deleted.
         </p>
@@ -542,7 +542,7 @@ function OwnersSection() {
           ))}
         </ul>
         {deleted && (
-          <p className="text-xs text-slate-400" data-testid="owner-delete-result">
+          <p className="text-xs text-fg-muted" data-testid="owner-delete-result">
             Deleted “{deleted.name}” and moved {deleted.counts.reassigned_accounts} accounts,{" "}
             {deleted.counts.reassigned_transactions} transactions and{" "}
             {deleted.counts.reassigned_splits} splits.
@@ -577,7 +577,7 @@ function OwnerRow({
   const dirty = trimmed !== owner.name && trimmed !== "";
 
   return (
-    <li className="space-y-2 rounded-lg bg-slate-800/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
+    <li className="space-y-2 rounded-control bg-surface-inset/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
       <div className="flex items-center gap-2">
         {canEdit ? (
           <Input
@@ -593,7 +593,7 @@ function OwnerRow({
         )}
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
-            isShared ? "bg-slate-700 text-slate-300" : "bg-brand/15 text-brand"
+            isShared ? "bg-surface-inset text-fg" : "bg-accent/15 text-accent"
           }`}
           data-testid={`owner-kind-${owner.id}`}
         >
@@ -624,20 +624,20 @@ function OwnerRow({
       </div>
 
       {isShared && (
-        <p className="text-xs text-slate-500">Shared is permanent — it cannot be deleted.</p>
+        <p className="text-xs text-fg-muted">Shared is permanent — it cannot be deleted.</p>
       )}
       {update.isError && (
-        <p className="text-xs text-red-400" data-testid={`owner-rename-error-${owner.id}`}>
+        <p className="text-xs text-negative" data-testid={`owner-rename-error-${owner.id}`}>
           {(update.error as Error).message}
         </p>
       )}
 
       {confirming && (
         <div
-          className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm"
+          className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm"
           data-testid={`owner-delete-confirm-${owner.id}`}
         >
-          <p className="text-red-200">
+          <p className="text-negative">
             Delete “{owner.name}”? Everything assigned to it moves to the owner below.
           </p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
@@ -678,7 +678,7 @@ function OwnerRow({
               Yes, delete
             </Button>
           </div>
-          {del.isError && <p className="mt-2 text-sm text-red-400">{(del.error as Error).message}</p>}
+          {del.isError && <p className="mt-2 text-sm text-negative">{(del.error as Error).message}</p>}
         </div>
       )}
     </li>
@@ -718,7 +718,7 @@ function RulesSection() {
   return (
     <div className="space-y-4">
       <Card title="Rules">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-muted">
           Rules run over new transactions as they arrive and over the existing ledger when you ask
           them to. Lower priority runs first, and a rule never overwrites a field a person has set.
         </p>
@@ -739,21 +739,21 @@ function RulesSection() {
             {apply.isPending ? "Applying…" : "Apply to existing"}
           </Button>
           {!isOwner && (
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-fg-muted">
               Only a household owner can create, edit or apply rules.
             </span>
           )}
         </div>
 
         {applied && (
-          <p className="text-xs text-slate-400" data-testid="rule-apply-result">
+          <p className="text-xs text-fg-muted" data-testid="rule-apply-result">
             {applied.updated === 0
               ? `Matched ${applied.matched} transactions — nothing left to change, the rules are already applied.`
               : `Matched ${applied.matched} transactions and updated ${applied.updated}.`}
           </p>
         )}
         {apply.isError && (
-          <p className="text-sm text-red-400" data-testid="rule-apply-error">
+          <p className="text-sm text-negative" data-testid="rule-apply-error">
             {(apply.error as Error).message}
           </p>
         )}
@@ -762,7 +762,7 @@ function RulesSection() {
           {rules.data?.map((r) => (
             <li
               key={r.id}
-              className="flex flex-wrap items-start gap-3 rounded-lg bg-slate-800/40 px-3 py-2"
+              className="flex flex-wrap items-start gap-3 rounded-control bg-surface-inset/40 px-3 py-2"
               data-testid={`rule-row-${r.id}`}
             >
               <label className="flex items-center gap-2 pt-0.5 text-sm">
@@ -778,15 +778,15 @@ function RulesSection() {
                 />
               </label>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-100">
+                <p className="text-sm font-medium text-fg">
                   {r.name}{" "}
-                  <span className="text-xs text-slate-500">priority {r.priority}</span>
-                  {!r.enabled && <span className="ml-2 text-xs text-amber-400/90">disabled</span>}
+                  <span className="text-xs text-fg-muted">priority {r.priority}</span>
+                  {!r.enabled && <span className="ml-2 text-xs text-warning/90">disabled</span>}
                 </p>
-                <p className="text-xs text-slate-400" data-testid={`rule-when-${r.id}`}>
+                <p className="text-xs text-fg-muted" data-testid={`rule-when-${r.id}`}>
                   When {describeConditions(r.conditions, names)}
                 </p>
-                <p className="text-xs text-slate-400" data-testid={`rule-then-${r.id}`}>
+                <p className="text-xs text-fg-muted" data-testid={`rule-then-${r.id}`}>
                   Then {describeActions(r.actions, names)}
                 </p>
               </div>
@@ -811,12 +811,12 @@ function RulesSection() {
                 </Button>
               </div>
               {update.isError && update.variables?.id === r.id && (
-                <p className="w-full text-xs text-red-400">{(update.error as Error).message}</p>
+                <p className="w-full text-xs text-negative">{(update.error as Error).message}</p>
               )}
             </li>
           ))}
           {rules.data?.length === 0 && (
-            <li className="text-xs text-slate-500" data-testid="rule-empty">
+            <li className="text-xs text-fg-muted" data-testid="rule-empty">
               No rules yet. A rule can categorise, tag, rename or hide transactions for you.
             </li>
           )}
@@ -888,8 +888,8 @@ function ProfileSection() {
   return (
     <Card title="Profile">
       <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2" data-testid="profile-info">
-        <div><dt className="text-slate-500">Display name</dt><dd>{me?.user.display_name}</dd></div>
-        <div><dt className="text-slate-500">Email</dt><dd>{me?.user.email}</dd></div>
+        <div><dt className="text-fg-muted">Display name</dt><dd>{me?.user.display_name}</dd></div>
+        <div><dt className="text-fg-muted">Email</dt><dd>{me?.user.email}</dd></div>
       </dl>
       <Button variant="secondary" onClick={() => logout()} data-testid="profile-signout">Sign out</Button>
     </Card>

@@ -1,10 +1,43 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0f172a" />
+    <!-- Rewritten by src/theme/theme.ts once the choice is known; this is the
+         pre-JS value. Light, because `:root` in index.css is light — there is
+         deliberately no `class="dark"` here, which is what made light mode
+         unreachable before: the class outranked every `:root` value, so the
+         light palette was defined and never once painted. -->
+    <meta name="theme-color" content="#f8fafc" />
     <title>MetalMark</title>
+    <script>
+      /*
+       * Set the theme before first paint. This is inline and synchronous on
+       * purpose: any deferred script (a module, a React effect) runs after the
+       * browser has painted, which is exactly the flash of wrong theme this
+       * exists to prevent.
+       *
+       * Keep the storage key in step with THEME_KEY in src/theme/theme.ts. The
+       * theme module is the owner of this logic once the app is running; this is
+       * a deliberate duplicate of a dozen lines, because the one thing it cannot
+       * do is wait for the module.
+       *
+       * Wrapped in try/catch because localStorage throws in a private window —
+       * and a thrown error here would leave the app unstyled rather than merely
+       * on the default theme.
+       */
+      (function () {
+        try {
+          var stored = localStorage.getItem("metalmark-theme");
+          var dark =
+            stored === "dark" ||
+            (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {
+          /* Not fatal: no class means the light default in index.css stands. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

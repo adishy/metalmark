@@ -178,7 +178,7 @@ export default function RuleBuilder({
             />
           </Field>
           <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm text-slate-300">
+            <label className="flex items-center gap-2 text-sm text-fg">
               <input
                 type="checkbox"
                 checked={d.enabled}
@@ -353,17 +353,17 @@ export default function RuleBuilder({
           {/* A rule that writes with nothing to match on is a catch-all, which is
               occasionally what someone wants and usually a forgotten condition. */}
           {!hasAnyCondition(d) && (
-            <p className="text-xs text-amber-400/90" data-testid="rule-no-conditions">
+            <p className="text-xs text-warning/90" data-testid="rule-no-conditions">
               No conditions — this rule matches every transaction.
             </p>
           )}
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-fg-muted">
             A field a person has already set is never overwritten. Tags are added, never removed.
           </p>
         </Section>
 
         {failure && (
-          <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400" data-testid="rule-error">
+          <p className="rounded-control bg-negative/10 px-3 py-2 text-sm text-negative" data-testid="rule-error">
             {(failure as Error).message}
           </p>
         )}
@@ -374,8 +374,8 @@ export default function RuleBuilder({
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="space-y-3 rounded-xl bg-slate-800/40 p-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</h3>
+    <section className="space-y-3 rounded-card bg-surface-inset/40 p-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{title}</h3>
       {children}
     </section>
   );
@@ -400,13 +400,13 @@ function Checks({
 }) {
   return (
     <fieldset className="space-y-1">
-      <legend className="text-xs font-medium text-slate-400">{legend}</legend>
+      <legend className="text-xs font-medium text-fg-muted">{legend}</legend>
       {items.length === 0 ? (
-        <p className="text-xs text-slate-500">{empty}</p>
+        <p className="text-xs text-fg-muted">{empty}</p>
       ) : (
-        <div className="flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-lg bg-slate-900/60 p-2">
+        <div className="flex max-h-32 flex-wrap gap-x-4 gap-y-1 overflow-y-auto rounded-control bg-surface-raised/60 p-2">
           {items.map((it) => (
-            <label key={it.id} className="flex items-center gap-2 text-sm text-slate-200">
+            <label key={it.id} className="flex items-center gap-2 text-sm text-fg">
               <input
                 type="checkbox"
                 checked={selected.includes(it.id)}

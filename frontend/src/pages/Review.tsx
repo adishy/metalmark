@@ -59,14 +59,14 @@ export default function Review() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Review</h2>
-        <span className="text-sm text-slate-500" data-testid="review-remaining">
+        <span className="text-sm text-fg-muted" data-testid="review-remaining">
           {remaining > 0 ? `${remaining} to review` : "All done"}
         </span>
       </div>
 
       {!current ? (
         <p
-          className="rounded-2xl bg-slate-900 px-4 py-10 text-center text-sm text-slate-500"
+          className="rounded-card bg-surface-raised px-4 py-10 text-center text-sm text-fg-muted"
           data-testid="review-empty"
         >
           Nothing to review. 🎉
@@ -85,14 +85,14 @@ export default function Review() {
           <div className="absolute inset-x-0 -bottom-14 flex justify-center gap-4">
             <button
               onClick={() => decide(current, false)}
-              className="rounded-full bg-slate-800 px-6 py-2 text-sm text-red-300"
+              className="rounded-full bg-surface-inset px-6 py-2 text-sm text-negative"
               data-testid="review-reject"
             >
               ← Ignore
             </button>
             <button
               onClick={() => decide(current, true)}
-              className="rounded-full bg-brand px-6 py-2 text-sm font-medium text-slate-950"
+              className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-accent-fg"
               data-testid="review-approve"
             >
               Reviewed →
@@ -120,7 +120,7 @@ function SwipeCard({
 
   return (
     <motion.div
-      className="absolute inset-0 flex cursor-grab flex-col justify-between rounded-2xl bg-slate-900 p-6 shadow-xl active:cursor-grabbing"
+      className="absolute inset-0 flex cursor-grab flex-col justify-between rounded-card bg-surface-raised p-6 shadow-xl active:cursor-grabbing"
       style={{ x, rotate }}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
@@ -134,13 +134,13 @@ function SwipeCard({
       <div className="flex justify-between">
         <motion.span
           style={{ opacity: ignoreOpacity }}
-          className="rounded-lg border border-red-400 px-2 py-1 text-xs text-red-300"
+          className="rounded-control border border-negative px-2 py-1 text-xs text-negative"
         >
           IGNORE
         </motion.span>
         <motion.span
           style={{ opacity: approveOpacity }}
-          className="rounded-lg border border-brand px-2 py-1 text-xs text-brand"
+          className="rounded-control border border-accent px-2 py-1 text-xs text-accent"
         >
           REVIEWED
         </motion.span>
@@ -148,13 +148,13 @@ function SwipeCard({
 
       <div>
         <p className="text-xl font-semibold">{txn.merchant || txn.description || "(no description)"}</p>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-fg-muted">
           {formatDate(txn.transacted_at)}
           {categoryName && ` · ${categoryName}`}
         </p>
       </div>
 
-      <p className={`text-2xl font-semibold ${Number(txn.amount) < 0 ? "text-slate-100" : "text-emerald-400"}`}>
+      <p className={`text-2xl font-semibold ${Number(txn.amount) < 0 ? "text-fg" : "text-positive"}`}>
         {formatMoney(txn.amount, txn.currency)}
       </p>
     </motion.div>

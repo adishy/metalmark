@@ -84,18 +84,18 @@ export default function Dialog({
         tabIndex={-1}
         className={
           side
-            ? "flex h-full w-full max-w-md flex-col bg-slate-900 shadow-2xl outline-none"
-            : "m-4 flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-slate-900 shadow-2xl outline-none"
+            ? "flex h-full w-full max-w-md flex-col bg-surface-raised shadow-2xl outline-none"
+            : "m-4 flex max-h-[90vh] w-full max-w-lg flex-col rounded-card bg-surface-raised shadow-2xl outline-none"
         }
         data-testid={testid}
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-          <h2 className="text-base font-semibold text-slate-100">{title}</h2>
+        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+          <h2 className="text-base font-semibold text-fg">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+            className="rounded-control px-2 py-1 text-fg-muted hover:bg-surface-inset hover:text-fg"
             data-testid={testid ? `${testid}-close` : undefined}
           >
             ✕
@@ -103,7 +103,7 @@ export default function Dialog({
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-slate-800 px-5 py-3">{footer}</div>
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-3">{footer}</div>
         )}
       </div>
     </div>

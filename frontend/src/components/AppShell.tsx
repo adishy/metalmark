@@ -14,17 +14,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-6">
-          <span className="text-lg font-semibold text-brand">MetalMark</span>
+          <span className="text-lg font-semibold text-accent">MetalMark</span>
           <nav className="hidden gap-1 sm:flex">
             {NAV.map((n) => (
               <NavLink
                 key={n.to}
                 to={n.to}
                 className={({ isActive }) =>
-                  `rounded-lg px-3 py-1.5 text-sm ${
-                    isActive ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+                  `rounded-control px-3 py-1.5 text-sm ${
+                    isActive ? "bg-surface-inset text-fg" : "text-fg-muted hover:text-fg"
                   }`
                 }
                 data-testid={`nav-${n.label.toLowerCase()}`}
@@ -34,9 +34,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
         </div>
-        <div className="flex items-center gap-3 text-sm text-slate-400">
+        <div className="flex items-center gap-3 text-sm text-fg-muted">
           <span className="hidden sm:inline">{me?.household_name}</span>
-          <button onClick={() => logout()} className="hover:text-white" data-testid="logout">
+          <button onClick={() => logout()} className="hover:text-fg" data-testid="logout">
             Sign out
           </button>
         </div>
@@ -45,13 +45,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <main className="mx-auto w-full max-w-4xl flex-1 p-4">{children}</main>
 
       {/* Mobile bottom nav */}
-      <nav className="flex border-t border-slate-800 sm:hidden">
+      <nav className="flex border-t border-border sm:hidden">
         {NAV.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
             className={({ isActive }) =>
-              `flex-1 py-3 text-center text-xs ${isActive ? "text-brand" : "text-slate-500"}`
+              `flex-1 py-3 text-center text-xs ${isActive ? "text-accent" : "text-fg-muted"}`
             }
           >
             {n.label}
