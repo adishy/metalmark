@@ -4442,6 +4442,12 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Unexplained
+        unexplained_by_account:
+          items:
+            $ref: '#/components/schemas/UnexplainedAccount'
+          type: array
+          title: Unexplained By Account
+          default: []
         warnings:
           items:
             type: string
@@ -6230,6 +6236,39 @@ components:
       - fx_cost_base
       - txn_ids
       title: TransferOut
+    UnexplainedAccount:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        name:
+          type: string
+          title: Name
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+      type: object
+      required:
+      - account_id
+      - name
+      - amount
+      title: UnexplainedAccount
+      description: 'One account''s share of the residual — the name behind the number.
+
+
+        A residual with no name is not a finding, so the report says which accounts the
+
+        unexplained change came from rather than printing one figure and leaving the
+
+        reader to guess whether the app is broken. Usually they are accounts whose
+
+        balance is an *observation* the flows we hold do not cover — a first bank sync,
+
+        whose balance is the bank''s number from today while the history starts where the
+
+        pull window starts.'
     UserResponse:
       properties:
         id:

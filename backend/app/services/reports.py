@@ -39,6 +39,7 @@ import calendar
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import NamedTuple
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,7 @@ from app.models import (
     InvestmentTransaction,
     Security,
     Transaction,
+    TransferGroup,
 )
 from app.models.investments import CASH_SECURITY_TYPE
 from app.services import fx
@@ -67,6 +69,14 @@ from app.services.ownership import account_owner_map, effective_owner_id
 INVESTMENT_INCOME_TYPES = ("dividend", "interest")
 INVESTMENT_EXPENSE_TYPES = ("fee",)
 INVESTMENT_TRADE_TYPES = ("buy", "sell")
+
+#: A residual below this is rounding on a converted balance, not a finding. Every
+#: term is quantized to storage precision, so a household with many accounts can
+#: disagree by a fraction of a cent with nothing wrong anywhere. One value for both
+#: questions — "is there anything to attribute?" and "is the remainder
+#: attributable?" — so that a residual the report calls unexplained is a residual
+#: that was chased to an account.
+UNEXPLAINED_TOLERANCE = Decimal("0.05")
 
 
 def _month_key(d: date) -> str:
@@ -275,8 +285,9 @@ async def _investment_cash_flow(
     base_ccy: str,
     *,
     account_ids: set[uuid.UUID] | None = None,
-) -> tuple[Decimal, Decimal, list[str]]:
-    """``(income, expense, warnings)`` from investment events (ADR-0033 §2).
+) -> tuple[Decimal, Decimal, dict[uuid.UUID, Decimal], list[str]]:
+    """``(income, expense, by_account, warnings)`` from investment events
+    (ADR-0033 §2).
 
     A ``buy`` or ``sell`` never appears: for an investment account it is not an
     excluded cash flow, it is not a cash flow at all — the account has no
@@ -300,6 +311,7 @@ async def _investment_cash_flow(
 
     income = Decimal("0")
     expense = Decimal("0")
+    by_account: dict[uuid.UUID, Decimal] = {}
     warnings: list[str] = []
     for t in rows:
         if t.type in INVESTMENT_TRADE_TYPES:
@@ -320,7 +332,8 @@ async def _investment_cash_flow(
             income += base_amount
         else:
             expense += base_amount
-    return quantize_storage(income), quantize_storage(expense), warnings
+        by_account[t.account_id] = by_account.get(t.account_id, Decimal("0")) + base_amount
+    return quantize_storage(income), quantize_storage(expense), by_account, warnings
 
 
 async def _cash_flow(
@@ -331,8 +344,11 @@ async def _cash_flow(
     *,
     owner_id: uuid.UUID | None = None,
     account_ids: set[uuid.UUID] | None = None,
-) -> tuple[Decimal, Decimal, Decimal, list[str]]:
-    """``(income, expense, net, warnings)`` in base over [start, end].
+) -> tuple[Decimal, Decimal, Decimal, dict[uuid.UUID, Decimal], list[str]]:
+    """``(income, expense, net, by_account, warnings)`` in base over [start, end].
+
+    ``by_account`` is the same money split by the account it moved through, and is
+    what lets the reconciliation name an account rather than print one number.
 
     ``owner_id`` selects *rows*: each entry is judged on its own attribution, so one
     person's report never totals another's share of a shared charge.
@@ -354,6 +370,7 @@ async def _cash_flow(
     owners = await account_owner_map(session)
     income = Decimal("0")
     expense = Decimal("0")
+    by_account: dict[uuid.UUID, Decimal] = {}
 
     txns = await _reporting_transactions(session, start, end, account_ids)
     for t in txns:
@@ -371,17 +388,21 @@ async def _cash_flow(
                 income += bamt
             else:
                 expense += bamt  # negative
+            by_account[t.account_id] = by_account.get(t.account_id, Decimal("0")) + bamt
 
-    inv_income, inv_expense, warnings = await _investment_cash_flow(
+    inv_income, inv_expense, inv_by_account, warnings = await _investment_cash_flow(
         session, start, end, base_ccy, account_ids=account_ids
     )
     income += inv_income
     expense += inv_expense
+    for account_id, amount in inv_by_account.items():
+        by_account[account_id] = by_account.get(account_id, Decimal("0")) + amount
     net = income + expense
     return (
         quantize_storage(income),
         quantize_storage(expense),
         quantize_storage(net),
+        by_account,
         warnings,
     )
 
@@ -393,8 +414,8 @@ async def _appreciation(
     end: date,
     base_ccy: str,
     account_ids: set[uuid.UUID] | None,
-) -> tuple[Decimal, list[str]]:
-    """Market appreciation over [start, end] — ADR-0032 §3, computed from the price
+) -> tuple[Decimal, dict[uuid.UUID, Decimal], list[str]]:
+    """``(total, by_account, warnings)`` — ADR-0032 §3, computed from the price
     series and the trades, never from what is left over.
 
     The formula is a decomposition of position *values*, not of prices:
@@ -435,7 +456,7 @@ async def _appreciation(
         stmt = stmt.where(Account.id.in_(account_ids))
     ids = {a.id for a in (await session.execute(stmt)).scalars().all()}
     if not ids:
-        return Decimal("0"), []
+        return Decimal("0"), {}, []
 
     start_quantities = await inv.quantities_at(session, account_ids=ids, on=start)
     end_quantities = await inv.quantities_at(session, account_ids=ids, on=end)
@@ -468,6 +489,7 @@ async def _appreciation(
         )
     ).scalars().all()
     net_buys = Decimal("0")
+    net_buys_by_account: dict[uuid.UUID, Decimal] = {}
     warnings: list[str] = []
     for t in trades:
         amount = await _investment_base_amount(session, t, base_ccy=base_ccy)
@@ -480,9 +502,95 @@ async def _appreciation(
         # `amount` is the cash effect, so money *into* securities is its negation:
         # a buy (negative) increases what was invested, a sell decreases it.
         net_buys += -amount
+        net_buys_by_account[t.account_id] = (
+            net_buys_by_account.get(t.account_id, Decimal("0")) - amount
+        )
+
+    # Per account, off the *same* two maps the total is computed from: a value is a
+    # sum of independent positions, so splitting one by its account key splits the
+    # number exactly — the attribution cannot disagree with the term it explains.
+    by_account: dict[uuid.UUID, Decimal] = {}
+    for account_id in ids:
+        in_account = {key: qty for key, qty in start_quantities.items() if key[0] == account_id}
+        value_then = await inv.securities_value_base(
+            session, quantities=in_account, on=start, base_ccy=base_ccy
+        )
+        in_account = {key: qty for key, qty in end_quantities.items() if key[0] == account_id}
+        value_now = await inv.securities_value_base(
+            session, quantities=in_account, on=end, base_ccy=base_ccy
+        )
+        by_account[account_id] = (
+            value_now - value_then - net_buys_by_account.get(account_id, Decimal("0"))
+        )
 
     appreciation = quantize_storage(value_end - value_start - net_buys)
-    return appreciation, warnings
+    return appreciation, by_account, warnings
+
+
+class Revaluation(NamedTuple):
+    """The revaluation term, its per-account parts, and its conversion cost.
+
+    ``by_account`` exists for the residual attribution (``_unexplained_by_account``)
+    — it is the same arithmetic, split so the reconciliation can name an account
+    instead of printing one number. ``conversion`` is broken out for the same
+    reason: it is a pair-level cost that belongs to no single account, so the
+    attribution has to be able to say that rather than blame one.
+    """
+
+    total: Decimal
+    by_account: dict[uuid.UUID, Decimal]
+    conversion: Decimal
+    warnings: list[str]
+
+
+async def _conversion_cost(
+    session: AsyncSession, *, start: date, end: date, account_ids: set[uuid.UUID] | None
+) -> Decimal:
+    """The FX spread cross-currency transfer legs actually paid — ADR-0018.
+
+    ``fx_cost_base`` is Σ ``base_amount`` of a group's legs, so it is non-zero
+    exactly when the conversion was not at the market rate the two legs were each
+    booked at. Linking removes both legs from cash flow, and that exclusion is
+    exact only when the legs cancel: the moment they do not, the household's net
+    worth moved by the difference and nothing on the report says so. This is the
+    term that says so.
+
+    ``ARCHITECTURE.md`` calls for it in as many words — "the real FX spread/fee —
+    stored as ``fx_cost_base`` and surfaced (as a fee/revaluation), **never
+    hidden** by the transfer exclusion".
+
+    It is a *flow* at a rate nobody recorded, which is why it belongs in this term
+    and not in cash flow: the legs are excluded there precisely because money
+    moving between two accounts the household owns is not income or spending.
+
+    Household scope only. When a subset of accounts is measured, ``_cash_flow``
+    counts the legs instead of excluding them, so their residual — this same
+    number — is already inside its total, and adding it here would double-count it.
+    """
+    if account_ids is not None:
+        return Decimal("0")
+    rows = (
+        await session.execute(
+            select(
+                TransferGroup.id,
+                TransferGroup.fx_cost_base,
+                Account.is_hidden,
+                Transaction.is_hidden,
+            )
+            .join(Transaction, Transaction.transfer_group_id == TransferGroup.id)
+            .join(Account, Account.id == Transaction.account_id)
+            .where(
+                Transaction.transacted_at >= start,
+                Transaction.transacted_at < end + timedelta(days=1),
+            )
+        )
+    ).all()
+    # A group counts only if *every* leg is visible: half a transfer is not a
+    # transfer, and both reports that would have shown the other half are not
+    # showing it either.
+    hidden = {gid for gid, _fx, acct_hidden, txn_hidden in rows if acct_hidden or txn_hidden}
+    costs = {gid: fx for gid, fx, _ah, _th in rows if gid not in hidden}
+    return sum((fx for fx in costs.values() if fx is not None), Decimal("0"))
 
 
 async def _revaluation(
@@ -492,7 +600,7 @@ async def _revaluation(
     end: date,
     base_ccy: str,
     account_ids: set[uuid.UUID] | None,
-) -> tuple[Decimal, list[str]]:
+) -> Revaluation:
     """The base-value change of foreign balances from rate moves — ADR-0032 §4.
 
     Also computed, for the same reason ``appreciation`` is: it used to be the
@@ -518,6 +626,11 @@ async def _revaluation(
     Investment accounts are **out of scope**, by ADR-0017 §5's standing deferral of
     position-level FX: the rate move on a foreign security's *value* is inside
     ``appreciation``, which is computed in base and therefore already reflects it.
+
+    The term also carries ``_conversion_cost`` — the spread a cross-currency
+    transfer paid. It is a rate effect on a flow rather than on a balance, so it
+    belongs to this term and not to cash flow, whose whole treatment of a linked
+    transfer assumes the legs cancel.
     """
     stmt = select(Account).where(Account.is_hidden.is_(False))
     if account_ids is not None:
@@ -525,6 +638,7 @@ async def _revaluation(
     accounts = list((await session.execute(stmt)).scalars().all())
 
     total = Decimal("0")
+    by_account: dict[uuid.UUID, Decimal] = {}
     warnings: list[str] = []
     for a in accounts:
         # A derived investment account's balance is Σ(holdings), so its "opening
@@ -584,9 +698,86 @@ async def _revaluation(
             moved_base += t.base_amount
 
         sign = 1 if a.is_asset else -1
-        total += sign * (opening * (rate_end - rates) + rate_end * moved) - moved_base
+        part = sign * (opening * (rate_end - rates) + rate_end * moved) - moved_base
+        total += part
+        by_account[a.id] = part
 
-    return quantize_storage(total), warnings
+    conversion = await _conversion_cost(
+        session, start=start, end=end, account_ids=account_ids
+    )
+    return Revaluation(
+        total=quantize_storage(total + conversion),
+        by_account=by_account,
+        conversion=conversion,
+        warnings=warnings,
+    )
+
+
+async def _unexplained_by_account(
+    session: AsyncSession,
+    *,
+    start: date,
+    end: date,
+    base_ccy: str,
+    account_ids: set[uuid.UUID] | None,
+    residual: Decimal,
+    cash_flow: dict[uuid.UUID, Decimal],
+    revaluation: Revaluation,
+    appreciation: dict[uuid.UUID, Decimal],
+) -> tuple[list[dict], Decimal]:
+    """Which accounts the residual came from — ``(rows, covered)``.
+
+    The reconciliation's residual is one number, and a number with no name is not a
+    finding. Every term is linear in the set of accounts, so the same arithmetic
+    run per account gives parts that sum back to the household's residual — which is
+    *not* a second opinion, it is the same opinion, arranged so the reader can see
+    which account to look at.
+
+    **Both kinds of part are real, and neither is a bug on its own.** An account
+    observed only periodically — a seeded balance, a bank feed that reports a
+    balance and an overlapping window of transactions — moves between two
+    observations by whatever happened in between, and the flows we hold explain only
+    the part inside the window. The first sync of a real bank is the same shape: the
+    balance is the bank's number from today and the history starts where the pull
+    window starts, so the difference is the account's own past. Naming the accounts
+    turns "unexplained $38,850.60" into something a person can check.
+
+    ``covered`` is the sum over *every* account, not just the material ones
+    returned, so the caller can state exactly what is left over instead of implying
+    the list is the whole story.
+    """
+    stmt = select(Account).where(Account.is_hidden.is_(False))
+    if account_ids is not None:
+        stmt = stmt.where(Account.id.in_(account_ids))
+    accounts = list((await session.execute(stmt)).scalars().all())
+
+    parts: dict[uuid.UUID, Decimal] = {}
+    for a in accounts:
+        value_start = await net_worth_at(session, start, base_ccy, account_ids={a.id})
+        value_end = await net_worth_at(session, end, base_ccy, account_ids={a.id})
+        parts[a.id] = (
+            (value_end - value_start)
+            - cash_flow.get(a.id, Decimal("0"))
+            - revaluation.by_account.get(a.id, Decimal("0"))
+            - appreciation.get(a.id, Decimal("0"))
+        )
+    covered = sum(parts.values(), Decimal("0"))
+
+    # Materiality is relative to the residual, not absolute: a household with a big
+    # unexplained number deserves the accounts behind it, and one whose residual is
+    # a rounding cent does not deserve a list of every account it ever had.
+    material = max(Decimal("1"), abs(residual) * Decimal("0.01"))
+    named = {a.id: a for a in accounts}
+    rows = [
+        {
+            "account_id": str(account_id),
+            "name": named[account_id].name,
+            "amount": quantize_storage(part),
+        }
+        for account_id, part in sorted(parts.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        if abs(part) >= material
+    ]
+    return rows, covered
 
 
 async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
@@ -610,16 +801,17 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     nw_start = await net_worth_at(session, start, base, account_ids=account_ids)
     nw_end = await net_worth_at(session, end, base, account_ids=account_ids)
     delta = quantize_storage(nw_end - nw_start)
-    _income, _expense, net_cf, warnings = await _cash_flow(
+    _income, _expense, net_cf, cash_flow_by_account, warnings = await _cash_flow(
         session, start, end, base, account_ids=account_ids
     )
-    revaluation, fx_warnings = await _revaluation(
+    reval = await _revaluation(
         session, start=start, end=end, base_ccy=base, account_ids=account_ids
     )
-    appreciation, price_warnings = await _appreciation(
+    revaluation = reval.total
+    appreciation, appreciation_by_account, price_warnings = await _appreciation(
         session, start=start, end=end, base_ccy=base, account_ids=account_ids
     )
-    warnings += fx_warnings + price_warnings
+    warnings += reval.warnings + price_warnings
 
     # The one term that is computed by subtraction — and therefore the only one
     # that can be wrong. Everything else is read off balances, transactions, rates
@@ -627,6 +819,44 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     # is not zero, something in the four terms above does not account for the
     # household's money and the UI has to be able to say so (ADR-0032 §5).
     unexplained = quantize_storage(delta - net_cf - revaluation - appreciation)
+
+    # Attribution costs a query per account, so it is paid only when there is
+    # something to attribute. A residual of a cent is rounding, and a list of every
+    # account in the household to explain it would be noise wearing a finding's
+    # clothes.
+    unexplained_by_account: list[dict] = []
+    if abs(unexplained) > UNEXPLAINED_TOLERANCE:
+        unexplained_by_account, covered = await _unexplained_by_account(
+            session,
+            start=start,
+            end=end,
+            base_ccy=base,
+            account_ids=account_ids,
+            residual=unexplained,
+            cash_flow=cash_flow_by_account,
+            revaluation=reval,
+            appreciation=appreciation_by_account,
+        )
+        # Everything the accounts do not have a name for. The conversion cost is
+        # the usual occupant: it is real, it is already inside `currency_revaluation`
+        # where ARCHITECTURE.md puts it, and it is the one part of the residual that
+        # genuinely belongs to a *pair* of accounts rather than to one.
+        leftover = unexplained - covered
+        if abs(leftover) > UNEXPLAINED_TOLERANCE:
+            conversion = abs(reval.conversion)
+            rest = leftover + reval.conversion
+            bits = []
+            if conversion:
+                bits.append(
+                    f"{quantize_storage(conversion)} {base} is conversion cost on "
+                    f"cross-currency transfers"
+                )
+            if abs(rest) > UNEXPLAINED_TOLERANCE:
+                bits.append(
+                    f"{quantize_storage(abs(rest))} {base} is not attributable to any "
+                    f"account or transfer"
+                )
+            warnings.append("Of the unexplained change, " + " and ".join(bits) + ".")
     return {
         "base_currency": base,
         "points": points,
@@ -635,6 +865,7 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
         "currency_revaluation": revaluation,
         "market_appreciation": appreciation,
         "unexplained": unexplained,
+        "unexplained_by_account": unexplained_by_account,
         "warnings": warnings,
         # Net worth decomposes by account, never by row: an owner filter here means
         # "the accounts Alex owns". Cash-flow and spending answer the other question.
@@ -649,7 +880,7 @@ async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
     out = []
     for d in _month_ends(start, end):
         m_start = date(d.year, d.month, 1)
-        income, expense, net, _ = await _cash_flow(
+        income, expense, net, _by_account, _ = await _cash_flow(
             session, m_start, d, base, owner_id=owner_id
         )
         out.append({"month": _month_key(d), "income": income, "expense": expense, "net": net})

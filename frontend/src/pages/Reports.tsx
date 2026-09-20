@@ -8,6 +8,7 @@ import { formatDay, formatMonth, isoDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
 import Chart from "@/components/Chart";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
+import Reconciliation from "@/components/Reconciliation";
 import { useChartTokens } from "@/theme/chartTokens";
 import {
   chartArea,
@@ -186,12 +187,9 @@ export default function Reports() {
         {nw.data && (
           <>
             <p className="text-2xl font-semibold">{formatMoney(nw.data.delta_net_worth, ccy)}</p>
-            <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm text-fg-muted">
-              <span>Cash flow {formatMoney(nw.data.net_cash_flow, ccy)}</span>
-              <span data-testid="revaluation">
-                Currency revaluation {formatMoney(nw.data.currency_revaluation, ccy)}
-              </span>
-            </div>
+            {/* The identity behind that figure (ADR-0032). The headline stays the
+                delta; this is what says whether to believe it. */}
+            <Reconciliation series={nw.data} />
           </>
         )}
         {hasSeries && <Chart option={nwOption} label={nwLabel} testid="net-worth-chart" />}

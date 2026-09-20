@@ -123,6 +123,39 @@ export interface NetWorthSeries {
   delta_net_worth: Money;
   net_cash_flow: Money;
   currency_revaluation: Money;
+  /**
+   * The change in position values less the buys that funded them (ADR-0032 §3).
+   * A term of the identity below, and never `delta` minus the others — the
+   * whole point is that it is computed independently and can disagree.
+   */
+  market_appreciation: Money;
+  /**
+   * `delta − cash flow − revaluation − appreciation`: the only term that is a
+   * subtraction, and therefore the one that says something when it is not zero.
+   *
+   * A non-zero value here is not automatically a bug — an account whose balance
+   * is `stated` has history we cannot attribute (ADR-0032 §6) — which is why it
+   * is rendered as a term of its own rather than hidden.
+   */
+  unexplained: Money;
+  /**
+   * Which accounts the residual came from — the name behind the number, largest
+   * first, and only the material ones (the service drops anything under 1% of the
+   * residual). A residual with no name is not a finding: this is what turns
+   * "unexplained $38,850.60" into an account a person can go and look at.
+   *
+   * The list is a *floor*, not the whole story — the parts that were too small to
+   * name are still inside `unexplained` — so it is rendered as "of which", never
+   * as a decomposition that adds up.
+   */
+  unexplained_by_account: { account_id: string; name: string; amount: Money }[];
+  /**
+   * Reasons a term is missing part of its data: no FX rate for a trade, a
+   * position with no price. **Rendered whenever non-empty**: a term computed
+   * from partial data is a number that is wrong in a way nobody can see, which
+   * is the failure ADR-0032 §5 refuses to render as a zero.
+   */
+  warnings: string[];
   /** Ownership only ever moves whole accounts, never individual postings. */
   attribution: "account";
 }

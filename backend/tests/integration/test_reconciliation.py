@@ -16,7 +16,7 @@ position.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -31,8 +31,10 @@ from app.models import (
     Transaction,
     TransferGroup,
 )
+from app.schemas.transactions import TransactionCreate
 from app.services import investments as inv
 from app.services import ledger, reports
+from app.services import transactions as txns
 
 pytestmark = pytest.mark.integration
 
@@ -477,3 +479,193 @@ async def test_an_investment_account_has_no_transactions_at_all(household_factor
 
     assert rows == []
     assert len(events) == 1
+
+
+# ---- the residual, and whose it is (ADR-0032 §5, ARCHITECTURE.md:185) --------
+#
+# NOK, deliberately, and not EUR: ``fx_rates`` is global reference data — no
+# household_id, unique on (base, quote, date) — so a rate written here would
+# decide every other test's conversion for that pair. CHF is taken by
+# test_transfers.py, JPY by test_investments.py and GBP by test_ledger.py for the
+# same reason.
+
+NOK_PER_USD = D("0.10")  # 1 NOK = 0.10 USD
+
+
+def _dt(y, m, d):
+    return datetime(y, m, d, tzinfo=UTC)
+
+
+async def _fx_pair(s, hh):
+    """A household whose only window activity is one cross-currency transfer.
+
+    The balances move by exactly what the legs moved, so the identity closes with a
+    zero residual *before* the legs are linked. That is what makes the linked case
+    say something: the conversion cost has to reappear in a term with a name,
+    rather than being absorbed by the residual.
+    """
+    await ledger.upsert_fx_rate(
+        s, hh, base_ccy="NOK", quote_ccy="USD", rate_date=START, rate=NOK_PER_USD
+    )
+    usd = await _account(s, hh, name="Checking", atype="depository", source=None)
+    nok = await _account(
+        s, hh, name="Oslo", atype="depository", source=None, currency="NOK"
+    )
+    await _balance(s, usd, "1000", START)
+    await _balance(s, usd, "900", END)
+    await _balance(s, nok, "0", START)
+    await _balance(s, nok, "970", END)
+    out = await txns.create_transaction(
+        s, hh,
+        TransactionCreate(account_id=usd.id, amount=D("-100"), transacted_at=_dt(2026, 1, 10)),
+    )
+    into = await txns.create_transaction(
+        s, hh,
+        TransactionCreate(account_id=nok.id, amount=D("970"), transacted_at=_dt(2026, 1, 10)),
+    )
+    return out, into
+
+
+async def test_linking_moves_the_conversion_cost_into_revaluation(household_factory):
+    """ADR-0018: the residual on a transfer group is a real cost, and it is
+    *surfaced* rather than hidden by the cash-flow exclusion.
+
+    Excluding both legs from cash flow removes 3 USD of movement from the term that
+    used to explain it. If nothing takes it in, it lands in ``unexplained`` — which
+    is how the figure becomes an accusation, and how a real conversion cost stayed
+    invisible until the sync e2e caught it. It belongs in currency revaluation:
+    that is the term for value that moved without anyone transacting.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        out, into = await _fx_pair(s, hh)
+        assert out.base_amount == D("-100.0000")
+        assert into.base_amount == D("97.0000")
+        before = await reports.net_worth_series(s, hh, START, END)
+        group = await txns.link_transfer(s, hh, out.id, into.id)
+        after = await reports.net_worth_series(s, hh, START, END)
+
+    assert group.fx_cost_base == D("-3.0000")
+    # Unlinked, the legs are ordinary spending and income and the identity closes
+    # on its own — no residual, nothing hidden.
+    assert before["net_cash_flow"] == D("-3.0000")
+    assert before["currency_revaluation"] == D("0.0000")
+    assert before["unexplained"] == D("0.0000")
+    # Linked, they leave cash flow entirely — nothing happened to the money but a
+    # label — and the cost they revealed arrives in revaluation.
+    assert after["delta_net_worth"] == before["delta_net_worth"] == D("-3.0000")
+    assert after["net_cash_flow"] == D("0.0000")
+    assert after["currency_revaluation"] == D("-3.0000")
+    assert after["unexplained"] == D("0.0000")
+
+
+async def test_an_owner_filter_keeps_the_identity_with_the_legs_counted(
+    household_factory,
+):
+    """The subset case, where the same transfer is *not* excluded.
+
+    A transfer crossing the boundary of an account subset really does move that
+    subset's balance, so its legs are cash flow for the subset — and revaluation
+    must then claim nothing, or the cost would be counted twice and the identity
+    would break for every owner filter the UI offers.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        out, into = await _fx_pair(s, hh)
+        await txns.link_transfer(s, hh, out.id, into.id)
+        owner_id = (await s.execute(select(Owner.id).limit(1))).scalar_one()
+        series = await reports.net_worth_series(s, hh, START, END, owner_id=owner_id)
+
+    assert series["delta_net_worth"] == D("-3.0000")
+    assert series["net_cash_flow"] == D("-3.0000")
+    assert series["currency_revaluation"] == D("0.0000")
+    assert series["unexplained"] == D("0.0000")
+
+
+async def test_a_material_residual_is_attributed_to_the_accounts_behind_it(
+    household_factory,
+):
+    """A residual with no name is not a finding.
+
+    Both accounts are observed for the first time inside the window, so their whole
+    balance is movement the flows cannot explain — the shape of a first bank sync,
+    and of a seeded household. The larger is named; the smaller is under 1% of the
+    residual and is not, because a list of every account in the household is noise
+    wearing a finding's clothes. Both are still *inside* the published figure: the
+    list is a floor, not a partition, which is why the figures here deliberately do
+    not add up to ``unexplained``.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        big = await _account(s, hh, name="First sync", atype="depository", source=None)
+        small = await _account(s, hh, name="Rounding", atype="depository", source=None)
+        await _balance(s, big, "500", END)
+        await _balance(s, small, "2", END)
+        expected = [
+            {"account_id": str(big.id), "name": "First sync", "amount": D("500.0000")}
+        ]
+        series = await reports.net_worth_series(s, hh, START, END)
+
+    assert series["unexplained"] == D("502.0000")
+    assert series["unexplained_by_account"] == expected
+
+
+async def test_a_cent_of_residual_does_not_earn_a_list_of_every_account(
+    household_factory,
+):
+    """The other end of materiality: below ``UNEXPLAINED_TOLERANCE`` the residual is
+    rounding, and attribution — which costs a query per account — is not paid for."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc = await _account(s, hh, name="Checking", atype="depository", source=None)
+        await _balance(s, acc, "100", START)
+        await _balance(s, acc, "100", END)
+        s.add(
+            Transaction(
+                household_id=hh,
+                account_id=acc.id,
+                amount=D("0.02"),
+                currency="USD",
+                base_amount=D("0.02"),
+                transacted_at=date(2026, 1, 10),
+                source="manual",
+            )
+        )
+        await s.flush()
+        series = await reports.net_worth_series(s, hh, START, END)
+
+    assert series["unexplained"] == D("-0.0200")
+    assert series["unexplained_by_account"] == []
+
+
+async def test_a_leftover_that_no_account_explains_is_reported(household_factory,
+                                                               monkeypatch):
+    """The guard, tested directly because it is unreachable by construction.
+
+    Every term of the identity is linear in the set of accounts, so the parts sum
+    back to the residual and the leftover is zero — until something stops being
+    additive, and then the report has to say so instead of presenting a partial
+    list as the whole answer. The branch is forced here so that its wording is
+    pinned: it is read by a person trying to work out whether the app is broken.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        out, into = await _fx_pair(s, hh)
+        await txns.link_transfer(s, hh, out.id, into.id)
+        # A material residual for the conversion cost to sit inside — without one
+        # the attribution is never asked for, and the branch cannot be reached.
+        fresh = await _account(s, hh, name="First sync", atype="depository", source=None)
+        await _balance(s, fresh, "500", END)
+
+        async def short(session, **kw):
+            return [], kw["residual"] - D("5.00")  # 5 of it belongs to nobody
+
+        monkeypatch.setattr(reports, "_unexplained_by_account", short)
+        series = await reports.net_worth_series(s, hh, START, END)
+
+    left_over = [w for w in series["warnings"] if w.startswith("Of the unexplained change")]
+    assert len(left_over) == 1
+    # 3 of the leftover is the conversion cost, which belongs to a *pair* of
+    # accounts rather than to one; the remaining 2 belong to nothing we hold.
+    assert "3.0000 USD is conversion cost on cross-currency transfers" in left_over[0]
+    assert "2.0000 USD is not attributable to any account or transfer" in left_over[0]

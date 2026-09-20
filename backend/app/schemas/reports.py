@@ -35,6 +35,22 @@ class CategorySpendRow(BaseModel):
     total: Decimal
 
 
+class UnexplainedAccount(BaseModel):
+    """One account's share of the residual — the name behind the number.
+
+    A residual with no name is not a finding, so the report says which accounts the
+    unexplained change came from rather than printing one figure and leaving the
+    reader to guess whether the app is broken. Usually they are accounts whose
+    balance is an *observation* the flows we hold do not cover — a first bank sync,
+    whose balance is the bank's number from today while the history starts where the
+    pull window starts.
+    """
+
+    account_id: uuid.UUID
+    name: str
+    amount: Decimal
+
+
 class NetWorthSeries(BaseModel):
     """The net-worth series and the reconciliation of its change (ADR-0032).
 
@@ -62,6 +78,9 @@ class NetWorthSeries(BaseModel):
     currency_revaluation: Decimal
     market_appreciation: Decimal
     unexplained: Decimal
+    # Which accounts the residual came from, largest first, and only the material
+    # ones: this is what turns `unexplained` from an accusation into a lead.
+    unexplained_by_account: list[UnexplainedAccount] = []
     warnings: list[str] = []
 
     # Always "account": an owner filter on this report selects accounts, not rows

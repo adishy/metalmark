@@ -268,12 +268,23 @@ def month_flow(income=False):
 
 
 def net_worth_parts():
+    """The whole reconciliation, not just the terms that happened to add up."""
     r = c.get("/reports/net-worth", params={"start": day(-40), "end": day(1)})
     if r.status_code != 200:
         return None
-    d = r.json()
+    return r.json()
+
+
+def terms(d):
+    """Every term of the identity, as numbers, for printing and arithmetic."""
     return (float(d["delta_net_worth"]), float(d["net_cash_flow"]),
-            float(d["currency_revaluation"]))
+            float(d["currency_revaluation"]), float(d["market_appreciation"]),
+            float(d["unexplained"]))
+
+
+def term_line(d):
+    delta, cf, reval, appr, unexpl = terms(d)
+    return (f"ΔNW={delta} CF={cf} reval={reval} appr={appr} unexplained={unexpl}")
 
 
 def legs():
@@ -288,9 +299,42 @@ check("both legs converted to base (a rate exists)", out_base > 0 and in_base > 
 exp_before, inc_before = month_flow(), month_flow(income=True)
 nw_before = net_worth_parts()
 if nw_before:
-    check("net worth identity holds before linking (ΔNW = CF + revaluation)",
-          abs(nw_before[0] - (nw_before[1] + nw_before[2])) < 0.01,
-          f"ΔNW={nw_before[0]} CF={nw_before[1]} reval={nw_before[2]}")
+    d0, cf0, reval0, appr0, unexpl0 = terms(nw_before)
+
+    # ΔNW = cash flow + currency revaluation + market appreciation + unexplained
+    # (ADR-0032). Only the first four are read off the ledger; `unexplained` is the
+    # remainder, so this one check would pass even if a term were silently missing —
+    # it is here to pin the *shape* of the payload and to prove the figures survive
+    # the round trip as exact decimals. The two checks under it are the ones that
+    # can actually fail.
+    check("the four terms reconcile to the change in net worth",
+          abs(d0 - (cf0 + reval0 + appr0 + unexpl0)) < 0.01,
+          term_line(nw_before))
+
+    # A residual with no name is not a finding, so a material one must arrive with
+    # the accounts behind it: largest first, each of them material to the residual
+    # (the service drops anything under 1% of it — a list of every account the
+    # household ever had is noise wearing a finding's clothes).
+    named = nw_before["unexplained_by_account"]
+    material = max(1.0, abs(unexpl0) * 0.01)
+    sizes = [abs(float(row["amount"])) for row in named]
+    check("a material unexplained change is attributed to named accounts",
+          abs(unexpl0) < 0.05 or len(named) > 0,
+          f"unexplained={unexpl0}, {len(named)} named")
+    check("attribution is material-only, largest first",
+          all(row["name"] for row in named)
+          and sizes == sorted(sizes, reverse=True)
+          and all(size >= material - 0.0001 for size in sizes),
+          f"materiality={material:.2f} sizes={sizes}")
+
+    # The tautology this replaced: if revaluation were computed as ΔNW − CF, then
+    # every residual would be invisible by construction — which is exactly how the
+    # conversion cost stayed hidden until it broke the sync e2e. Revaluation is a
+    # term in its own right, so where there is a residual it is not simply the plug.
+    if abs(unexpl0) > 0.05:
+        check("revaluation is a computed term, not the leftover",
+              abs(reval0 - (d0 - cf0)) > 0.05,
+              f"reval={reval0} vs ΔNW−CF={d0 - cf0}")
 
 r = c.post("/transactions/transfers", json={"from_txn_id": out_txn, "to_txn_id": in_txn}, headers=C)
 check("link a cross-currency transfer", r.status_code in (200, 201), f"{r.status_code} {body(r)}")
@@ -318,23 +362,29 @@ if r.status_code in (200, 201):
 
     nw_after = net_worth_parts()
     if nw_after and nw_before:
+        da, cfa, revala, appra, unexpla = terms(nw_after)
         # No money left the household, so net worth is unmoved by the *link* — but
         # the conversion cost it reveals must still be accounted for somewhere, and
         # it is: it moves out of cash flow and into revaluation.
         check("linking does not change net worth",
-              abs(nw_after[0] - nw_before[0]) < 0.01,
-              f"ΔNW {nw_before[0]} -> {nw_after[0]}")
-        check("net worth identity still holds after linking",
-              abs(nw_after[0] - (nw_after[1] + nw_after[2])) < 0.01,
-              f"ΔNW={nw_after[0]} CF={nw_after[1]} reval={nw_after[2]}")
+              abs(da - d0) < 0.01,
+              f"ΔNW {d0} -> {da}")
         # Unlinked, the two legs leave a hole in cash flow (you sent 100 and booked
         # 90 * 0.925 back). Linked, they leave cash flow entirely and the same hole
         # reappears as revaluation — the conversion cost, no longer disguised as
         # ordinary spending.
         check("the conversion cost moves from cash flow into revaluation",
-              abs((nw_after[1] - nw_before[1]) - (out_base - in_base)) < 0.01
-              and abs((nw_after[2] - nw_before[2]) + (out_base - in_base)) < 0.01,
-              f"CF {nw_before[1]} -> {nw_after[1]}, reval {nw_before[2]} -> {nw_after[2]}")
+              abs((cfa - cf0) - (out_base - in_base)) < 0.01
+              and abs((revala - reval0) + (out_base - in_base)) < 0.01,
+              f"CF {cf0} -> {cfa}, reval {reval0} -> {revala}, legs {out_base}/{in_base}")
+        # And it lands in a *named* term rather than in the remainder. This is the
+        # check the tautology used to hide: with revaluation computed as ΔNW − CF,
+        # the residual could not move, because the hole was being poured into the
+        # term next to it. Both directions are asserted, so a conversion cost that
+        # vanished (or landed twice) fails here rather than passing quietly.
+        check("the conversion cost does not move the residual",
+              abs(unexpla - unexpl0) < 0.01,
+              f"unexplained {unexpl0} -> {unexpla}; {term_line(nw_after)}")
 
     r = c.delete(f"/transactions/transfers/{group}", headers=C)
     check("unlink the transfer", r.status_code in (200, 204), f"{r.status_code} {body(r)}")
