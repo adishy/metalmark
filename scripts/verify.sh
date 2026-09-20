@@ -11,13 +11,10 @@
 # inside .github/workflows/ci.yml before; they live in scripts/ now and both
 # callers use the same files.
 #
-# Prerequisites: Docker, and the stack up in the compose project:
+# Prerequisites: Docker, and the stack up in the compose project. One command does
+# all of it, and it is the same reset that runs after the mutating gates:
 #
-#   docker compose up -d --build
-#   docker compose run --rm api alembic upgrade head
-#   docker compose run --rm -e METALMARK_SEED_EMAIL=owner@example.com \
-#     -e METALMARK_SEED_PASSWORD=devpassword123 -e METALMARK_SEED_HOUSEHOLD=Home \
-#     api python -m app.seed --demo
+#   ./scripts/verify.sh reset
 #
 # `walkthrough` and `contract` need that seeded stack. `lint`, `pytest` and
 # `frontend` need the containers running but no particular data. `pytest` uses a
@@ -34,16 +31,28 @@ PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-metalmark}"
 NETWORK="${COMPOSE_PROJECT}_default"
 
-GATES=(lint pytest frontend contract e2e walkthrough)
+GATES=(lint pytest frontend contract e2e walkthrough reset)
 RESULTS=()
 FAILED=0
+MUTATED=0
+# Every mutating gate runs against the same dev database, which is demo data plus
+# whatever the last run left behind. `reset` is how it gets back to demo data.
+MUTATING=" e2e walkthrough "
+
+# Seeded by `reset`; the same credentials CI seeds and the walkthrough logs in with.
+SEED_EMAIL="${SEED_EMAIL:-owner@example.com}"
+SEED_PASSWORD="${SEED_PASSWORD:-devpassword123}"
+SEED_HOUSEHOLD="${SEED_HOUSEHOLD:-Home}"
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
-  cat <<EOF
+  # Quoted delimiter: the text below is prose, and backticks in an unquoted heredoc
+  # are command substitution — `reset` here would run /usr/bin/reset and reset the
+  # terminal instead of printing.
+  cat <<'EOF'
 usage: scripts/verify.sh [--list] [gate ...]
 
 gates (default: all, in this order):
@@ -53,6 +62,12 @@ gates (default: all, in this order):
   contract     protected routes 401 unauthenticated; openapi.yaml vs the live spec
   e2e          Playwright against the compose stack (in the pinned image)
   walkthrough  M1a paths the Playwright suite does not reach, over real HTTP
+  reset        drop the volume, migrate, seed demo data
+
+e2e and walkthrough write to the dev database, and the seed never deletes, so
+`reset` runs automatically after them. The database is demo data again when the
+run ends — and therefore when the next one starts. Pass `reset` explicitly to
+reset without running anything else.
 EOF
 }
 
@@ -82,6 +97,7 @@ require_stack() {
 
 run_gate() {
   local name="$1"; shift
+  case "$MUTATING" in *" $name "*) MUTATED=1 ;; esac
   say "$name"
   local start=$SECONDS
   if "$@"; then
@@ -155,10 +171,39 @@ gate_walkthrough() {
   # set up. scripts/ is outside the api bind-mount, hence the extra volume.
   docker compose run --rm -T \
     -e WALKTHROUGH_BASE_URL=http://api:8000 \
-    -e WALKTHROUGH_EMAIL="${WALKTHROUGH_EMAIL:-owner@example.com}" \
-    -e WALKTHROUGH_PASSWORD="${WALKTHROUGH_PASSWORD:-devpassword123}" \
+    -e WALKTHROUGH_EMAIL="${WALKTHROUGH_EMAIL:-$SEED_EMAIL}" \
+    -e WALKTHROUGH_PASSWORD="${WALKTHROUGH_PASSWORD:-$SEED_PASSWORD}" \
     -v "$ROOT/scripts":/scripts:ro \
     api python /scripts/walkthrough.py
+}
+
+# Back to demo data. Deliberately a volume drop rather than deleting rows: the
+# volume is where the app role, the RLS policies and the schema live, so this is
+# the only reset that is complete, and it is exactly the path CI takes from a
+# fresh checkout — the fresh-volume path stays exercised instead of rotting.
+#
+# No require_stack: this is the gate that recreates the stack.
+gate_reset() {
+  docker compose down -v || return 1
+  docker compose up -d --build || return 1
+  docker compose run --rm api alembic upgrade head || return 1
+  # /healthz fails closed, so this loop is a real readiness gate rather than a
+  # formality — seeding before the role and schema exist is the failure this
+  # ordering exists to prevent.
+  local i
+  for i in $(seq 1 60); do
+    curl -fsS http://localhost:8000/healthz >/dev/null 2>&1 && break
+    sleep 2
+  done
+  if ! curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then
+    warn "  api never became healthy after reset"
+    return 1
+  fi
+  docker compose run --rm \
+    -e METALMARK_SEED_EMAIL="$SEED_EMAIL" \
+    -e METALMARK_SEED_PASSWORD="$SEED_PASSWORD" \
+    -e METALMARK_SEED_HOUSEHOLD="$SEED_HOUSEHOLD" \
+    api python -m app.seed --demo
 }
 
 # --------------------------------------------------------------------- main
@@ -166,6 +211,22 @@ gate_walkthrough() {
 for name in "${REQUESTED[@]}"; do
   run_gate "$name" "gate_$name" || true
 done
+
+# e2e and walkthrough write to the dev database, and the seed is idempotent: it adds
+# demo data but never removes what a test left behind. Without this the next run
+# starts on top of the last one's debris, and review.spec.ts — which drains a queue —
+# is the first thing to break. Resetting at the end means the database holds demo
+# data both after a run and before the next one, so there is no state to remember.
+# Runs on failure too: a broken run leaves the most debris.
+if [ "$MUTATED" -eq 1 ]; then
+  wants_reset=0
+  for g in "${REQUESTED[@]}"; do
+    if [ "$g" = "reset" ]; then wants_reset=1; fi
+  done
+  if [ "$wants_reset" -eq 0 ]; then
+    run_gate reset gate_reset || true
+  fi
+fi
 
 printf '\n%s\n' "--------------------------------------------"
 printf '%s\n' "${RESULTS[@]}"
