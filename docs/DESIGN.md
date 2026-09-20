@@ -665,25 +665,40 @@ screen reader.
 
 | Screen | Pattern |
 |---|---|
-| `<640px` | **Bottom sheet**: `rounded-t-overlay`, `max-h-[85vh]`, drag handle, `pb-[env(safe-area-inset-bottom)]` |
+| `<640px` | **Bottom sheet**: `rounded-t-overlay`, `max-h-[85dvh]`, drag handle, safe-area padding on the footer (below) |
 | `≥640px` | Centred modal, `max-w-lg`, `rounded-overlay` |
 | `≥1024px` | Optional right slide-over for detail views |
 
 Use a full-screen takeover only for a multi-step flow (the CSV import).
 
-Both are the **same component**: extend `Dialog.tsx`, which already handles focus
-move-in, focus restore, Escape, backdrop click, `role="dialog"`, `aria-modal`, and a
-Tab cycle. Add:
+Both are the **same component**: `Dialog.tsx`, which handles focus move-in, focus
+restore, Escape, backdrop click, `role="dialog"`, `aria-modal`, and a Tab cycle. It
+also implements everything below — read it before changing any of it:
 
-- `title` must be a real heading (`<h2>`), already done, and the dialog should be
-  labelled by it via `aria-labelledby` rather than `aria-label` (a label attribute
-  and a visible heading should not be able to drift apart).
-- On `open`, also set `overflow: hidden` on `<body>` — a background that scrolls
-  under a sheet is how a user taps the wrong row.
-- A sheet is dismissed by dragging down **or** the close button; the close button is
-  `size-11`, not the current 24 px.
-- Bottom sheets need `padding-bottom: env(safe-area-inset-bottom)` or their last row
-  sits under the home indicator.
+- **`dvh`, not `vh`, for the sheet height.** On iOS Safari `vh` is measured against
+  the largest possible viewport, so an `85vh` sheet overflows the screen while the URL
+  bar is showing — exactly when it matters. `85dvh` tracks the *visible* viewport.
+- **Safe-area padding goes on the footer, not the sheet**:
+  `pb-[calc(0.75rem+env(safe-area-inset-bottom))]` on the footer element. Padding the
+  sheet instead pads the bottom of its *scroll area*, which pushes the last row of
+  content up away from the footer rather than lifting the buttons clear of the home
+  indicator.
+- **Drag is a sheet gesture only** — it makes a centred modal wobble — and it is
+  disabled entirely under `prefers-reduced-motion`, not merely unanimated.
+- **`onClose` is held in a ref.** It is almost always an inline arrow, so keying the
+  focus effect on it re-ran the effect on every parent render, and the cleanup
+  restored focus to whatever was focused at open: focus jumped out of the field
+  mid-keystroke. The effect depends on `open` alone.
+
+The rest of the contract:
+
+- `title` renders as a real heading and the panel is labelled by it via
+  `aria-labelledby`, never `aria-label` (a label attribute and a visible heading
+  should not be able to drift apart).
+- On `open`, `<body>` gets `overflow: hidden` — a background that scrolls under a
+  sheet is how a user taps the wrong row.
+- A sheet is dismissed by dragging down **or** the close button, which is `size-11`.
+- `shadow-lg`, never `shadow-2xl`: §2.6 allows exactly one overlay shadow.
 
 ### 4.9 Charts
 
@@ -742,18 +757,29 @@ Rules for all three:
   reads the safe noun ("Keep"), never "Cancel" vs "OK".
 - Never a red button as the default focus. Focus lands on the safe option.
 
-### 4.13 Navigation on small screens
+### 4.13 Navigation and the app shell
+
+**The shell header is sticky at every width** (`sticky top-0 z-40`) and **must be
+opaque** (`bg-surface`). Above 640 px the header *is* the primary navigation, so a
+non-sticky header took navigation away entirely as soon as a long list scrolled. The
+opacity is load-bearing: without it rows scroll straight through the bar.
+
+Sticky chrome at both ends creates the hazard §7 item 3 names — a focused element
+scrolled flush to the viewport edge ends up underneath a bar. `index.css` sets
+`scroll-padding-top` and `scroll-padding-bottom` of `4rem` on `html` to clear either
+bar. Anything that changes the header or tab-bar height must change those too.
 
 - **Bottom tab bar, 5 items maximum** (`AppShell.tsx` has exactly 5).
 - Each item: `min-h-11` plus `pb-[env(safe-area-inset-bottom)]`. The current
   `py-3 text-xs` computes to 40 px and sits under the home indicator without the
   inset.
 - **The active item is not colour alone.** `text-accent` on `text-fg-muted` is a hue
-  difference only. Add `font-semibold` and `aria-current="page"`:
+  difference only. Add `font-semibold` **and** `aria-current="page"`. `NavLink`
+  supplies the latter itself (`ariaCurrent` defaults to `"page"` and is emitted only
+  when active), so it is not passed explicitly:
 
 ```tsx
 <NavLink
-  aria-current={isActive ? "page" : undefined}
   className={({ isActive }) =>
     `flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-xs ` +
     (isActive ? "font-semibold text-accent" : "text-fg-muted")

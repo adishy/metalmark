@@ -39,7 +39,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+      {/* Sticky, and opaque: on desktop the primary nav lives in here, so
+          scrolling a long list used to take navigation away entirely. `z-40`
+          matches the phone tab bar; overlays are `z-50` and cover both. The
+          `bg-surface` is load-bearing — without it, rows scroll through the
+          bar. Focus scroll-margin for this bar is set in index.css. */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2">
         <div className="flex min-w-0 items-center gap-6">
           <span className="text-lg font-semibold text-accent">MetalMark</span>
           <nav className="hidden gap-1 sm:flex" aria-label="Main">
@@ -47,8 +52,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <NavLink
                 key={n.to}
                 to={n.to}
-                // NavLink sets `aria-current="page"` itself when active; do not
-                // pass the attribute here, or it overrides that.
+                // NavLink sets `aria-current="page"` itself when active, so it is
+                // not passed here. (Passing it would also work — NavLink
+                // destructures the prop out and recomputes it — but it is the
+                // same fact stated twice.)
                 className={({ isActive }) =>
                   `inline-flex min-h-11 items-center rounded-control px-3 text-sm ${
                     isActive
