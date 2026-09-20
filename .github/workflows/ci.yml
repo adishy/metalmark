@@ -1,0 +1,204 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Backend: lint + pytest against a real Postgres (tests recreate kestrel_test)
+  # --------------------------------------------------------------------------
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          # Owner role must be a superuser so tests/conftest.py can CREATE DATABASE.
+          POSTGRES_USER: kestrel
+          POSTGRES_PASSWORD: kestrel_ci_password
+          POSTGRES_DB: kestrel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kestrel -d kestrel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      KESTREL_TEST_PG_HOST: localhost
+      KESTREL_TEST_PG_PORT: "5432"
+      POSTGRES_USER: kestrel
+      POSTGRES_PASSWORD: kestrel_ci_password
+      POSTGRES_DB: kestrel
+      KESTREL_SECRET_KEY: ci-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend dependencies (from uv.lock)
+        working-directory: backend
+        # uv sync provisions the right Python, installs the frozen deps + dev
+        # extra, and installs the project itself into backend/.venv.
+        run: uv sync --frozen --extra dev
+
+      - name: Lint (ruff) — advisory until pre-existing debt is cleared
+        working-directory: backend
+        continue-on-error: true
+        run: uv run ruff check .
+
+      - name: Run backend tests (pytest)
+        working-directory: backend
+        run: uv run pytest -q
+
+  # --------------------------------------------------------------------------
+  # Frontend: type-check, unit tests (vitest), production build
+  # --------------------------------------------------------------------------
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests (vitest)
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  # --------------------------------------------------------------------------
+  # Contract check: live API conforms to the OpenAPI spec (schemathesis) and
+  # protected endpoints are 401 when unauthenticated. Pragmatic scope.
+  # --------------------------------------------------------------------------
+  contract:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: kestrel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create runtime secret (Fernet key)
+        run: |
+          mkdir -p secrets
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/kestrel_secret_key
+
+      - name: Start API + DB
+        run: docker compose up -d --build db api
+
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/healthz >/dev/null; then
+              echo "api healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy" >&2
+          docker compose logs api >&2
+          exit 1
+
+      - name: Schemathesis conformance (/healthz)
+        run: >-
+          docker compose exec -T api schemathesis run
+          http://localhost:8000/openapi.json
+          --include-path /healthz --max-examples 5 --checks all
+
+      - name: Protected endpoints require auth (401)
+        run: |
+          fail=0
+          for path in /accounts /transactions /categories /reports/net-worth; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}")
+            echo "GET ${path} -> ${code}"
+            if [ "$code" != "401" ]; then
+              echo "expected 401 for ${path}, got ${code}" >&2
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  # --------------------------------------------------------------------------
+  # E2E: bring up the full stack, seed, run Playwright against it (Chromium).
+  # --------------------------------------------------------------------------
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_PROJECT_NAME: kestrel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create runtime secret (Fernet key)
+        run: |
+          mkdir -p secrets
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/kestrel_secret_key
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for API + web
+        run: |
+          ok() { curl -fsS "$1" >/dev/null; }
+          for i in $(seq 1 60); do
+            if ok http://localhost:8000/healthz && ok http://localhost:5173; then
+              echo "stack up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "stack did not come up" >&2
+          docker compose logs >&2
+          exit 1
+
+      - name: Seed demo data (idempotent)
+        run: >-
+          docker compose run --rm
+          -e KESTREL_SEED_EMAIL=owner@example.com
+          -e KESTREL_SEED_PASSWORD=devpassword123
+          -e KESTREL_SEED_HOUSEHOLD=Home
+          api python -m app.seed --demo
+
+      - name: Run Playwright (against the compose stack)
+        run: >-
+          docker run --rm --network ${COMPOSE_PROJECT_NAME}_default
+          -e E2E_BASE_URL=http://web:5173 -e CI=1
+          -v "${{ github.workspace }}/frontend":/work -w /work
+          mcr.microsoft.com/playwright:v1.63.0-noble
+          sh -c "npm ci && npx playwright test"
+
+      - name: Upload Playwright report + diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

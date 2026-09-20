@@ -40,6 +40,10 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    // Allow the `web` compose-service hostname so Playwright can drive the dev
+    // server from another container on the compose network (e2e/CI). localhost
+    // and IP hosts are always permitted; this is additive and dev-only.
+    allowedHosts: ["web"],
     watch: { usePolling: true },
     proxy: {
       "/api": {
@@ -52,5 +56,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    // Playwright specs live under e2e/ and must not be collected by vitest.
+    exclude: ["e2e/**", "node_modules/**", "dist/**"],
   },
 });

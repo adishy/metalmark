@@ -15,6 +15,7 @@ unit + integration/e2e + visual-regression tests; then pause for SimpleFIN.
 | # | Who | Scope | Result |
 |---|-----|-------|--------|
 | P0 | Opus 4.8 (orchestrator) | Phase 0 foundations: monorepo scaffold, docker-compose+Caddyfile+.env, FastAPI skeleton, SQLAlchemy 2.0 models (identity, ledger, fx), Alembic baseline migration, **app role + RLS tenant isolation (ADR-0014)**, argon2 auth + server-side sessions + CSRF + invite-only signup, Fernet secret helper, money/allocate/convert primitives (ADR-0005), WS-T harness (testcontainers/external-DB), money property tests + tenant-isolation integration test | ✅ green: 9 tests pass; auth flow (login/me/invite/signup) verified over HTTP in containers |
+| T | Opus 4.8 (subagent): test & CI | Frontend unit tests (vitest + @testing-library: `format` money/date + Login render, 10 tests); Playwright e2e (`frontend/e2e/`: happy-path login→account→txn→reports, review approve + keyboard-swipe; unique-data/relative asserts, no reset needed); Linux visual baseline (login page, `*-chromium-linux.png` via playwright:v1.63.0-noble); `.github/workflows/ci.yml` (backend uv+pytest[+advisory ruff], frontend npm ci/typecheck/vitest/build, schemathesis+401 contract check, compose e2e w/ report artifact). Added `allowedHosts:["web"]` to vite dev server for container e2e. No app-code/testid changes. | ✅ green: vitest 10, e2e 4, backend 16, typecheck clean |
 
 ## Conventions established (P0)
 - **Tenant isolation is one layer, not per-handler:** app connects as non-superuser `kestrel_app`;
