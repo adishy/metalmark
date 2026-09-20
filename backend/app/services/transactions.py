@@ -169,6 +169,17 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
     # that unset an owner silently do nothing. The required fields are guarded by
     # TransactionUpdate's validator, so arriving here they are non-null.
     if is_set(data, "amount"):
+        # A split parent's amount is a mirror of its children, and the children are
+        # what every report actually sums. Letting the parent drift makes the row
+        # claim one number while every total shows another — the PATCH succeeds and
+        # changes nothing a user can see. The splits are where a parent's amount is
+        # edited, and ``replace_splits`` enforces the sum there.
+        if txn.splits and data.amount != txn.amount:
+            raise LedgerError(
+                "A split transaction's amount comes from its splits; "
+                "edit the splits or un-split it first",
+                409,
+            )
         txn.amount = data.amount
         _mark(fs, ["amount"], "user")
         recompute = True
@@ -213,9 +224,23 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         )
         txn.base_amount = conv
         txn.fx_rate_date = rate_date
+        # Moving a split parent to another date can change the rate it converts at,
+        # so the children — which carry the amounts and base amounts every report
+        # sums — have to be re-allocated exactly as ``replace_splits`` does them.
+        # Without this they keep the old day's conversion and stop summing to the
+        # parent, which is the same silent divergence as a drifted amount.
+        if txn.splits:
+            realloc = allocate(
+                conv, [abs(s.amount) or Decimal(1) for s in txn.splits], currency=base
+            )
+            for split, base_amount in zip(txn.splits, realloc, strict=True):
+                split.base_amount = base_amount
 
-    if data.tag_ids is not None:
-        await _set_tags(session, txn.id, data.tag_ids)
+    if is_set(data, "tag_ids"):
+        # Explicit null clears the set. The schema promises absent = no change and
+        # null = clear for the nullable fields; ``is not None`` here quietly broke
+        # that promise, so an attempt to clear tags looked like it worked.
+        await _set_tags(session, txn.id, data.tag_ids or [])
 
     await session.flush()
     return txn

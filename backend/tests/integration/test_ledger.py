@@ -13,11 +13,12 @@ from decimal import Decimal
 import pytest
 
 from app.db import scoped_session
-from app.models import CategoryGroup
+from app.models import CategoryGroup, Tag
 from app.schemas.ledger import AccountCreate
-from app.schemas.transactions import SplitIn, TransactionCreate
+from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, reports
 from app.services import transactions as txns
+from app.services.errors import LedgerError
 
 pytestmark = pytest.mark.integration
 
@@ -244,3 +245,78 @@ async def test_provenance_marks_user_fields(household_factory):
     assert txn.field_sources.get("category") == "user"
     assert txn.field_sources.get("merchant") == "user"
     assert txn.field_sources.get("amount") == "user"
+
+
+async def test_split_parent_amount_is_edited_through_its_splits(household_factory):
+    """A split parent's amount mirrors its children, and the children are what
+    every report sums. Editing the parent alone therefore succeeded while changing
+    nothing a user could see, and left the row claiming one number while every
+    total showed another. It is refused instead."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-100"), transacted_at=_dt(2026, 1, 5)))
+        await txns.replace_splits(s, txn.id, [
+            SplitIn(amount=D("-60")), SplitIn(amount=D("-40"))])
+
+        with pytest.raises(LedgerError) as exc:
+            await txns.update_transaction(
+                s, hh, txn.id, TransactionUpdate(amount=D("-500")))
+        assert exc.value.status == 409
+
+        after = await txns.get_transaction(s, txn.id)
+        assert after.amount == D("-100.0000")  # untouched by the refused patch
+        assert sum((sp.amount for sp in after.splits), Decimal(0)) == after.amount
+
+
+async def test_moving_a_split_parent_reallocates_child_base_amounts(household_factory):
+    """The children carry the base amounts reports sum, so they have to follow the
+    parent when its date — and therefore its FX rate — changes. Otherwise they keep
+    the old day's conversion and quietly stop summing to the parent."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        await ledger.upsert_fx_rate(s, hh, base_ccy="USD", quote_ccy="EUR",
+                                    rate_date=date(2026, 1, 5), rate=D("0.90"))
+        await ledger.upsert_fx_rate(s, hh, base_ccy="USD", quote_ccy="EUR",
+                                    rate_date=date(2026, 1, 6), rate=D("0.80"))
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Euro", type="depository", currency="EUR"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-100"), transacted_at=_dt(2026, 1, 5)))
+        parent = await txns.get_transaction(s, txn.id)
+        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("1")), SplitIn(pct=D("1"))])
+        base_on_the_5th = parent.base_amount
+
+        await txns.update_transaction(
+            s, hh, txn.id, TransactionUpdate(transacted_at=_dt(2026, 1, 6)))
+        after = await txns.get_transaction(s, txn.id)
+        child_base = sum((sp.base_amount for sp in after.splits), Decimal(0))
+
+    assert after.base_amount != base_on_the_5th  # the rate really did move...
+    assert child_base == after.base_amount       # ...and the children followed it
+
+
+async def test_explicit_null_tag_ids_clears_the_tags(household_factory):
+    """Absent means "no change", null means "clear". ``is not None`` collapsed the
+    two, so a patch that cleared the tags looked like it had worked and had not."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        tag = Tag(household_id=hh, name="Reimbursable")
+        s.add(tag)
+        await s.flush()
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-20"), transacted_at=_dt(2026, 1, 7),
+            tag_ids=[tag.id]))
+        assert (await txns._tag_ids_for(s, [txn.id])) == {txn.id: [tag.id]}
+
+        # omitted: no change
+        await txns.update_transaction(s, hh, txn.id, TransactionUpdate(amount=D("-21")))
+        assert (await txns._tag_ids_for(s, [txn.id])) == {txn.id: [tag.id]}
+
+        # explicit null: cleared
+        await txns.update_transaction(s, hh, txn.id, TransactionUpdate(tag_ids=None))
+        assert (await txns._tag_ids_for(s, [txn.id])) == {}
