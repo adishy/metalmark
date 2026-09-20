@@ -1378,7 +1378,45 @@ got it wrong: it substituted muted *text* roles with `bg-surface-raised`, which 
 `text-fg-muted` to 0 uses and left every `hover:` a no-op against the card behind it.
 Grep #6 is what catches that, so keep it in CI rather than running it once.
 
-What is left, verified against the tree:
+### The audit below is closed
+
+**Every row of the table that used to follow this line has been fixed**, verified
+against the tree on 2026-09-20. It is kept, struck through, because a list of what was
+wrong and how each item was caught is worth more than a clean page — but **it is not a
+list of open problems, and reading it as one wastes an afternoon.** The counts below are
+the ones that were true when the audit was written; the parenthetical is what a re-check
+found.
+
+| Problem (as audited) | Verified 2026-09-20 |
+|---|---|
+| Destructive button's label failed contrast in both themes | Fixed — `danger` is now `bg-danger text-white` (6.47:1), the exact figure §2.1 gives |
+| Focus ring suppressed on every control (`outline-none` beat the global rule) | Fixed — **zero** real occurrences; the two remaining hits are comments explaining why it is *not* used, and §8 grep #4 is clean |
+| Controls had no `min-h-11` (`px-3 py-2 text-sm` = 36 px) | Fixed — `min-h-11` is on the base control class, with the 36 px arithmetic in the docstring |
+| 19 controls at 24–28 px | Fixed — the lint is clean; `min-h-11` appears 20 times |
+| No safe-area inset anywhere (`env()` used 0 times) | Fixed — 2 uses, including the bottom tab bar |
+| `useChartTokens` read names that do not exist, so hardcoded dark fallbacks painted in light mode | Fixed |
+| `Reports.tsx` hardcoded 16 hex values and kept the dark donut palette in both themes | Fixed — **0** hex values in that file |
+| Zero live regions (0 × `aria-live`, 0 × `role="status"`) | Fixed — 12 |
+| Zero `aria-current`; active nav item and tab were colour-only | Fixed — 3; `NavLink` sets it itself |
+| No `<h1>` on any authenticated page | Fixed — every page has one |
+| Members table had no `<caption>` and no `scope=` | Fixed — both present |
+
+**How to re-run it** rather than trusting a snapshot: `npm run lint:design` in the `web`
+container covers §8's rules 1–6 and 8; the rest are greps —
+
+```sh
+grep -rn 'aria-live\|role="status"' src | wc -l     # live regions
+grep -rn 'aria-current' src | wc -l                 # active-state signal
+grep -rn 'safe-area-inset' src | wc -l              # edge-pinned elements
+grep -l '<h1' src/pages/*.tsx                       # page headings
+grep -rn 'outline-none' src                         # each hit needs a ring (§8 #4)
+```
+
+An audit is a claim about a commit, so **date it and say what it did not check.** This
+one checked the eleven items above; it did not measure contrast across the app, and it is
+not a substitute for a real screen-reader pass.
+
+What follows is the audit as written, with its original counts:
 
 | Problem | Where | Breaks |
 |---|---|---|
