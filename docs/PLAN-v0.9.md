@@ -20,6 +20,14 @@ What is *not* built, in the order this plan addresses it:
 | 2 | Portable export/import + encrypted backups | Nothing. `pg_dump` appears only in prose |
 | — | Admin panel discoverability | **Shipped but the user cannot find it.** A defect in what we just built |
 | — | Reports time filters, review deck, account marks, pretty dates, desktop layout, desktop notifications, app icon | Nothing; layout is mobile-first with no desktop section in DESIGN.md |
+| — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | Nothing. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
+
+## Appended after this plan was written
+
+**Bulma.** Requested while item 4's ADRs were being written: *"can we change our design system to use
+https://bulma.io/? this should be appended to our todo"*. It is not part of the 4/1/3/2 order — it is a
+seventh workstream appended at the end, and decision M below is where it is scoped. Item 4 is
+**not blocked** by it: OFX import and auto-split rules are backend + a small surface, so they proceed.
 
 ## Decisions taken
 
@@ -209,6 +217,56 @@ while the link gates on `household.role === "owner"`. They agree for every user 
 produce (`services/auth.py:88,232` set both together) so it is not a live bug, but it becomes one the
 moment anyone creates an `is_admin` member or an owner without `is_admin`. Both will read one field.
 
+### M. Bulma as the design system (appended; ADR-worthy, and it supersedes DESIGN.md §2's *wiring*, not its values)
+
+Bulma 1.0.4 is **CSS-only** — no JavaScript components — and its theming runs on **CSS custom properties**.
+Both facts matter here, and both make this a smaller change than the word "design system" suggests.
+
+**What we actually have today** (measured, not assumed): no component library at all. `package.json` has
+React, React Router, TanStack Query, ECharts, framer-motion and `@use-gesture` — there is **no Radix, no
+shadcn, no CVA, no `clsx`**. Every control is hand-built. 21 of the 32 `.tsx` files carry `className=` with
+Tailwind utilities, and the palette underneath is already a `:root`/`.dark` CSS-variable block wired into
+Tailwind via `rgb(var(--x) / <alpha-value>)` (`tailwind.config.js`).
+
+So Bulma would be **adding** a component library, not swapping one — and it lands on a token layer that is
+already CSS variables, which is the same mechanism Bulma uses. The parts of DESIGN.md that carry real
+value (the measured contrast ratios in §2.1, the money rules in §6, the accessibility floor in §7) are
+*values and rules*, and they survive a styling-layer swap intact. What does not survive is §2.5–2.10's
+Tailwind wiring, and the design lint, which is written against Tailwind utility classes.
+
+**What Bulma buys, concretely.** `navbar`, `menu`, `panel`, `card`, `box`, `table`, `tabs`, `tag`,
+`notification`, `pagination`, `breadcrumb`, `columns` — the exact components this app is missing, and the
+exact reason decision I exists: the desktop view reads as a stretched phone partly because there is no
+navbar, no table and no panel to reach for, so pages lay out as stacked cards at every width.
+
+**Cost, honestly.** A rewrite of the presentation layer across ~21 files, a design-lint rewrite (rules 1–6
+and 8 all name Tailwind classes), a DESIGN.md §2 remap of role tokens (`surface-raised`, `fg-muted`) onto
+Bulma's variable names (`--bulma-...`) or a bridge that keeps our roles as the source of truth, and the
+loss of Tailwind's utility workflow for one-off spacing. Two class systems must never coexist — a file
+using both is the failure mode that makes this kind of migration permanent.
+
+**Decision: adopt Bulma, staged, and *before* the unbuilt UI rather than after.** The review card stack,
+the Sankey, the investments screens and the export UI do not exist yet; building them in Tailwind first
+and restyling them later means writing each one twice. The sequence is therefore:
+
+1. **Bridge, not replace, the tokens.** Keep DESIGN.md's role vocabulary as the source of truth: map
+   `--surface`/`--fg`/`--accent`/… onto Bulma's variables in one `theme.scss` so light/dark, the contrast
+   table and the pre-paint theme script in `index.html` keep working unchanged. Bulma's automatic dark mode
+   is driven by the same `.dark`-style hook we already set, or it is not used at all.
+2. **Shell first** — `AppShell`, the nav, and the page gutter — because that is decision I's territory and
+   the highest-value swap. Ship it, look at it, and stop if it is worse.
+3. **Component-by-component, one commit each**, starting with the list/table surfaces. Every step keeps the
+   app working, so the change is abandonable at any point.
+4. **Delete Tailwind last**, in one commit, only once no file imports it.
+
+**Checkpoint required.** Per the user's own rule (*"checkpoint / commit before making larger changes"*),
+step 2 lands as its own commit with a clean tree on both sides of it, so the whole migration can be reverted
+in one `git revert` without touching anything else.
+
+**Not decided here:** whether to drop Tailwind entirely or keep it alongside Bulma for layout utilities.
+Recommendation is to drop it — two class systems is the cost this whole section exists to avoid — but that
+is a call for after step 2, when there is something real to look at.
+
 ## Order of work
 
 Admin defect first (it is broken shipped behaviour and it is small), then the four requested items in the
@@ -224,6 +282,13 @@ them so nothing is built twice:
 5. **Item 3** — Sankey, plus the report ranges/granularity from decision D.
 6. **Item 2** — export/import, then encrypted backups and the restore-drill gate.
 7. **Review deck**, desktop layout, desktop notifications.
+8. **Bulma** — decision M, appended at the user's request after this plan was written.
+
+**Step 8 has an ordering recommendation attached, and it is the user's call, not mine.** Decision M argues
+for doing the shell swap (its steps 1–2) *before* item 1, because the investments screens, the Sankey and the
+export UI are all unbuilt and would otherwise be written in Tailwind and then restyled. That is a reordering
+of the sequence the user set (4/1/3/2), so it is **not taken here** — the default is to follow the stated
+order and raise it when item 4 lands. Nothing in items 4/1/3/2 is blocked either way.
 
 Each step: ADR + DESIGN.md updates in the same commit, tests written with the code, `./scripts/verify.sh`
 green, CI green, pushed. `reset` between mutating gates.
