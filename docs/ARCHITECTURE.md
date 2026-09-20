@@ -416,6 +416,15 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   household today. **The worker has no user session** yet moves the most cross-household data: it must **not**
   run `BYPASSRLS` (that removes the backstop) — each sync job sets `SET LOCAL app.household_id` for its
   connection's household inside the job transaction, so RLS applies to the worker exactly as to the API.
+- **Tables outside RLS, and what that costs**: `users`, `households`, `household_members`, `sessions`
+  (identity — a session has to be read before its household is known; ADR-0025), `fx_rates` (global
+  reference data: the same fact for everyone) and `alembic_version` carry **no policy**. For these six, RLS
+  is not merely absent — it is not a backstop at all: the app role holds ordinary
+  `SELECT/INSERT/UPDATE/DELETE` on every one, deliberately, because it has to read `sessions` and write
+  `household_members` in order to authenticate. What keeps them isolated is that each is reached by
+  something the caller already proved it holds — a session token, or an id read out of a verified session —
+  rather than by household. A future query that reaches them by *household filter* would be the leak, and
+  nothing in the database would stop it.
 - **Auth**: argon2id password hashing; httpOnly + SameSite session cookies; CSRF token for mutations;
   login rate-limit + lockout. **Signup is open (ADR-0027)** — the first signer creates the household (as its
   `owner` + `is_admin`), later signers join the oldest one as members; `METALMARK_OPEN_SIGNUP=false` closes it.
