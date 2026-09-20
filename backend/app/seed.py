@@ -28,8 +28,10 @@ from sqlalchemy import select
 
 from app.db import scoped_session, unscoped_session
 from app.logging import configure_logging, get_logger
-from app.models import Category, CategoryGroup, User
+from app.models import Category, CategoryGroup, Tag, User
+from app.models.ledger import Rule
 from app.schemas.ledger import AccountCreate, AccountUpdate
+from app.schemas.rules import RuleActions, RuleConditions
 from app.schemas.transactions import SplitIn, TransactionCreate
 from app.services import auth as svc
 from app.services import ledger as ledger_svc
@@ -266,6 +268,87 @@ async def demo_reference_data(
     await session.flush()
 
 
+# Labels for the tags the demo ledger's rows can be marked with. Like the demo
+# owners, they exist so the pickers have something in them on a fresh database.
+DEMO_TAGS = [
+    ("Reimbursable", "#38bdf8"),
+    ("Vacation", "#f472b6"),
+]
+
+
+async def demo_tags_and_rules(session, household_id: uuid.UUID) -> None:
+    """Tags, and two rules that match the ledger that was just seeded.
+
+    Both exist for the same reason: Settings → Tags and Settings → Rules are
+    otherwise empty on a fresh database, which makes a working feature look like
+    an unbuilt one. It is also why the rules are chosen to match rows the ledger
+    already has — "Apply to existing" reporting 0 updated would demonstrate the
+    engine's failure modes rather than the engine.
+
+    **Order matters, and it is why this runs after the ledger rather than in
+    ``demo_reference_data``.** ``create_transaction`` applies rules on insert, so
+    a rule seeded first rewrites the demo ledger as it is built, silently, and
+    ``tests/integration/test_seed.py`` takes that ledger as ground truth. Seeded
+    afterwards, the rules are inert data waiting for someone to press the button.
+
+    Idempotent by name, like the rest of the seed.
+    """
+    for name, color in DEMO_TAGS:
+        if not (
+            await session.execute(
+                select(Tag.id).where(Tag.household_id == household_id, Tag.name == name)
+            )
+        ).first():
+            session.add(Tag(household_id=household_id, name=name, color=color))
+    await session.flush()
+
+    cats = await _named(session, Category, household_id)
+    tags = await _named(session, Tag, household_id)
+    owners = await _named(session, owner_svc.Owner, household_id)
+
+    demo_rules = [
+        (
+            "Supermarket runs are groceries",
+            100,
+            RuleConditions(description_regex="Supermarket"),
+            RuleActions(
+                set_category_id=cats["groceries"],
+                add_tag_ids=[tags["reimbursable"]],
+            ),
+        ),
+        (
+            "Over 400 at once is a household cost",
+            200,
+            # Signed amounts: an expense is negative, so "over 400 of spending"
+            # is a bound on the LOW end. `amount_min: 400` would mean "income of
+            # at least 400" and match the salary instead.
+            RuleConditions(amount_max=Decimal("-400")),
+            RuleActions(set_owner_id=owners["shared"]),
+        ),
+    ]
+    for name, priority, conditions, actions in demo_rules:
+        if (
+            await session.execute(
+                select(Rule.id).where(Rule.household_id == household_id, Rule.name == name)
+            )
+        ).first():
+            continue
+        session.add(
+            Rule(
+                household_id=household_id,
+                name=name,
+                priority=priority,
+                enabled=True,
+                # Through the schemas, not the dicts: `.stored()` is the same
+                # serializer the API writes with, so a seeded rule cannot drift
+                # into a shape the reader of a user-written rule would not expect.
+                conditions=conditions.stored(),
+                actions=actions.stored(),
+            )
+        )
+    await session.flush()
+
+
 async def run(demo: bool) -> None:
     settings = get_settings()
     configure_logging(settings.log_level, settings.env)
@@ -293,6 +376,8 @@ async def run(demo: bool) -> None:
             await demo_reference_data(session, household_id, owner_name)
             log.info("seed.demo_categories", household=str(household_id))
             await _demo_ledger(session, household_id, owner_name)
+            await demo_tags_and_rules(session, household_id)
+            log.info("seed.demo_tags_rules", household=str(household_id))
 
 
 if __name__ == "__main__":
