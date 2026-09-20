@@ -14,12 +14,14 @@ from app.models.ledger import (  # noqa: F401
     Category,
     CategoryGroup,
     Owner,
+    Rule,
     Tag,
     Transaction,
     TransactionSplit,
     TransactionTag,
     TransferGroup,
 )
+from app.models.sync import SyncJob, SyncRun, SyncRunEvent  # noqa: F401
 
 __all__ = [
     "FxRate",
@@ -33,7 +35,11 @@ __all__ = [
     "Category",
     "CategoryGroup",
     "Owner",
+    "Rule",
     "Tag",
+    "SyncJob",
+    "SyncRun",
+    "SyncRunEvent",
     "Transaction",
     "TransactionSplit",
     "TransactionTag",

@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -35,12 +36,30 @@ from app.models.base import TimestampMixin, UUIDPkMixin
 MONEY = Numeric(19, 4)
 
 
+# Sync cadence bounds. SimpleFIN refreshes each account about once a day and the
+# bridge tolerates roughly 24 requests/day per token, so a 60-minute interval would
+# spend the entire budget on cron alone and leave nothing for a manual "Sync now".
+# The bridge's failure mode for an overrun is HTTP 403, which the app maps to
+# `auth_error` and renders as "reconnect" — when nothing is wrong. Half the budget
+# keeps that trap out of reach. The default preserves ADR-0002's documented 6h.
+SYNC_INTERVAL_MIN_MINUTES = 120
+SYNC_INTERVAL_MAX_MINUTES = 10080  # 7 days
+SYNC_INTERVAL_DEFAULT_MINUTES = 360  # 6h
+
+
 class AccountConnection(UUIDPkMixin, TimestampMixin, Base):
     """One per SimpleFIN claim (Phase 2). Present now so accounts can carry the
     nullable, ON DELETE SET NULL FK that decouples the ledger from sync
     (ARCHITECTURE §2 'Connection ↔ ledger decoupling')."""
 
     __tablename__ = "account_connections"
+    __table_args__ = (
+        CheckConstraint(
+            f"sync_interval_minutes BETWEEN {SYNC_INTERVAL_MIN_MINUTES}"
+            f" AND {SYNC_INTERVAL_MAX_MINUTES}",
+            name="sync_interval_range",
+        ),
+    )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("households.id", ondelete="CASCADE"), nullable=False,
@@ -49,9 +68,26 @@ class AccountConnection(UUIDPkMixin, TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="simplefin")
     access_url_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     org_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Health, not scheduling: ok|auth_error|error. Deliberately *not* extended with
+    # a paused value — pausing is a scheduling gate (`is_enabled`) and conflating the
+    # two would make "paused" indistinguishable from "broken" in the status column.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- the admin control panel's knobs -------------------------------------
+    # Paused. Cron skips it and a queued job for it is cancelled at claim time; a
+    # job already running finishes, because "pause stops the future, cancel stops
+    # the present" is the distinction that makes both controls worth having.
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_interval_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=SYNC_INTERVAL_DEFAULT_MINUTES
+    )
+    # The cadence clock *and* the failure backoff in one column. Using
+    # `last_synced_at` as the clock instead (the obvious first idea) means a
+    # *failing* connection never advances it, so the tick re-enqueues every minute
+    # forever — a hot loop against a flaky bank. Set at run close-out.
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Owner(UUIDPkMixin, TimestampMixin, Base):
@@ -214,6 +250,13 @@ class Transaction(UUIDPkMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where="external_id IS NULL AND import_hash IS NOT NULL",
         ),
+        # The pending sweep's index: "what on this connection is still unsettled".
+        Index(
+            "ix_transactions_household_pending_since",
+            "household_id",
+            "pending_since",
+            postgresql_where=text("is_pending"),
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -247,6 +290,11 @@ class Transaction(UUIDPkMixin, TimestampMixin, Base):
         PGUUID(as_uuid=True), ForeignKey("owners.id"), nullable=True
     )
     is_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # When this row was first seen pending, so the TTL can expire a phantom that
+    # neither posted nor reappeared. Set once on insert and cleared on posting —
+    # never refreshed while pending, or the TTL would never fire. (Which is also why
+    # it is not named `last_seen_at`.)
+    pending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_status: Mapped[str] = mapped_column(String(16), nullable=False, default="needs_review")
     is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_split_parent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
