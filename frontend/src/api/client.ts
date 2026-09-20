@@ -18,6 +18,41 @@ export class ApiError extends Error {
 
 const UNSAFE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/** A response body as JSON, or `undefined` when it is not JSON at all.
+ *
+ * A *failed* request does not necessarily answer with JSON. A 500 from the app
+ * is the plain text `Internal Server Error`, and anything in front of it answers
+ * with HTML. Parsing that unconditionally throws before the caller can look at
+ * `res.ok`, so the reader is handed `Unexpected token 'l', "Internal S"... is
+ * not valid JSON` — a syntax error about a 500, saying nothing about the 500.
+ * The status is the one fact always available, so it must not be the one lost.
+ */
+function parseJson(text: string): unknown {
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** What to tell the reader about a failed response.
+ *
+ * The server's `detail` when it sent one, then the body as it stands, then the
+ * status. That last fallback is not a formality: `statusText` is empty under
+ * HTTP/2, so a bare `|| res.statusText` can leave the message blank.
+ */
+function detailOf(res: { status: number; statusText: string }, data: unknown, text: string) {
+  if (data && typeof data === "object" && "detail" in data) {
+    const detail = (data as { detail: unknown }).detail;
+    if (typeof detail === "string") return detail;
+    if (detail !== undefined) return JSON.stringify(detail);
+  }
+  // Bounded: a proxy's error page is not a message anyone reads to the end, and
+  // it should not become one because it happens to be the body.
+  return text.trim().slice(0, 200) || res.statusText || `HTTP ${res.status}`;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -33,13 +68,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) {
-    const detail =
-      (data && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))) ||
-      res.statusText;
-    throw new ApiError(res.status, detail);
-  }
+  const data = parseJson(text);
+  if (!res.ok) throw new ApiError(res.status, detailOf(res, data, text));
   return data as T;
 }
 
@@ -79,12 +109,7 @@ export async function upload<T>(
   });
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) {
-    const detail =
-      (data && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))) ||
-      res.statusText;
-    throw new ApiError(res.status, detail);
-  }
+  const data = parseJson(text);
+  if (!res.ok) throw new ApiError(res.status, detailOf(res, data, text));
   return data as T;
 }
