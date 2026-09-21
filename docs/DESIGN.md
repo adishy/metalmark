@@ -1003,10 +1003,32 @@ page and everything around it is about the card.
   that side over 240 ms, fading over the last third of the distance. The throw is the
   confirmation: the button you pressed is behind you, and the direction is what tells
   you which of the two answers you gave.
+- **Up is not a third verdict.** Pulling the card up 80 px — or pressing `e`, or the Edit
+  button sitting between the two verdicts — opens the transaction as a right slide-over
+  (§9.6). The card is constrained rather than thrown: it travels 140 px up and no further,
+  because it is not going anywhere and the sheet appearing is what says the gesture landed.
+  **The deck does not advance.** The card is where you left it when the sheet closes, still
+  asking the same question, now carrying the answer you opened it to give — categorizing a
+  transaction is the reason to open a card from the deck, and a decision is not something
+  to make by accident while editing one.
+- **The sheet opens over the deck, never beside it.** At `lg:` a transaction detail is
+  normally a pane with the list beside it (§9.3/§9.6), and Review has no second column —
+  one card, centred. So Review tells the sheet which presentation to use rather than
+  letting the width choose, and at 1280 the difference is visible: `role="dialog"` over the
+  deck, not `role="region"` in it.
+- **Arrow keys belong to the sheet while it is open.** A ← in the amount box is a caret
+  move. Without the gate it would file the card the sheet is showing, behind the sheet,
+  where nothing on screen says it happened.
 - **The card is 288 px tall** (`h-72`), measured rather than chosen — at 320 px the
   longest realistic merchant wraps four times and the content comes to about 218 px.
   The identity block centres itself in the room the amount leaves, so a one-line
   merchant sits on the card's optical centre instead of at the top of an empty box.
+  It is also what keeps the deck out of the whole window: `drag` costs the card
+  `touch-action: none`, so a touch that starts on the card can never scroll the page. At
+  320×568 the card and both buttons fit above the fold and nothing needs to scroll; at
+  667×375 the page does scroll, and the 129 px of shell above the deck is what is left to
+  start it from. Both are pinned in `review.spec.ts` — a full-height deck would trap a
+  landscape phone with no way to reach the buttons.
 - **The two verdicts are overlays** in the top corners, fading in with drag distance
   (40 → 160 px). They are not a row of their own: that row cost 26 px of height on
   every card, always, for two labels that are invisible until the card is dragged.
@@ -1016,7 +1038,9 @@ page and everything around it is about the card.
 - **The next card does not arrive until the throw lands.** A card appearing behind one
   mid-throw spoils the throw, which is the only thing saying where the last decision
   went.
-- **Keyboard**: ← / → are the same two decisions, for the desktop review pass.
+- **Keyboard**: ← / → are the same two decisions and `e` opens the card, for the desktop
+  review pass. All three are window-level, and all three stand down while the sheet is
+  open or a field has focus.
   **Reduced motion** (§2.8): no throw, no rotation, no badge fade — the card leaves the
   deck immediately, and the deck is faster for it, never slower.
 
@@ -1488,7 +1512,9 @@ Five shapes, and they are the whole of it:
   centred. This is the one page whose desktop shape is *not* wider: a decision card is
   read at a glance, and the room would only push the merchant and the amount further
   apart — which is exactly what the 864 px card this replaced did (§4.17). What the
-  desktop gets instead of width is the keyboard, ← / →.
+  desktop gets instead of width is the keyboard, ← / →. The transaction detail opens
+  **over** the deck as a slide-over (§9.6), never as a pane: a pane is the second column
+  of the Transactions shape, and there is no second column here to put it in.
 
 ### 9.4 The list row at `lg:`
 

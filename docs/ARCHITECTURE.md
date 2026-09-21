@@ -393,8 +393,10 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 ## 4. Feature mechanics
 
 - **Transaction review**: `review_status` drives the queue. List view + **mobile swipe deck**
-  (right = mark reviewed, left = flag/recategorize, up = open detail sheet: category, owner, tags,
-  split, notes). Built with framer-motion + @use-gesture; keyboard shortcuts on desktop (j/k/e/…).
+  (right = mark reviewed, left = ignore, up = open the detail: category, owner, tags, notes —
+  the recategorize path is the up gesture, and the detail is where it happens). Built with
+  framer-motion alone: its own `drag` covers both axes, so no `@use-gesture`. Keyboard on
+  desktop: ← / → to decide, `e` to open. Splits are not in the detail yet.
 - **Splits**: parent → N children by `$` or `%`; children carry category + owner. Reporting reads splits
   when present, else the parent.
 - **Rules**: applied when a transaction is created and via "apply to existing" (batch). Ordered by

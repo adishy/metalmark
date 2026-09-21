@@ -28,6 +28,18 @@ interface TxnDetailSheetProps {
   tags: Tag[];
   onClose: () => void;
   onReplaced: (updated: Transaction) => void;
+  /**
+   * Which of §9.3's two detail presentations to use, or `auto` to let the width
+   * decide.
+   *
+   * The pane exists to sit *beside* a list — §9.3 calls the Transactions list
+   * keeping its two thirds "the single biggest win" — so a page with no list has
+   * no second column to put a pane in. Review is that page: its whole desktop
+   * shape is one centred card, and a pane there would either crush this form
+   * into the deck's column or widen the page past what §9.3 says it does. So
+   * Review asks for the overlay by name rather than by width.
+   */
+  presentation?: "auto" | "overlay";
 }
 
 export default function TxnDetailSheet(props: TxnDetailSheetProps) {
@@ -39,16 +51,30 @@ export default function TxnDetailSheet(props: TxnDetailSheetProps) {
   return <TxnDetailForm key={props.txn.id} {...props} />;
 }
 
-function TxnDetailForm({ txn, accounts, categories, tags, onClose, onReplaced }: TxnDetailSheetProps) {
+function TxnDetailForm({
+  txn,
+  accounts,
+  categories,
+  tags,
+  onClose,
+  onReplaced,
+  presentation = "auto",
+}: TxnDetailSheetProps) {
   const update = useUpdateTransaction();
   const del = useDeleteTransaction();
   const owners = useOwners();
   // Which of the two presentations this is (§9.3): beside the list in the
-  // page's second column at `lg:`, or over it as the phone's bottom sheet.
+  // page's second column at `lg:`, or over the page as the right slide-over.
   // Decided here rather than by the caller so there is one component and one
   // form — a caller that rendered both and hid one would give the household
   // two copies of every edit in flight.
-  const pane = useIsDesktop();
+  //
+  // The hook runs either way and only its answer is overridden — it is not
+  // `presentation === "overlay" ? false : useIsDesktop()`, which would call a
+  // hook conditionally. `overlay` is a caller saying it has nowhere to put a
+  // pane, not a second layout.
+  const desktop = useIsDesktop();
+  const pane = presentation === "overlay" ? false : desktop;
 
   const account = accounts.find((a) => a.id === txn.account_id);
   const [amount, setAmount] = useState(txn.amount);
