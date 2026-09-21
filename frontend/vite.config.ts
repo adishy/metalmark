@@ -32,6 +32,17 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // The `notificationclick` handler, appended to the generated worker
+        // (ADR-0037). `generateSW` does not let us author the worker at all, and
+        // this is the one seam it offers — the alternative is `injectManifest`,
+        // which would mean owning the whole worker to add one listener to it.
+        //
+        // The file is outside `src/`, so it is outside the TypeScript program,
+        // outside typecheck and outside design-lint. That is the cost the ADR
+        // accepts, and the reason it is one listener and nothing else —
+        // `src/lib/notify.test.ts` runs it against a fake `self` so a change
+        // that stopped registering the handler fails a test rather than shipping.
+        importScripts: ["/sw-notify.js"],
         // Cache the app SHELL only. Financial data (/api) is never cached
         // on-device (ARCHITECTURE §5) — always go to the network.
         navigateFallbackDenylist: [/^\/api/],

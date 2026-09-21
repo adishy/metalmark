@@ -16,15 +16,18 @@
 // state in seconds and is the thing Cancel acts on, so 5 s; a run log is
 // append-only history, so 15 s is plenty.
 
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useInvalidateLedger } from "@/api/hooks";
+import * as notify from "@/lib/notify";
 import type {
   Connection,
   ConnectionClaim,
   ConnectionDefaults,
   ConnectionUpdate,
   SyncJob,
+  SyncNotice,
   SyncRun,
   SyncRunDetail,
   UUID,
@@ -56,6 +59,7 @@ const CONNECTIONS = ["connections"] as const;
 const DEFAULTS = ["connection-defaults"] as const;
 const JOBS = ["sync-jobs"] as const;
 const RUNS = ["sync-runs"] as const;
+const NOTICES = ["sync-notices"] as const;
 
 /** The household's connections.
  *
@@ -69,6 +73,66 @@ export function useConnections(poll = false) {
     queryFn: () => api.get<Connection[]>("/connections"),
     refetchInterval: poll ? CONNECTION_POLL_MS : false,
   });
+}
+
+/** How often the notice feed is re-read (ADR-0037).
+ *
+ *  Slower than anything else here, and by a wide margin, because of what it
+ *  carries: a bank connection that broke is not a race, and the panel a few
+ *  hundred pixels away already polls the same run history at 15 s. This is the
+ *  feed that has to keep running on *every* page, which is the other half of the
+ *  reason it is a minute — a poll on every route of the app is a cost the
+ *  five-second one could not justify. */
+const NOTICE_POLL_MS = 60_000;
+
+/** The notice feed, and the thing that shows them.
+ *
+ *  Mounted once, in `AppShell`, because a notification is not a page's business:
+ *  the tab can be anywhere in the app when a connection breaks. It is
+ *  deliberately *not* gated on the user being on Admin — that would make the
+ *  feature work only for someone already looking at the answer.
+ *
+ *  The cursor is read inside `queryFn` rather than folded into the query key.
+ *  In the key it would be a new query after every delivery, so the poll would
+ *  restart and remount each time it succeeded; read at call time, one query
+ *  polls for the life of the tab.
+ *
+ *  Enabled when the *browser* can do this at all, not when permission has been
+ *  granted: `deliver` declines to advance the cursor without permission, so a
+ *  denied browser re-reads the same window harmlessly — and starts showing
+ *  notices the moment permission is granted, without a reload. */
+export function useSyncNotices() {
+  const query = useQuery({
+    queryKey: NOTICES,
+    queryFn: () => {
+      const since = notify.readCursor();
+      const path = since ? `/connections/notifications?since=${since}` : "/connections/notifications";
+      return api.get<SyncNotice[]>(path);
+    },
+    enabled: notify.support() !== "unsupported",
+    refetchInterval: NOTICE_POLL_MS,
+    // A notice is worth exactly one showing, so a refetch on focus would only
+    // race the interval for the same rows.
+    refetchOnWindowFocus: false,
+  });
+
+  const notices = query.data;
+  useEffect(() => {
+    if (notices && notices.length > 0) void notify.deliver(notices);
+  }, [notices]);
+
+  return query;
+}
+
+/** Re-read the feed now, rather than at the next tick.
+ *
+ *  For the moment permission is granted: the poll has been running all along and
+ *  declining to show anything (the cursor does not advance without permission),
+ *  so without this the notices that arrived while it was denied wait out the
+ *  rest of the minute before appearing. */
+export function useRefreshNotices() {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: NOTICES });
 }
 
 /** The cadence bounds, from the CHECK constraint's own constants — the slider

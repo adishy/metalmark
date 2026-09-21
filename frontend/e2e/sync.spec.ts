@@ -238,6 +238,25 @@ test.describe("bank sync", () => {
     await expect(row).toContainText("every 12 h");
   });
 
+  test("the panel answers the notification question in every browser", async ({ page }) => {
+    // The notification half of the panel (ADR-0037). The poll and the permission
+    // control can only work in a secure context, and this stack is served over
+    // `http://web:5173` — which is *not* one, so `navigator.serviceWorker` does
+    // not exist here and the control renders its explanation rather than a
+    // button. Asserting the button would pass on a developer's localhost and
+    // fail in CI, which is the worst of both. What holds in both, and is the
+    // property worth guarding, is that the panel says *something*: a control
+    // that silently renders nothing leaves a reader unable to tell "I have not
+    // enabled this" from "this browser cannot notify me at all".
+    await login(page);
+    await page.getByTestId("nav-admin").click();
+    await expect(page.getByRole("heading", { name: "Sync activity" })).toBeVisible();
+
+    const button = page.getByTestId("notify-enable");
+    const said = page.getByTestId("notify-state");
+    await expect(button.or(said)).toHaveCount(1);
+  });
+
   test("cancelling a job answers truthfully, whichever side of the race it lands", async ({
     page,
   }) => {

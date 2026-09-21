@@ -102,14 +102,32 @@ record the decision to notify on the server rather than deciding in the browser.
   load-bearing for the asleep case. Working around it would mean either Web Push (rejected above) or a
   native client (out of scope).
 - **Negative / costs:** the `public/sw-notify.js` shim is outside the TypeScript build, so it is checked
-  by nothing. It must stay small and be covered by an e2e test that asserts the handler exists in the
-  registered worker.
+  by nothing — not typecheck, not design-lint, not the compiler. It must stay small and hand-written
+  once. The intended check was an e2e assertion inside the registered worker; measurement killed that
+  (below), so the shim is instead *executed* by a unit test against a fake `self` and a fake
+  `clients` — which catches the failure that matters, a change that stops it registering a
+  `notificationclick` handler or navigating the wrong tab.
 - **Negative / costs:** a second `localStorage` cursor to get wrong. Its failure mode is benign and
   one-directional: a lost cursor re-shows notices the user has seen; a cursor that runs ahead shows
   none. Neither corrupts anything, which is why a browser-local cursor is acceptable here where a
   server-side one would not be.
-- **Follow-ups:** the e2e suite cannot grant notification permission headlessly in a useful way, so the
-  poll → display path is unit-tested at the decision boundary and the endpoint is covered by an
-  integration test; the real display path is verified by hand.
+- **Follow-ups:** what the e2e suite can and cannot reach, measured rather than assumed. Playwright
+  drives this stack at `http://web:5173`, a plain-HTTP container hostname, and both `Notification` and
+  `ServiceWorker` sit behind the browser's secure-context gate. Read out of that browser:
+  `Notification.permission === "denied"`, `"serviceWorker" in navigator === false`,
+  `isSecureContext === false` — and Chromium's
+  `--unsafely-treat-insecure-origin-as-secure=http://web:5173` did not change any of the three. So
+  `support()` answers `unsupported` in CI, the poll is disabled and the control renders its
+  explanation. Consequences, all of them implemented: the e2e asserts only the environment-independent
+  half (the panel always answers the notification question, never renders nothing); the
+  `AppShell` → endpoint wire is covered by a unit test with the two APIs stubbed, since neither jsdom
+  nor the e2e browser has them; the display path is unit-tested at the decision boundary; the endpoint
+  is covered by an integration test; and the real display path is verified by hand.
+- **Follow-ups (a deployment fact, not a test one):** by the same gate, **an instance reached over
+  plain HTTP on a LAN hostname cannot show notifications at all** — only `https://` or `localhost` can.
+  ADR-0002 puts this app on a LAN behind a VPN, which makes that the *likely* first deployment, so the
+  absence has to be explained rather than left as a control that does nothing; that is why
+  `unsupported` renders a sentence. Serving the app over TLS — or using it on the host itself — is what
+  turns this on.
 - **Follow-ups:** if the webhook is later removed or generalised, this ADR records that it is one sink
   among several, not the owner of the notification rule.

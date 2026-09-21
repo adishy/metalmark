@@ -413,6 +413,30 @@ export interface SyncRunDetail {
   events: SyncRunEvent[];
 }
 
+/** One notice the worker decided to send, as the browser shows it (ADR-0037).
+ *
+ *  A title and a body, composed server-side — deliberately not the raw trouble
+ *  fields. The decision that a failure is worth telling somebody about is
+ *  `should_notify`'s, in the worker, and a page allowed to build its own wording
+ *  from raw fields is a page that can be persuaded to put an amount in it. So
+ *  this is shown as it arrives and never re-composed here.
+ *
+ *  Named `SyncNotice` rather than `Notification` because the display path goes
+ *  through the DOM's `Notification` API and the two would shadow each other in
+ *  any module that does both. */
+export interface SyncNotice {
+  id: UUID;
+  run_id: UUID;
+  ts: string;
+  /** What the browser passes as the notification's `tag`, so a repeat about one
+   *  connection replaces the standing notification rather than stacking a column
+   *  of them. Null once the connection is gone — the notice is history and the
+   *  failure still happened. */
+  connection_id: UUID | null;
+  title: string;
+  body: string;
+}
+
 /** The cadence floor, ceiling and default, so the interval control needs no
  *  hard-coded copy of constants a CHECK constraint enforces. */
 export interface ConnectionDefaults {

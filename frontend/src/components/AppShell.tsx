@@ -7,6 +7,7 @@ import {
   type SVGProps,
 } from "react";
 import { useAuth } from "@/auth/AuthContext";
+import { useSyncNotices } from "@/api/sync";
 import { MetalMark } from "@/components/MetalMark";
 import { ThemeButton } from "@/components/ThemeToggle";
 import { AdminIcon, ChartIcon, ListIcon, ReviewIcon, SettingsIcon, WalletIcon } from "@/components/icons";
@@ -59,6 +60,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   const isAdmin = me?.user.is_admin === true;
   const items = NAV.filter((n) => !n.adminOnly || isAdmin);
+
+  // The notice feed (ADR-0037). Rendered by nothing — it is a poll and an
+  // effect — and here rather than in a page because the shell is the only thing
+  // that is mounted on every route. A tab sitting on Reports when a bank
+  // connection breaks is exactly the tab this feature is for; putting the poll
+  // in Admin would make it work only for someone already looking at the answer.
+  useSyncNotices();
 
   // A client-side route change keeps the scroll position of the page you left,
   // and nothing else here resets it — the browser only restores scroll for a
