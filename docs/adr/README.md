@@ -47,6 +47,21 @@ it), and `docs/PLAN.md` / `docs/ARCHITECTURE.md`.
 paths (`…/tmp/monarch_clone`), so the references there are left as-is: rewriting a quotation would make
 the record lie about what was said.
 
+## A note on the default ports
+
+The deployment first published its two doors on `8080` and `8443` — the conventional "alternative
+http/https" pair, which is exactly what makes them contended: on a machine already running other
+self-hosted services, the very first `up` failed on a port that had nothing to do with this app. The
+defaults are now **`8791`** (the loopback http door) and **`8790`** (Caddy's), deliberately un-round for
+that reason. Decision 5 of ADR-0038 states them and was updated with them; the measured-evidence
+paragraph in that same decision still names `8443`, because that is the port the measurement was actually
+taken on, not the one in force now. So, as with the codename note above: **where an accepted record names
+`8080` or `8443` for a published door, read `8791` or `8790`.**
+
+Neither number is load-bearing. Both come from `METALMARK_HTTP_PORT` / `METALMARK_HTTPS_PORT`, and
+`scripts/verify.sh` reads those same two variables — so the `prod` gate probes whatever a deployment was
+actually told to open, rather than a default it did not use.
+
 ## Index
 
 | ADR | Title | Status |

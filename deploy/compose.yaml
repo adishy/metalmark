@@ -5,7 +5,7 @@
 # Nothing else is required. No clone, no `.env`, no build tools, and no
 # credential to write down anywhere: the images come from GHCR (ADR-0039) and the
 # three credentials this stack needs are generated on first boot into a named
-# volume by `secret-init` below. Open https://<METALMARK_SITE>:8443 and sign up —
+# volume by `secret-init` below. Open https://<METALMARK_SITE>:8790 and sign up —
 # the first signup creates the household (ADR-0027), so there is nothing to seed
 # either. The README has the operator's version of this, including the one
 # command that makes a browser trust the certificate.
@@ -222,7 +222,14 @@ services:
       # the one door that needs no certificate installed and still gets a service
       # worker. It is the door for the machine itself; Caddy below is the one for
       # every other device.
-      - "127.0.0.1:${METALMARK_HTTP_PORT:-8080}:8080"
+      #
+      # 8791 rather than 8080, for the same reason port 80 is not published
+      # below: 8080 is the port most likely to be taken on a machine that is also
+      # running something else — it is the default for a whole class of
+      # self-hosted tools — so a default there fails on the very first `up`, for a
+      # reason that has nothing to do with this app. `METALMARK_HTTP_PORT`
+      # overrides it.
+      - "127.0.0.1:${METALMARK_HTTP_PORT:-8791}:8080"
     healthcheck:
       # nginx's own image has no healthcheck, and caddy below waits on this one
       # rather than on the container merely existing — otherwise the first request
@@ -239,7 +246,11 @@ services:
       web:
         condition: service_healthy
     ports:
-      - "${METALMARK_HTTPS_PORT:-8443}:443"
+      # 8790 rather than 8443, which is the conventional "alternative https" —
+      # and being the conventional one is exactly what makes it contended. The
+      # README states the URL, so nothing here depends on guessing it.
+      # `METALMARK_HTTPS_PORT` overrides it.
+      - "${METALMARK_HTTPS_PORT:-8790}:443"
       # Port 80 is deliberately not published. Its only job would be an
       # http→https redirect for someone who types a bare hostname, and the cost
       # is the port most likely to be taken on a machine that is also running
@@ -275,8 +286,8 @@ configs:
   caddyfile:
     content: |
       # The TLS door. Serves :443 inside the compose network, published on the
-      # host as METALMARK_HTTPS_PORT (8443 by default, since 443 is the sort of
-      # port something else may already want).
+      # host as METALMARK_HTTPS_PORT (8790 by default — both 443 and 8443 are
+      # ports something else is likely to already want).
       #
       # Why TLS at all, on an app that is LAN/VPN-only (ADR-0002) and never sees
       # the internet: a browser's service worker — the thing that displays a

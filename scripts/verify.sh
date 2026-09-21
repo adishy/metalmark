@@ -40,8 +40,10 @@ NETWORK="${COMPOSE_PROJECT}_default"
 # database volume, so what it tests is the fresh-install path rather than an
 # upgrade of whatever dev left behind.
 PROD_PROJECT="${PROD_PROJECT_NAME:-metalmark-prod}"
-PROD_HTTPS_PORT="${METALMARK_HTTPS_PORT:-8443}"
-PROD_HTTP_PORT="${METALMARK_HTTP_PORT:-8080}"
+# Must track deploy/compose.yaml's own defaults, or the `prod` gate probes a door
+# the deployment never opened.
+PROD_HTTPS_PORT="${METALMARK_HTTPS_PORT:-8790}"
+PROD_HTTP_PORT="${METALMARK_HTTP_PORT:-8791}"
 
 GATES=(secrets lint pytest frontend contract drill e2e walkthrough prod reset)
 RESULTS=()
@@ -576,6 +578,10 @@ prod_checks() {
   # so a service worker is refused there. The rule's target has to be a literal
   # address — `MAP localhost web` fails to resolve. Both measured; prod_probe.cjs
   # has the details. `npm ci` output is suppressed because it is not the subject.
+  #
+  # That `8080` is nginx's port *inside* the container and is deliberately not
+  # PROD_HTTP_PORT: this request goes to the web container's own address on the
+  # compose network, never through the published host door.
   docker run --rm --network "${PROD_PROJECT}_default" \
     -v "$ROOT/frontend":/work -v "$ROOT/scripts":/probe:ro -w /work \
     "$PLAYWRIGHT_IMAGE" \

@@ -80,8 +80,8 @@ docker compose up -d
 That is the whole thing. `up` does not return until the credentials exist and the schema is current, so
 there is nothing to wait for and nothing to run afterwards.
 
-Open **https://metalmark.local:8443** and sign up — **the first signup creates the household** (ADR-0027),
-so there is nothing to seed either. From the same machine, **http://localhost:8080** works immediately,
+Open **https://metalmark.local:8790** and sign up — **the first signup creates the household** (ADR-0027),
+so there is nothing to seed either. From the same machine, **http://localhost:8791** works immediately,
 with no certificate to install and still a working service worker.
 
 Then **trust Caddy's CA**, or every device will refuse the connection properly. There is no public DNS
@@ -101,9 +101,11 @@ A few things worth knowing once it is up:
 - **`METALMARK_SITE` is the name in the certificate.** A request with any other `Host` fails the TLS
   handshake rather than serving the app under a name the certificate does not cover. Changing it means
   `docker compose up -d` again — Caddy re-issues on start, and every client has to trust the new root.
-- **`METALMARK_HTTPS_PORT`** (8443) and **`METALMARK_HTTP_PORT`** (8080) move the two doors if something
-  else on the machine has them. Port 80 is not published; the compose file says where to add it if you
-  want an http→https redirect.
+- **`METALMARK_HTTPS_PORT`** (8790) and **`METALMARK_HTTP_PORT`** (8791) move the two doors. The defaults
+  are un-round on purpose — `8080` and `8443` are the ports most likely to already be taken on a machine
+  running other self-hosted services, and a collision there fails the very first `up` — so you should not
+  need them. Port 80 is not published; the compose file says where to add it if you want an http→https
+  redirect.
 - **Close signup once you are in.** Anyone who can reach the instance can join the household and read all
   of it, which is fine while it is just you. Add `METALMARK_OPEN_SIGNUP=false` to `.env` and run
   `docker compose up -d` to shut the door. It has to stay open until the first account exists.
@@ -136,7 +138,7 @@ and the two changes that matter most are not about the deployment at all:
 | `METALMARK_ENV` | `dev` | `prod`: `Secure` session cookie, no dev CORS, the fake aggregator refuses to exist |
 | Credentials | `secrets/metalmark_secret_key`, created by hand | generated on first boot, never rewritten |
 | Schema | migrated by hand | applied by a one-shot container before the api starts |
-| Reachable at | `http://localhost:5173` | `https://<METALMARK_SITE>:8443` (any device), `http://localhost:8080` (this one) |
+| Reachable at | `http://localhost:5173` | `https://<METALMARK_SITE>:8790` (any device), `http://localhost:8791` (this one) |
 | Installable, works offline | no | yes |
 
 **The two doors are two answers to the same problem.** Caddy's is the one for every device, and it is

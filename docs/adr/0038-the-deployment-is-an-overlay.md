@@ -59,7 +59,7 @@ front of it. The dev stack is not modified.**
    test/dev — so no environment variable can point a deployment at fabricated data.
 
 5. **Two doors, and the difference between them is a certificate.** `web` publishes
-   `127.0.0.1:8080` — loopback only — and Caddy publishes `METALMARK_HTTPS_PORT` (8443 by default).
+   `127.0.0.1:8791` — loopback only — and Caddy publishes `METALMARK_HTTPS_PORT` (8790 by default).
    The loopback door is plain HTTP and that is deliberate: it never leaves the machine, and `localhost`
    is a secure context by specification, so it is the one door that needs nothing installed to reach
    and still gets a service worker. Caddy is the door for every other device, and it is not optional —
