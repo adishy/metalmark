@@ -23,6 +23,7 @@ Every item in the order this plan addresses it, and where it stands. Status as o
 | — | Desktop layout | **Done** (`679a207` for the rules, then `a9da13e`, `93198b2`, `7d153f1`, `10d8331`, `2a05571`) |
 | — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, `6b26638`, ADR-0037) — with two honest limits, both recorded there and neither papered over. **One:** the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all. **Two, found after the first was recorded:** clearing that gate is not enough, because display also needs a registered service worker and `docker compose up` runs `npm run dev`, for which `vite-plugin-pwa` builds none. So notifications do not work on the stack as it ships today; the panel now says that instead of claiming they are on (`canShow()` asks permission *and* registration). **Both gates are now cleared by the deployment file** — `deploy/compose.yaml` builds `dist/` and serves it from nginx behind Caddy (ADR-0038, ADR-0039), and `./scripts/verify.sh prod` boots it from an empty volume and asserts from a browser that the worker registers. The dev stack is untouched, so limit two still describes `docker compose up`, which is what the panel's sentence is about |
 | — | **A standalone install** (appended mid-plan, 2026-09-20) | **Done** (`450bf98`, ADR-0039) — one file, one command, no clone: the images are published to GHCR, and the deployment generates its own credentials and applies its own schema on first boot. `docker-compose.prod.yml` and the root `Caddyfile` are deleted, superseded by `deploy/compose.yaml`. The plan's definition of done said "ready for the user's end-to-end run"; this is what makes that run possible on a machine that is not this one |
+| — | Session unreachable ≠ signed out | **Done** (`029de7e`) — moved out of "what this plan deliberately does not do" below, which had recorded it as a deliberate omission. It was the one `isError` branch that skipped §4.11, so the fix was that shape rather than the new design the earlier note assumed it needed |
 | — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | **Tabled by the user** (2026-09-20) — not started. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
 
 **Two notes on the order, both raised rather than taken unilaterally.**
@@ -429,9 +430,12 @@ happens in the UI, by the user, and is reported back as counts and statuses only
   Until there is an ADR for (3), the view shows position value, share and price age and says nothing about
   gain — a "gain/loss" whose currency policy nobody wrote down is worse than its absence.
   `InvestmentsView.tsx`'s header records the same points where the gap was hit.
-- **Telling "signed out" apart from "server unreachable".** `AuthContext`'s session probe treats *any*
-  failure of `GET /auth/me` as "not signed in" — a 5xx, or a dropped connection from an api container
-  being restarted, renders the sign-in page, which reads as an expired session. Found while investigating
-  an e2e flake (the flake itself was a dev-server reload, unrelated). Left undone deliberately: the honest
-  fix is a distinct unreachable state with its own screen, which is a design decision rather than a retry
-  loop, and no user has hit it. A self-hoster who restarts the api meets it once and reloads.
+- **Telling "signed out" apart from "server unreachable"** — *no longer on this list; done in `029de7e`.*
+  It sat here on the reasoning that the honest fix "is a design decision rather than a retry loop", and
+  that "no user has hit it". The second half was about to stop being true: the end-to-end run the
+  definition of done above closes with is the user's, on a stack whose containers they will plausibly
+  restart. The first half was simply mistaken
+  — §4.11 already mandates the error-plus-retry shape universally (`QueryStates.tsx`), so this was that
+  shape applied to the one branch that skipped it. The one decision that *was* real is recorded in
+  DESIGN.md §4.11: §4.11 says render the API's message, and when nothing answered there is no message to
+  render, so that single case substitutes its own and an `ApiError` still renders `detail` verbatim.
