@@ -126,7 +126,7 @@ def reidentified(account_set: AccountSet, *, salt: str = "b") -> AccountSet:
 
     This is the demo bridge's **observed** behaviour, not a hypothetical: two
     fetches moments apart returned identical amounts and descriptions shifted
-    one day forward, with every id re-minted (fixture README, correction 6).
+    one day forward, with every id re-minted (fixture README, correction 8).
 
     A connection pointed at the live demo bridge therefore accumulates
     duplicates, because the ids genuinely change and ``(account_id,

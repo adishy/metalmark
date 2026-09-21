@@ -98,7 +98,24 @@ implementation, so they are recorded here rather than rediscovered later.
    `act.*` are documented codes that the demo bridge will not produce, so their
    message wording is unverified — route on the **code prefix**, never on text.
 
-7. **The demo regenerates its data relative to *now*, so transaction ids and dates
+7. **The bridge has moved hosts, and the old one redirects to a *root*, not to the
+   same path.** `bridge.simplefin.org` answers every path — `/`, `/simplefin/info`,
+   a claim URL — with `302 → https://beta-bridge.simplefin.org/`. Two things follow
+   and only the first is obvious.
+
+   *Don't follow the redirect.* The obvious rescue for a token that names the old
+   host is to follow it, and it cannot work: the target is the new host's home
+   page, not `/simplefin/claim/…`, so a claim would POST to a homepage.
+
+   *A real token does not name the old host.* `bridge.simplefin.org/simplefin/create`
+   — the page a token is minted from — redirects too, so anyone who goes there is
+   moved to the new host *before* their token exists, and the token they copy
+   encodes the new host. Measured, not assumed: a token minted from the current
+   developers page decodes to `beta-bridge.simplefin.org/simplefin/claim/…`.
+   So the old-host case is unreachable rather than merely unlikely, which is why
+   `SimpleFinProvider.claim` explains it instead of trying to recover from it.
+
+8. **The demo regenerates its data relative to *now*, so transaction ids and dates
    shift on every fetch.** Two fetches moments apart returned the same amounts,
    descriptions and payees, one day later, with every id re-minted. This is the
    id-instability case ADR-0022 said only a real capture could reveal — and it

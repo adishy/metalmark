@@ -139,6 +139,13 @@ def _claim_status(exc: ProviderError) -> int:
         return 400
     if exc.status == 402:
         return 402
+    # A 3xx is the same shape as a spent token, and belongs in the same bucket: the
+    # token names an address the bridge no longer serves, so another one is the fix
+    # and re-sending this one cannot ever work. Without this it falls to the 502
+    # below — which reads as "the server is briefly broken", i.e. retry — and the
+    # user retries a request that is guaranteed to fail identically.
+    if exc.status is not None and 300 <= exc.status < 400:
+        return 400
     return 502
 
 

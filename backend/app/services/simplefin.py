@@ -418,6 +418,23 @@ class SimpleFinProvider:
                     secrets=secrets,
                 )
             return ClaimResult(access_url=access_url)
+        if 300 <= status < 400:
+            # The bridge has moved hosts once already (``bridge`` → ``beta-bridge``)
+            # and the old host still answers — with a 302 to the *new host's root*,
+            # not to the same path. So following it would post to a homepage, and
+            # rewriting the host is the only thing that could work. It is not worth
+            # doing on the strength of a token that cannot be produced any more:
+            # the old host redirects its own token-minting page, so anyone who goes
+            # there is moved before their token exists. What is worth doing is
+            # saying so — the alternative is a bare "HTTP 302" classified transient,
+            # which the UI turns into a 502 and a retry that can never succeed.
+            raise ProviderError(
+                "the bridge has moved and this setup token names its old address; "
+                "generate a new one at the bridge",
+                kind="auth",
+                status=status,
+                secrets=secrets,
+            )
         if status == 403:
             raise ProviderError(
                 "setup token was already claimed or is not recognized; "

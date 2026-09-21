@@ -16,6 +16,7 @@ import httpx
 import pytest
 
 from app.services.aggregator import ProviderError
+from app.services.connections import _claim_status
 from app.services.simplefin import (
     MAX_PAYLOAD_BYTES,
     SimpleFinProvider,
@@ -304,6 +305,49 @@ async def test_claim_of_a_used_token_is_auth_and_says_to_get_a_new_one() -> None
         await _provider(handler).claim(_token("https://bridge.example.com/claim/x"))
     assert caught.value.kind == "auth"
     assert "new one" in caught.value.message
+
+
+async def test_claim_of_a_token_naming_the_old_bridge_says_so() -> None:
+    """A redirect is not a transient failure, and reporting it as one is a trap.
+
+    The bridge has moved hosts, and its old address answers *every* path —
+    including a claim — with a 302 to the new host's **root**. So following it
+    would post to a homepage; the token is simply from the old place and another
+    one is the only fix. Left unclassified it surfaces as a bare "HTTP 302", which
+    the API turns into a 502 — advice to retry a request that cannot ever succeed.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(302, headers={"Location": "https://beta.example.com/"})
+
+    with pytest.raises(ProviderError) as caught:
+        await _provider(handler).claim(_token("https://bridge.example.com/claim/x"))
+
+    assert caught.value.kind == "auth"
+    assert "moved" in caught.value.message
+    assert "new one" in caught.value.message  # the same advice a spent token gets
+    assert "bridge.example.com" not in repr(caught.value)
+    assert [str(r.url) for r in seen] == ["https://bridge.example.com/claim/x"]
+
+
+def test_a_moved_bridge_is_a_bad_request_and_not_a_bad_gateway() -> None:
+    """The other half of the contract above, which lives here because it is the
+    same decision seen from the API's side: ``_claim_status`` is what turns a
+    provider's status into the one a client acts on.
+
+    A 502 says "the server is briefly broken, try again". For a token naming an
+    address the bridge no longer serves, trying again is the one thing that
+    cannot work — so it is a 400, in the bucket with a spent token.
+    """
+    moved = ProviderError("the bridge has moved", kind="auth", status=302)
+    spent = ProviderError("already claimed", kind="auth", status=403)
+    upstream = ProviderError("boom", kind="transient", status=503)
+
+    assert _claim_status(moved) == 400
+    assert _claim_status(spent) == 400
+    assert _claim_status(upstream) == 502
 
 
 async def test_claim_accepts_a_url_safe_token() -> None:
