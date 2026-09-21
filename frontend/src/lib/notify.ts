@@ -86,6 +86,23 @@ async function registration(): Promise<ServiceWorkerRegistration | null> {
   return (await navigator.serviceWorker.getRegistration()) ?? null;
 }
 
+/** Whether this page can *actually* display a notification, right now.
+ *
+ *  Permission is necessary and not sufficient. Display goes through the service
+ *  worker's registration — `new Notification(...)` is not an option (see below)
+ *  — so a page with no registered worker shows nothing, whatever the permission
+ *  says. And that is not a corner case: it is every `vite dev` session, which is
+ *  what `docker compose up` runs, because `vite-plugin-pwa` builds the worker
+ *  only for a production build.
+ *
+ *  So the panel asks this before it says "on". A control that reports a state
+ *  the page cannot reach is the same lie as a button that does nothing, and this
+ *  one is worse: the reader has just granted a permission and watched the app
+ *  say it worked. */
+export async function canShow(): Promise<boolean> {
+  return support() === "granted" && (await registration()) !== null;
+}
+
 /** Show every notice not yet shown, and return how many were.
  *
  *  The cursor advances **per notice, after it is shown** — not once at the end

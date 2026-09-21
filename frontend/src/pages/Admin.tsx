@@ -20,7 +20,6 @@ import {
   useCancelJob,
   useConnections,
   useConnectionDefaults,
-  useRefreshNotices,
   useSyncJobs,
   useSyncRunDetail,
   useSyncRuns,
@@ -31,9 +30,8 @@ import type { RunStatus, SyncJob, SyncRun } from "@/api/types";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { Instant, Time } from "@/components/datetime";
 import { Button, Select, Spinner } from "@/components/form";
+import NoticePermission from "@/components/NoticePermission";
 import { formatDuration } from "@/lib/format";
-import * as notify from "@/lib/notify";
-import type { NotifySupport } from "@/lib/notify";
 
 // ---- presentational bits ---------------------------------------------------
 
@@ -86,90 +84,6 @@ function Card({ title, note, children }: { title: string; note?: string; childre
       </div>
       {children}
     </section>
-  );
-}
-
-/**
- * The desktop-notification permission, asked for from a click and from nowhere
- * else (ADR-0037 §4).
- *
- * A browser permission prompt that appears unbidden is the one everyone
- * reflexively denies, and a denial is permanent for the origin — so the request
- * lives behind a button, and the button is preceded by a sentence saying what
- * will be sent. That sentence is the point of the control: *the institution and
- * what went wrong, never an amount*, which is the same limit the notice's body
- * is built to (ADR-0037 §6).
- *
- * Three states render instead of a button, and all three matter. Granted is the
- * state the button would be lying about. Denied cannot be re-asked — a page may
- * call `requestPermission()` as often as it likes after a denial and the browser
- * answers "denied" without prompting, so the copy has to say where the fix
- * actually is rather than offering a control that does nothing. Unsupported is
- * the browser saying it has no such facility here at all, and it is the one a
- * self-hosted deployment over http:// is most likely to meet.
- */
-function NoticePermission() {
-  // The browser's answer, which can change without this page being told — a user
-  // who unblocks the site in their browser's own settings should not have to
-  // reload to see that said. So it is read per render, and the click's own
-  // answer (if there is one) takes precedence for this session.
-  const [answered, setAnswered] = useState<NotifySupport | null>(null);
-  const state = answered ?? notify.support();
-  const refresh = useRefreshNotices();
-
-  // `unsupported` is a real answer, and it is not a rare one: the API sits
-  // behind a secure-context gate, so `http://<lan-host>:5173` — the ordinary way
-  // to reach a self-hosted app — has no `navigator.serviceWorker` at all. A
-  // control that does nothing is worse than a sentence that explains the
-  // absence, so this branch says which two things are missing rather than
-  // quietly rendering a panel that will never notify.
-  if (state === "unsupported") {
-    return (
-      <p className="mt-2 text-xs text-fg-muted" data-testid="notify-state">
-        This browser cannot show desktop notifications for this page. They need https:// or
-        localhost, and a browser that supports them.
-      </p>
-    );
-  }
-
-  if (state === "granted") {
-    return (
-      <p className="mt-2 text-xs text-fg-muted" data-testid="notify-state">
-        Desktop notifications are on. A bank connection that breaks will say so here.
-      </p>
-    );
-  }
-
-  if (state === "denied") {
-    return (
-      <p className="mt-2 text-xs text-warning" data-testid="notify-state">
-        Desktop notifications are blocked for this site. A page cannot ask twice — the
-        permission has to be changed in this browser's own settings for the site.
-      </p>
-    );
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <Button
-        variant="secondary"
-        onClick={async () => {
-          const next = await notify.requestPermission();
-          setAnswered(next);
-          // The poll has been running all along and declining to show anything
-          // while permission was missing, so ask it again now rather than
-          // leaving the first notice to wait out the rest of the minute.
-          if (next === "granted") void refresh();
-        }}
-        data-testid="notify-enable"
-      >
-        Enable desktop notifications
-      </Button>
-      <span className="text-xs text-fg-muted">
-        A connection that breaks will say so here — the institution and what went wrong, and no
-        amount or account.
-      </span>
-    </div>
   );
 }
 

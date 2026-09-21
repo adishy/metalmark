@@ -166,6 +166,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("canShow", () => {
+  it("is false for a granted browser with no worker to show through", async () => {
+    // The state `docker compose up` puts a granted browser in: `vite dev` serves
+    // the app, `vite-plugin-pwa` builds no worker for it, and the panel would
+    // otherwise report "on" for a page that can display nothing. Asked
+    // separately from `support()` for exactly this reason — permission and
+    // delivery are different questions and the deployment answers them
+    // differently.
+    browser({ permission: "granted", registration: false });
+
+    expect(notify.support()).toBe("granted");
+    expect(await notify.canShow()).toBe(false);
+  });
+
+  it("is true only when there is both permission and a worker", async () => {
+    browser({ permission: "granted", registration: true });
+    expect(await notify.canShow()).toBe(true);
+
+    browser({ permission: "default", registration: true });
+    expect(await notify.canShow()).toBe(false);
+
+    browser({ permission: "denied", registration: true });
+    expect(await notify.canShow()).toBe(false);
+  });
+
+  it("is false where the API does not exist at all", async () => {
+    expect(await notify.canShow()).toBe(false);
+  });
+});
+
 describe("deliver", () => {
   it("shows a notice once, then never again", async () => {
     const { showNotification } = browser();

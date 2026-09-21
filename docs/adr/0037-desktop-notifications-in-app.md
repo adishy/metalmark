@@ -127,7 +127,31 @@ record the decision to notify on the server rather than deciding in the browser.
   plain HTTP on a LAN hostname cannot show notifications at all** — only `https://` or `localhost` can.
   ADR-0002 puts this app on a LAN behind a VPN, which makes that the *likely* first deployment, so the
   absence has to be explained rather than left as a control that does nothing; that is why
-  `unsupported` renders a sentence. Serving the app over TLS — or using it on the host itself — is what
-  turns this on.
+  `unsupported` renders a sentence. Serving the app over TLS — or using it on the host itself — clears
+  *this* gate, and **only this one**: see the next bullet.
+- **Follow-ups (the second gate, and the one a granted browser still meets today):** secure context is
+  necessary and not sufficient, because display goes through `registration.showNotification` and the
+  **shipped deployment registers no service worker**. `frontend/Dockerfile` runs `CMD ["npm", "run",
+  "dev"]`, so `docker compose up` serves the Vite dev server; `vite-plugin-pwa` builds a worker only for
+  a production build (there is no `devOptions` in `vite.config.ts`). Measured, not inferred:
+  `curl http://localhost:5173/` returns HTML whose only mention of a manifest is a comment saying
+  `vite-plugin-pwa` injects the link — no `<link rel="manifest">` element, because that build never made
+  one. The same tree's `npm run build` does emit `dist/sw.js`, with
+  `importScripts("/sw-notify.js")` in it. So on the current deployment a granted browser has permission,
+  has no worker, and `deliver()` can display nothing.
+  That combination used to be rendered as **"Desktop notifications are on."** — a control reporting a
+  state the page cannot reach, which is a worse lie than a button that does nothing because the reader
+  has just granted a permission and watched the app confirm it worked. `notify.canShow()` now asks
+  permission *and* registration, and the panel splits `granted` in two, saying where the notices actually
+  are (the run history) when there is no worker. The fix is copied — a browser with no worker is told so
+  plainly, and `NoticePermission` is its own component precisely so that branch is reachable by a test,
+  since neither jsdom nor the e2e stack has `navigator.serviceWorker` at all.
+  **Consequence for the deployment, unresolved and deliberately not papered over:** notifications do not
+  work under `docker compose up`, and cannot until the `web` service runs a production build. That is a
+  container change, and the architecture doc has already settled what it looks like —
+  `docs/ARCHITECTURE.md:10-18` draws `Caddy (TLS)` in front of `web (nginx) | static React PWA`, which
+  clears *both* gates at once, while the compose file today serves the dev server over plain HTTP and so
+  fails both. The doc and the stack disagree; this ADR records the disagreement rather than resolving it,
+  because the deployment shape is its own decision and not this feature's to make.
 - **Follow-ups:** if the webhook is later removed or generalised, this ADR records that it is one sink
   among several, not the owner of the notification rule.
