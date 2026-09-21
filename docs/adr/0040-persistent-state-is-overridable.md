@@ -78,7 +78,12 @@ also state the install's one `.env` line rather than claiming it has none.**
   full cluster (`PG_VERSION` 16, `base/`, `pg_wal/`) is on the host. The directory must be **dedicated and
   empty** — anything else in it is re-owned too — and the corollary is that the operator's own account can
   no longer read it. "Your backup tooling can reach it" is true of root-run and snapshot tooling, not of a
-  per-user `rsync`.
+  per-user `rsync`. That last sentence was written from reasoning and measured afterwards, by the gate
+  failing: `scripts/verify.sh` read `PG_VERSION` off the host and was green on Docker Desktop and red on a
+  Linux runner, *for the same directory*, because Desktop maps the container's ownership back to the
+  invoking user and Linux does not. So on Linux this cost is not a caveat about backup tooling in the
+  abstract — the operator cannot `ls` their own ledger. The gate now reads it as root, through a throwaway
+  mount of the host path, and prints the mode and owner it finds.
 
 - **Negative / costs — a new failure that reads as a different one.** uid 999 must be able to *traverse*
   the secrets directory and every parent. `mkdir -m 700` on a secrets directory — a natural instinct —

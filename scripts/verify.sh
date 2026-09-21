@@ -720,10 +720,30 @@ prod_path_checks() {
     "all three credentials are on the host" "${missing:-<all present>}"
   [ -z "$missing" ] || fail=1
 
+  # …but the database directory is read differently, and this cost a red CI run to
+  # learn. `[ -f "$dir/db/PG_VERSION" ]` is true on Docker Desktop and false on a
+  # Linux runner *for the same directory*: Desktop maps the ownership Postgres sets
+  # back to the invoking user, and Linux does not. The file is there in both cases;
+  # what differs is the account reading it. Measured on the runner — uid 1001,
+  # PGDATA `drwx------ postgres postgres` — it surfaced as a bare `<absent>` naming
+  # neither the directory nor the permission.
+  #
+  # That is ADR-0040's first cost met in the gate that proves the feature, so the
+  # check moves to the account that pays it: the host directory, mounted into a
+  # throwaway root container, which is also how the operator has to reach it. It is
+  # deliberately not read out of the running `db` container — this mounts the host
+  # path on its own, so it would still report a cluster if the deployment were
+  # somehow reading a volume instead. The mode and owner are printed because they
+  # are the thing the operator is buying into.
+  local hostdb pgver
+  hostdb=$(docker run --rm --user 0:0 --entrypoint sh -v "$dir/db":/pgdata:ro caddy:2-alpine \
+    -c 'printf "%s " "$(stat -c "%a %u:%g" /pgdata)"; cat /pgdata/PG_VERSION' 2>/dev/null \
+    | tr -d '\r' || true)
+  pgver="${hostdb##* }"
   printf '  %-4s %-52s %s\n' \
-    "$([ -f "$dir/db/PG_VERSION" ] && echo ok || echo FAIL)" \
-    "Postgres built a cluster on the host" "$(cat "$dir/db/PG_VERSION" 2>/dev/null || echo '<absent>')"
-  [ -f "$dir/db/PG_VERSION" ] || fail=1
+    "$([ "$pgver" = "16" ] && echo ok || echo FAIL)" \
+    "Postgres built a cluster on the host" "${hostdb:+mode owner, then PG_VERSION: $hostdb}"
+  [ "$pgver" = "16" ] || fail=1
 
   # The modes are load-bearing rather than cosmetic — 0644 on `postgres_password`
   # is what lets uid 999 read it, and is the reason that one file differs from the

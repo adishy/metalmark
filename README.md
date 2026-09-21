@@ -154,7 +154,8 @@ A few things worth knowing once it is up:
     `chown`s everything inside it to uid 999, so pointing it at a directory that holds anything else
     re-owns that content too.
   - **You will not be able to read it afterwards.** That is expected, not a fault, and it is why cleaning
-    one of these up takes a container.
+    one of these up takes a container. Snapshot tooling and anything running as root are unaffected; a
+    per-user backup that walks the tree itself is not, and has to run as root.
   - The secrets directory, and every parent of it, must be **traversable by uid 999** — `0755` is fine,
     `0700` is not. When Postgres cannot traverse it, it reports an authentication failure that names
     neither the directory nor the permission.
