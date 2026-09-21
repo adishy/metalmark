@@ -101,6 +101,11 @@ A few things worth knowing once it is up:
 - **`METALMARK_SITE` is the name in the certificate.** A request with any other `Host` fails the TLS
   handshake rather than serving the app under a name the certificate does not cover. Changing it means
   `docker compose up -d` again — Caddy re-issues on start, and every client has to trust the new root.
+  **An IP address is a valid value** — Caddy issues a certificate carrying it as an `IP Address` SAN and
+  serves it to a client sending no SNI, which is what a browser does for an IP literal. So
+  `METALMARK_SITE=192.168.1.50` gives you a trusted `https://192.168.1.50:8790`. It is also the brittle
+  choice: the certificate names that exact address, so a new DHCP lease breaks it until you set the new
+  one and come back up. A LAN name, or a tailnet name, survives being renumbered.
 - **`METALMARK_HTTPS_PORT`** (8790) and **`METALMARK_HTTP_PORT`** (8791) move the two doors. The defaults
   are un-round on purpose — `8080` and `8443` are the ports most likely to already be taken on a machine
   running other self-hosted services, and a collision there fails the very first `up` — so you should not
