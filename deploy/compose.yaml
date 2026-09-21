@@ -1,0 +1,347 @@
+# MetalMark — the deployment. Standalone: this file is the whole install.
+#
+#   docker compose up -d
+#
+# Nothing else is required. No clone, no `.env`, no build tools, and no
+# credential to write down anywhere: the images come from GHCR (ADR-0039) and the
+# three credentials this stack needs are generated on first boot into a named
+# volume by `secret-init` below. Open https://<METALMARK_SITE>:8443 and sign up —
+# the first signup creates the household (ADR-0027), so there is nothing to seed
+# either. The README has the operator's version of this, including the one
+# command that makes a browser trust the certificate.
+#
+# **No `name:` on purpose.** The compose project is named after the directory you
+# run this in, which is what a stranger installing it wants and, more
+# importantly, is what keeps a checkout from landing on top of the dev stack:
+# `docker-compose.yml` in the repo root pins `name: metalmark`, so a developer who
+# runs this file from a clone gets a *separate* project and cannot replace their
+# dev containers by accident. scripts/verify.sh passes `-p` and pins it outright.
+#
+# Two rules for what is a literal here and what is `${interpolated}`:
+#
+#   * **Addresses and identities are literal.** Which host the api dials, which
+#     role it connects as, which database it opens — all stated, never read from
+#     a variable. Every one of them has to agree across seven services and a
+#     migration, and a variable that agrees in six places is a failure that
+#     surfaces as `role "…" does not exist`.
+#   * **Deployment-specific values are interpolated**, and they are exactly the
+#     three things a target machine decides for itself: the hostname on the
+#     certificate, the two published ports, and whether signup stays open. None
+#     has a dev value that could be inherited by mistake.
+#
+# That second rule is not decoration. `METALMARK_ENV: prod` is written as a
+# literal for precisely this reason: it *does* have a dev value, `.env` sets it
+# to `dev`, and an interpolated `${METALMARK_ENV:-prod}` therefore resolved to
+# `dev` on every checkout that has one — measured, not assumed. The deployment
+# would then have been the dev api behind nginx: the localhost CORS allowance
+# still open, the session cookie still `Secure`-less, and the fake aggregator
+# still selectable.
+
+services:
+  # ---------------------------------------------------------------------------
+  # The credentials, once, before anything that needs one.
+  # ---------------------------------------------------------------------------
+  # Three files into a named volume — the Fernet key that encrypts bank
+  # credentials at rest, the Postgres owner's password, and the app role's.
+  # `app.bootstrap_secrets` never overwrites an existing file, so restarting the
+  # stack cannot rotate the key out from under the data it decrypts; deleting the
+  # volume is the only way to get a new one, which is the right shape for a
+  # deliberate act. Nothing it prints is a credential.
+  secret-init:
+    image: ${METALMARK_API_IMAGE:-ghcr.io/adishy/metalmark-api:latest}
+    build:
+      context: ../backend
+    command: ["python", "-m", "app.bootstrap_secrets"]
+    environment:
+      METALMARK_SECRETS_DIR: /secrets
+    volumes:
+      - metalmark_secrets:/secrets
+    restart: "no"
+    # The image's healthcheck curls the api's /healthz, which this one-shot does
+    # not serve — left on, it would report this container unhealthy every run.
+    healthcheck:
+      disable: true
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: metalmark
+      POSTGRES_DB: metalmark
+      # `_FILE`, not `POSTGRES_PASSWORD`: the password is generated into the
+      # volume above, and an environment variable would put it in `docker
+      # inspect` and in every process listing on the host. The Postgres image
+      # reads this one natively.
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - metalmark_secrets:/secrets:ro
+    depends_on:
+      secret-init:
+        condition: service_completed_successfully
+    # Both `ports:` absent and `db_data` named: nothing outside this compose
+    # network talks to the database, and a Postgres listening on a laptop's
+    # interface is reachable from whatever network that laptop joins next. It is
+    # also what lets the `prod` gate boot this file beside the dev stack, which
+    # already holds 5432.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metalmark -d metalmark"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # The schema, applied. The one thing a fresh install cannot skip and the one
+  # thing the api deliberately does not do for itself (migrations are always
+  # explicit — CI's `contract`, `drill`, `e2e` and `prod` jobs each run it as its
+  # own step, and that is the behaviour being kept).
+  # ---------------------------------------------------------------------------
+  # Consumed through `service_completed_successfully` below, so `up -d` does not
+  # return until the schema is current — which is what makes "one command" true
+  # rather than "one command, then wait and hope". `alembic upgrade head` is
+  # idempotent, so a second `up` is a no-op.
+  migrate:
+    image: ${METALMARK_API_IMAGE:-ghcr.io/adishy/metalmark-api:latest}
+    build:
+      context: ../backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      METALMARK_ENV: prod
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: metalmark
+      POSTGRES_USER: metalmark
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+      APP_DB_USER: metalmark_app
+      APP_DB_PASSWORD_FILE: /secrets/app_db_password
+      METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
+    volumes:
+      - metalmark_secrets:/secrets:ro
+    depends_on:
+      secret-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true
+
+  api:
+    image: ${METALMARK_API_IMAGE:-ghcr.io/adishy/metalmark-api:latest}
+    build:
+      context: ../backend
+    # No `command:` — the image's own CMD is uvicorn without `--reload`, which is
+    # the one difference from the dev stack and the one thing worth not restating.
+    environment:
+      METALMARK_ENV: prod
+      METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: metalmark
+      POSTGRES_USER: metalmark
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+      APP_DB_USER: metalmark_app
+      APP_DB_PASSWORD_FILE: /secrets/app_db_password
+      METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
+      METALMARK_DEFAULT_BASE_CURRENCY: ${METALMARK_DEFAULT_BASE_CURRENCY:-USD}
+      # Open by default, and it has to be: a fresh install has no household and
+      # no user, so closing this before the first signup leaves a deployment
+      # nobody can enter. Set `METALMARK_OPEN_SIGNUP=false` in the environment
+      # once the household exists and the door should shut (ADR-0027).
+      METALMARK_OPEN_SIGNUP: ${METALMARK_OPEN_SIGNUP:-true}
+      # In prod the fake aggregator is refused outright rather than selected, so
+      # this line is documentation as much as configuration: the claim endpoint's
+      # provider is the real one, and no environment variable can point a
+      # deployment at fabricated data.
+      METALMARK_SIMPLEFIN_PROVIDER: simplefin
+    volumes:
+      - metalmark_secrets:/secrets:ro
+    depends_on:
+      secret-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    # Not published. The api is behind nginx now, and nothing should reach it
+    # except through the web container — which is also what keeps the whole
+    # deployment on one origin, with no CORS anywhere in it.
+    restart: unless-stopped
+
+  worker:
+    # The same image as the api — one build, `python -m app.worker` instead of
+    # uvicorn. A `--build` here would tag a second local copy of an image that
+    # already exists under exactly this reference.
+    image: ${METALMARK_API_IMAGE:-ghcr.io/adishy/metalmark-api:latest}
+    build:
+      context: ../backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      METALMARK_ENV: prod
+      METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: metalmark
+      POSTGRES_USER: metalmark
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+      APP_DB_USER: metalmark_app
+      APP_DB_PASSWORD_FILE: /secrets/app_db_password
+      METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
+    volumes:
+      - metalmark_secrets:/secrets:ro
+    depends_on:
+      secret-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    # A worker that dies is silent, which is the one thing sync must never be:
+    # the api keeps serving, the panel keeps drawing, "Sync now" keeps accepting,
+    # and no job is ever consumed again. That is worse here than on a laptop,
+    # because nobody is watching. `wait_for_database` handles the ordinary reason
+    # it would exit (a database that is not migrated yet); this covers the rest.
+    restart: unless-stopped
+    # The image's healthcheck is the api's /healthz, which the worker does not
+    # serve — left on, every deployment would show a permanently unhealthy
+    # container that is in fact working.
+    healthcheck:
+      disable: true
+
+  web:
+    # The built PWA on nginx, published alongside the api image (ADR-0039).
+    # This is the image that matters for a deployment: `npm run build` is the only
+    # thing that produces `dist/sw.js`, and with no service worker the app cannot
+    # display a desktop notification at all (ADR-0037).
+    image: ${METALMARK_WEB_IMAGE:-ghcr.io/adishy/metalmark-web:latest}
+    build:
+      context: ../frontend
+      target: prod
+    depends_on:
+      - api
+    ports:
+      # Loopback of the machine running the stack, and nowhere else. Plain http is
+      # acceptable on that interface precisely because it never leaves the
+      # machine, and `localhost` is a secure context by specification — so this is
+      # the one door that needs no certificate installed and still gets a service
+      # worker. It is the door for the machine itself; Caddy below is the one for
+      # every other device.
+      - "127.0.0.1:${METALMARK_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      # nginx's own image has no healthcheck, and caddy below waits on this one
+      # rather than on the container merely existing — otherwise the first request
+      # through the proxy can land in the gap between started and listening.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "${METALMARK_HTTPS_PORT:-8443}:443"
+      # Port 80 is deliberately not published. Its only job would be an
+      # http→https redirect for someone who types a bare hostname, and the cost
+      # is the port most likely to be taken on a machine that is also running
+      # something else. Reach the app at https:// explicitly; add `- "80:80"`
+      # here and a `:80` site to the Caddyfile to have the redirect.
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      # The local CA and everything it has issued. A named volume rather than an
+      # anonymous one, so that `up`/`down` does not regenerate the CA — which
+      # would silently invalidate the trust every client installed, and present
+      # as a certificate error that looks like the deployment is broken.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+# -----------------------------------------------------------------------------
+# The Caddyfile, inlined.
+# -----------------------------------------------------------------------------
+# It lives here rather than in a file beside this one because a deployment is
+# meant to be a single thing you can fetch and run — and because the site address
+# has to be interpolated by *compose*, which cannot reach inside a file it only
+# mounts.
+#
+# That distinction was the whole reason this is not a separate Caddyfile with
+# `{$METALMARK_SITE}` in it. Caddy resolves `{$…}` from its **own** environment
+# at startup, so the variable would have to be passed into the container as well;
+# and a mounted file is not interpolated by compose, so setting the variable
+# would look like it worked while changing nothing. Here there is one expansion,
+# by the tool that is already reading this document, and it cannot go stale.
+configs:
+  caddyfile:
+    content: |
+      # The TLS door. Serves :443 inside the compose network, published on the
+      # host as METALMARK_HTTPS_PORT (8443 by default, since 443 is the sort of
+      # port something else may already want).
+      #
+      # Why TLS at all, on an app that is LAN/VPN-only (ADR-0002) and never sees
+      # the internet: a browser's service worker — the thing that displays a
+      # desktop notification, which is what `sw.js` is for — is gated on a
+      # *secure context*. `localhost` counts; a LAN hostname does not, over plain
+      # http. And there is a second, harder reason in the same direction:
+      # METALMARK_ENV=prod sets the session cookie's `Secure` flag (api/auth.py),
+      # so a browser on another machine reaching this over http would not store
+      # the cookie and could not log in at all. Neither of those is a
+      # wire-tapping story. The certificate unlocks the API.
+
+      # The site address has to name the host you will actually type, and it is
+      # interpolated for that reason: Caddy obtains a certificate for the names
+      # it is *told* about, and there is no default that covers a LAN. A bare
+      # `:443` — the obvious way to write "any host" — measures as a server with
+      # no certificate at all: the TLS handshake is refused with `tlsv1 alert
+      # internal error`, which looks like a broken deployment rather than a
+      # missing hostname.
+      #
+      # So a real deployment sets METALMARK_SITE — `metalmark.tailnet.ts.net`, or
+      # the machine's LAN name — and that name is then in the URL and in the
+      # certificate. The default, `localhost`, is what the machine itself and the
+      # `prod` gate use.
+      ${METALMARK_SITE:-localhost}:443 {
+      	# A LAN deployment has no public DNS name for ACME to validate, so Caddy's
+      	# own CA issues the certificate instead. The trade is that every client has
+      	# to trust that CA once — the README has the two commands, and it is worth
+      	# doing properly: a browser that merely clicks through a certificate
+      	# warning is on an origin with a *certificate error*, and service workers
+      	# are refused there outright. "Ignore it and continue" is the one response
+      	# that does not work.
+      	tls internal
+
+      	encode zstd gzip
+
+      	# Applied here rather than in nginx on purpose: Caddy proxies every
+      	# response on the door that other devices use, while nginx's `add_header`
+      	# is *not* inherited by a location block that sets one of its own — and
+      	# frontend/nginx.conf sets Cache-Control in four of them, so the same
+      	# three lines would have to be repeated there or they would quietly apply
+      	# to some routes and not others. Half-applied security headers read as
+      	# applied. The loopback door does not send them; a client that never
+      	# leaves the machine is the one case where that costs nothing.
+      	header {
+      		Referrer-Policy strict-origin-when-cross-origin
+      		X-Content-Type-Options nosniff
+      		X-Frame-Options DENY
+      	}
+
+      	# Everything, /api included, goes to the web container, which serves the
+      	# built SPA and forwards /api to the api service itself. So the whole
+      	# deployment has one origin and no CORS anywhere in it. (ARCHITECTURE §1
+      	# draws Caddy splitting /api off one hop earlier; the split happens inside
+      	# nginx instead. Same shape, and it puts the fork where the routes already
+      	# live.)
+      	reverse_proxy web:8080
+      }
+
+volumes:
+  db_data:
+  # The generated credentials. Separate from db_data on purpose: it holds the
+  # Fernet key, so it is the one volume whose loss is not survivable by
+  # re-running a migration — an access URL encrypted with a key that no longer
+  # exists cannot be recovered, and its absence presents as a sync that fails
+  # authentication for no visible reason. Back this up with the database.
+  metalmark_secrets:
+  caddy_data:
+  caddy_config:

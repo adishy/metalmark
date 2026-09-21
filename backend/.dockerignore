@@ -1,0 +1,23 @@
+# What the api image must not contain, and one line here is a security boundary
+# rather than a size optimisation: the Dockerfile ends `COPY . .`, and that image
+# is published to a registry (ADR-0039), so anything that survives this file is
+# shipped — including to whoever pulls it. `.env` and `.env.*` are excluded for
+# exactly that reason, not because a build needs them: the app reads its
+# configuration from the environment and its signing key from a mounted file.
+#
+# The rest is build context. `.venv` is 291 MB measured, uploaded on every build
+# and copied into the image at /app/.venv — where it does nothing at all, since
+# the install below is `--system` (UV_SYSTEM_PYTHON=1) precisely so a dev
+# bind-mount over /app cannot shadow it. The caches are regenerated.
+
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+.env
+.env.*

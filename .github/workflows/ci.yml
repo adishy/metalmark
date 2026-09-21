@@ -29,6 +29,29 @@ concurrency:
 # ends with them removed.
 jobs:
   # --------------------------------------------------------------------------
+  # Secrets: no credential in the worktree, in any commit, or in the built image.
+  # The image half is asserted by the `prod` job, which asks a running container;
+  # the two file halves are here, on a bare checkout with no services.
+  # --------------------------------------------------------------------------
+  secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every commit on every ref is scanned, so the history has to be
+          # present. The default depth-1 checkout would make that half of the
+          # check pass by having nothing to read — a gate that is green because
+          # it cannot see, which is the failure mode this whole job exists to
+          # avoid. Measured: `git rev-list --all --count` is 1 on a shallow clone.
+          fetch-depth: 0
+
+      # Never prints what it matched — only `path:line` and the rule name. A
+      # scanner that echoes a leaked token into a CI log has found the secret and
+      # published it, which is the accident it exists to prevent.
+      - name: Scan the worktree and every commit
+        run: ./scripts/secret_scan.sh
+
+  # --------------------------------------------------------------------------
   # Backend: lint + pytest against a real Postgres (tests recreate metalmark_test)
   # --------------------------------------------------------------------------
   backend:
@@ -248,11 +271,16 @@ jobs:
         run: docker compose down -v
 
   # --------------------------------------------------------------------------
-  # Deployment: boot docker-compose.prod.yml from an empty volume and probe it.
-  # The only job that builds the frontend for production, serves it the way
+  # Deployment: boot deploy/compose.yaml from an empty volume and probe it. The
+  # only job that builds the frontend for production, serves it the way
   # ARCHITECTURE §1 draws, and therefore the only one that can reach the service
   # worker — which is what makes a desktop notification possible at all, and
   # which no gate could reach before (ADR-0037's gap, closed by ADR-0038).
+  #
+  # It also boots the deployment the way a *stranger* does: no `secrets/`
+  # directory is created in this job any more, because deploy/compose.yaml
+  # generates its own credentials and applies its own migrations. If either of
+  # those regresses, this job is what notices.
   # --------------------------------------------------------------------------
   prod:
     runs-on: ubuntu-24.04
@@ -262,11 +290,6 @@ jobs:
       PROD_PROJECT_NAME: metalmark-prod
     steps:
       - uses: actions/checkout@v7
-
-      - name: Create runtime secret (Fernet key)
-        run: |
-          mkdir -p secrets
-          openssl rand -base64 32 | tr '+/' '-_' > secrets/metalmark_secret_key
 
       # The gate itself rather than a copy of its steps: `scripts/verify.sh` is
       # what a developer runs, and the whole point of it is that a green run here
@@ -370,3 +393,150 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  # --------------------------------------------------------------------------
+  # Publish: push the two images to GHCR, then boot *those* and check them.
+  #
+  # Publishing is what makes the install one command. Without it a target machine
+  # needs a clone, Node, a frontend build and a Python toolchain; with it, the
+  # deployment file is the whole install (ADR-0039).
+  #
+  # `needs:` every verifying job on purpose: `latest` is what a stranger's
+  # `docker compose up -d` pulls, so nothing reaches that tag that has not passed
+  # the suite. The alternative — publish early so the later jobs can test the
+  # artifact — puts a possibly-broken image in front of the one audience with no
+  # context to debug it. The artifact is instead verified here, after the push,
+  # by the same gate that verified the source.
+  # --------------------------------------------------------------------------
+  publish:
+    runs-on: ubuntu-24.04
+    needs: [secrets, backend, frontend, contract, drill, e2e, prod]
+    # Only on a push: a PR from a fork gets a read-only token and could not push
+    # to the registry at all, so the job would fail for a reason that has nothing
+    # to do with the change under review.
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PROD_PROJECT_NAME: metalmark-prod
+    steps:
+      - uses: actions/checkout@v7
+
+      # GHCR rejects any path with an uppercase letter in it, and a repository
+      # owner's login may well have one — so the prefix is lowercased rather than
+      # assumed. `Adishy/metalmark` would otherwise fail the push with an error
+      # about the reference format that does not mention case at all.
+      - name: Image prefix
+        id: prefix
+        run: |
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "value=ghcr.io/${owner}/metalmark" >> "$GITHUB_OUTPUT"
+
+      # Majors checked against the registry rather than remembered: v7/v4/v4.
+      # `build-push-action@v6` and `login-action@v3` — the obvious guesses from
+      # this repo's own v-pinning habit — do not resolve to what they used to,
+      # and a wrong major fails the job before it builds anything.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two tags, and both are needed: `sha-<full>` is what this job then boots
+      # (so the artifact tested is the artifact pushed, not whatever `latest`
+      # happens to be by the time the next step runs), and `latest` is what the
+      # deployment file asks for when a target machine runs `docker compose up`.
+      #
+      # `latest` moves on main only. A branch push still publishes its own
+      # sha-tagged images — useful, and harmless — without changing what a
+      # stranger gets.
+      #
+      # Built here rather than inline in `tags:` because the two cases produce
+      # different *numbers* of tags, and a `tags:` list with a conditionally
+      # empty line in it is a list with an empty entry in it.
+      - name: Image tags
+        id: tags
+        run: |
+          prefix='${{ steps.prefix.outputs.value }}'
+          {
+            echo "api<<TAGS"
+            echo "${prefix}-api:sha-${GITHUB_SHA}"
+            if [ "${GITHUB_REF}" = "refs/heads/main" ]; then echo "${prefix}-api:latest"; fi
+            echo "TAGS"
+            echo "web<<TAGS"
+            echo "${prefix}-web:sha-${GITHUB_SHA}"
+            if [ "${GITHUB_REF}" = "refs/heads/main" ]; then echo "${prefix}-web:latest"; fi
+            echo "TAGS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push the api image (amd64 + arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.api }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      # arm64 as well, because the machines people self-host on are frequently
+      # not amd64 — a Raspberry Pi or a Synology NAS is exactly the target this
+      # install path is for. QEMU makes that a build cost, not a porting exercise.
+      - name: Build and push the web image (amd64 + arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          target: prod
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.web }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      # The step this job exists for, and the reason it is not merely a push: it
+      # boots the images that were just published, by digest-able tag, under the
+      # same gate that checked the build. A `docker push` that succeeded proves
+      # the registry accepted bytes; this proves the bytes are a working
+      # deployment.
+      #
+      # PROD_IMAGE_PREFIX makes `prod` pull instead of build. Without it the gate
+      # would build the same source again and test that instead.
+      - name: Boot the published images and check them
+        env:
+          PROD_IMAGE_PREFIX: ${{ steps.prefix.outputs.value }}
+          PROD_IMAGE_TAG: sha-${{ github.sha }}
+        run: ./scripts/verify.sh prod
+
+      # …and then the question the gate above cannot ask, because it runs logged
+      # in: can a target machine pull this *without* credentials?
+      #
+      # The install path has no `docker login` in it on purpose — the README's
+      # one command is the whole thing. GHCR creates packages **private** by
+      # default even in a public repository, and a private package makes that
+      # command fail on a machine that has never authenticated, which is the one
+      # audience that cannot debug it. So the anonymity is asserted rather than
+      # assumed, and this is the step that goes red until the package visibility
+      # is flipped once in the GitHub UI.
+      - name: A stranger can pull it without credentials
+        run: |
+          docker logout ghcr.io
+          for image in api web; do
+            ref="${{ steps.prefix.outputs.value }}-${image}:sha-${{ github.sha }}"
+            if docker pull "$ref" >/dev/null 2>&1; then
+              echo "ok   anonymously pullable: ${image}"
+            else
+              echo "FAIL ${ref} is not anonymously pullable" >&2
+              echo "" >&2
+              echo "The package is private. GHCR defaults to private and this repo" >&2
+              echo "is public, so a target machine running 'docker compose up -d'" >&2
+              echo "would fail to pull. Fix once, in the UI:" >&2
+              echo "  https://github.com/users/${GITHUB_REPOSITORY_OWNER}/packages/container/metalmark-${image}/settings" >&2
+              echo "  -> Danger Zone -> Change visibility -> Public" >&2
+              exit 1
+            fi
+          done
+

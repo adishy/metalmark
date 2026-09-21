@@ -102,7 +102,7 @@ services:
       # --build` (the command in the README, in CI, and in the `reset` gate) would
       # quietly replace the dev server with the deployment image: nginx listening
       # on 8080 while the service publishes 5173, and nothing answering at all.
-      # docker-compose.prod.yml sets `target: prod` in its turn.
+      # deploy/compose.yaml states `target: prod` in its turn.
       target: dev
     depends_on:
       - api

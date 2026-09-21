@@ -1,7 +1,10 @@
 """Application settings.
 
 Secrets are loaded from files (docker secrets), never plain env vars, per
-ARCHITECTURE §5. ``METALMARK_SECRET_KEY_FILE`` points at the Fernet key.
+ARCHITECTURE §5. ``METALMARK_SECRET_KEY_FILE`` points at the Fernet key, and the
+two database credentials accept the same ``_FILE`` suffix — which is what lets
+``deploy/compose.yaml`` generate every credential at install time instead of
+carrying one.
 """
 
 from __future__ import annotations
@@ -56,15 +59,32 @@ class Settings(BaseSettings):
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")
 
+    # Docker's `_FILE` convention for the two database credentials. The Fernet key
+    # above already worked this way; these follow because a password passed as an
+    # environment variable is a password in `docker inspect` and in every process
+    # listing on the host, and because a deployment that *generates* its
+    # credentials (deploy/compose.yaml) has no other way to hand them over.
+    postgres_password_file: str | None = Field(default=None, alias="POSTGRES_PASSWORD_FILE")
+    app_db_password_file: str | None = Field(default=None, alias="APP_DB_PASSWORD_FILE")
+
     _secret_key: str = ""
 
     @model_validator(mode="after")
-    def _load_secret(self) -> Settings:
+    def _load_secrets(self) -> Settings:
         if self.secret_key_inline:
             object.__setattr__(self, "_secret_key", self.secret_key_inline)
-        elif self.secret_key_file and Path(self.secret_key_file).exists():
-            object.__setattr__(
-                self, "_secret_key", Path(self.secret_key_file).read_text().strip()
+        elif self.secret_key_file:
+            object.__setattr__(self, "_secret_key", _read_secret(self.secret_key_file))
+        # A file that is set but unreadable leaves the environment value in place
+        # rather than blanking it: the alternative turns a permissions mistake
+        # into `password authentication failed`, which points at the database.
+        if self.postgres_password_file:
+            self.postgres_password = (
+                _read_secret(self.postgres_password_file) or self.postgres_password
+            )
+        if self.app_db_password_file:
+            self.app_db_password = (
+                _read_secret(self.app_db_password_file) or self.app_db_password
             )
         return self
 
@@ -92,6 +112,21 @@ class Settings(BaseSettings):
     def owner_dsn(self) -> str:
         """Privileged DSN — migrations/bootstrap only."""
         return self._dsn(self.postgres_user, self.postgres_password)
+
+
+def _read_secret(path: str) -> str:
+    """The contents of a `_FILE` secret, stripped; `""` if it cannot be read.
+
+    Stripped, not raw: a secret written by a person or by `echo` ends in a
+    newline, and a password carrying a trailing ``\\n`` fails authentication in a
+    way that reads as *wrong password* rather than *one stray byte*. The Postgres
+    image strips for exactly this reason, and this has to agree with it — the
+    same file is read by both sides of the connection.
+    """
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return ""
 
 
 @lru_cache

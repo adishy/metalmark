@@ -69,4 +69,5 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 | [0035](0035-reports-read-once.md) | A report reads each thing once, and rounds where it says it rounds | Accepted |
 | [0036](0036-portable-export.md) | A portable export is a document, a backup is the instance, and no id crosses between | Accepted |
 | [0037](0037-desktop-notifications-in-app.md) | Desktop notifications: in-app, not Web Push; the decision to notify is recorded server-side | Accepted |
-| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted |
+| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted, superseded in part by 0039 |
+| [0039](0039-the-deployment-is-standalone.md) | The deployment is a standalone file that carries no credentials, and the image is published | Accepted |

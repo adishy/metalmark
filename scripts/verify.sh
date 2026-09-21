@@ -41,8 +41,9 @@ NETWORK="${COMPOSE_PROJECT}_default"
 # upgrade of whatever dev left behind.
 PROD_PROJECT="${PROD_PROJECT_NAME:-metalmark-prod}"
 PROD_HTTPS_PORT="${METALMARK_HTTPS_PORT:-8443}"
+PROD_HTTP_PORT="${METALMARK_HTTP_PORT:-8080}"
 
-GATES=(lint pytest frontend contract drill e2e walkthrough prod reset)
+GATES=(secrets lint pytest frontend contract drill e2e walkthrough prod reset)
 RESULTS=()
 FAILED=0
 MUTATED=0
@@ -67,6 +68,7 @@ usage() {
 usage: scripts/verify.sh [--list] [gate ...]
 
 gates (default: all, in this order):
+  secrets      no credentials in the worktree, in any commit, or in the image
   lint         ruff
   pytest       backend suite against a real Postgres
   frontend     tsc --noEmit, vitest, production build
@@ -77,15 +79,28 @@ gates (default: all, in this order):
   prod         boot the deployment in its own project and probe it in a browser
   reset        drop the volume, migrate, seed demo data
 
+`secrets` needs no stack and no data — it reads files. It is first because it is
+the cheapest and because the accident it catches happens at `git add`, long
+before anything is started.
+
 e2e and walkthrough write to the dev database, and the seed never deletes, so
 `reset` runs automatically after them. The database is demo data again when the
 run ends — and therefore when the next one starts. Pass `reset` explicitly to
 reset without running anything else.
 
-`prod` needs no stack running and touches no dev data: it stands up its own
-project (metalmark-prod), builds the production images, migrates and seeds a
-fresh volume, checks what nginx and Caddy serve, and tears the whole thing down.
-It is the only gate that costs a full image build.
+`prod` needs no stack running and touches no dev data: it boots deploy/compose.yaml
+— the standalone deployment file, the same one a target machine fetches — under
+its own project name (metalmark-prod), builds the production images, waits for
+the file's own secret generation and migration, seeds a fresh volume, checks what
+nginx and Caddy serve, and tears the whole thing down. It is the only gate that
+costs a full image build.
+
+  PROD_IMAGE_PREFIX=ghcr.io/adishy/metalmark PROD_IMAGE_TAG=sha-abc123
+  ./scripts/verify.sh prod
+
+With those set, `prod` boots the published images instead of building from the
+checkout — which is how CI verifies the artifact it just pushed rather than a
+second build of the same source.
 EOF
 }
 
@@ -193,6 +208,16 @@ run_gate() {
 
 # --------------------------------------------------------------------- gates
 
+gate_secrets() {
+  # No require_stack, deliberately: this one reads files rather than containers,
+  # so it is the only gate that runs on a bare checkout with nothing up — which
+  # is also the only time it is worth running, since the accident it catches
+  # happens at `git add`, before anything has been started. The script exits
+  # non-zero on its own, and prints `path:line` and the rule name, never the
+  # match.
+  "$ROOT/scripts/secret_scan.sh"
+}
+
 gate_lint() {
   require_stack
   docker compose exec -T api ruff check .
@@ -280,8 +305,26 @@ gate_walkthrough() {
 
 # ------------------------------------------------------- the deployment gate
 
+# The deployment is one standalone file — deploy/compose.yaml — rather than an
+# overlay on the dev stack, so this gate boots exactly what a target machine
+# boots. Only two things differ, and both are stated here rather than in the
+# file: the project name, so this stands up *beside* the dev stack instead of
+# replacing it (the file deliberately has no `name:`, so a checkout running it by
+# hand lands on `deploy` and cannot collide either), and the images, for CI.
+#
+# `PROD_IMAGE_PREFIX`/`PROD_IMAGE_TAG` are what make the publish job mean
+# something: with them set, this gate boots the images that were just pushed to
+# the registry rather than building the same source a second time, so it tests
+# the artifact a stranger would pull. Unset, compose uses the `ghcr.io` refs in
+# the file, and `--build` still builds from the checkout — which is what a
+# developer running this gate on their own branch needs.
+if [ -n "${PROD_IMAGE_PREFIX:-}" ]; then
+  export METALMARK_API_IMAGE="${PROD_IMAGE_PREFIX}-api:${PROD_IMAGE_TAG:-latest}"
+  export METALMARK_WEB_IMAGE="${PROD_IMAGE_PREFIX}-web:${PROD_IMAGE_TAG:-latest}"
+fi
+
 prod() {
-  docker compose -p "$PROD_PROJECT" -f docker-compose.yml -f docker-compose.prod.yml "$@"
+  docker compose -p "$PROD_PROJECT" -f deploy/compose.yaml "$@"
 }
 
 # One assertion per line, in the same shape scripts/prod_probe.cjs prints, so the
@@ -341,11 +384,13 @@ gate_prod() {
     return 1
   fi
 
-  # The overlay is the only place in the repo that uses compose's `!override`
-  # and `!reset` tags. A malformed one otherwise surfaces much later as a service
-  # that quietly kept its dev bind mount, so it is resolved and discarded first.
+  # Resolved and discarded first, because the deployment file is also the only
+  # place in the repo where a Caddyfile lives inside YAML: an indentation mistake
+  # in that block scalar is valid YAML and invalid Caddyfile, and it would
+  # otherwise surface minutes later as a container that restarts forever with a
+  # config error in a log nobody has looked at yet.
   if ! prod config >/dev/null; then
-    warn "  the prod overlay does not resolve"
+    warn "  deploy/compose.yaml does not resolve"
     return 1
   fi
 
@@ -363,13 +408,30 @@ gate_prod() {
 
 prod_checks() {
   local fail=0
-  local base="http://127.0.0.1:8080" tls="https://localhost:${PROD_HTTPS_PORT}"
-  local i code asset jar setcookie authcode web_ip
+  local base="http://127.0.0.1:${PROD_HTTP_PORT}" tls="https://localhost:${PROD_HTTPS_PORT}"
+  local i code asset jar setcookie authcode web_ip envkey secretfiles dotenv
 
-  prod up -d --build || return 1
-  # Nothing migrates a fresh volume on its own — the api container runs uvicorn
-  # and nothing else, and that is deliberate (migrations are always explicit).
-  prod run --rm api alembic upgrade head || return 1
+  # No `alembic upgrade head` here any more, and its absence is the assertion: the
+  # deployment file generates its own credentials and applies its own migrations,
+  # and `up -d` does not return until both have succeeded (they are consumed
+  # through `service_completed_successfully`). Running the migration by hand would
+  # prove the schema could be applied while leaving the *install* — the thing this
+  # gate is for — untested, which is precisely the step a stranger's
+  # `docker compose up -d` depends on.
+  #
+  # Which image is under test is the one real fork in this gate. Normally it is a
+  # build of the checkout: compose builds only when asked, so `--build` is what
+  # selects it (with `image:` and `build:` both present a plain `up` pulls and
+  # never touches the builder — measured). When PROD_IMAGE_PREFIX names published
+  # images the build is the one thing that must *not* happen: it would replace the
+  # artifact under test with a local build of the same source, and the gate would
+  # pass without ever having pulled what a stranger pulls.
+  if [ -n "${PROD_IMAGE_PREFIX:-}" ]; then
+    prod pull --quiet api worker web || return 1
+    prod up -d || return 1
+  else
+    prod up -d --build || return 1
+  fi
 
   # `/healthz` fails closed in the app — it checks the app role, not just that the
   # process is up — and nginx proxies it, so a 200 here has already exercised the
@@ -460,6 +522,45 @@ prod_checks() {
     "a logged-in session reads accounts over TLS" "$authcode"
   [ "$authcode" = "200" ] || fail=1
   rm -f "$jar"
+
+  # Where the credentials are, and where they are not. scripts/secret_scan.sh
+  # makes three claims about secrets; two of them are about files in the repo and
+  # it checks those itself, and the third is about the *image*, which is not
+  # answerable by reading anything — only by asking a container built from it.
+  # That is this block.
+  #
+  # It matters because the api image is built with `COPY . .`: it is published to
+  # a public registry (ADR-0039), so it ships exactly what survives
+  # backend/.dockerignore. A `.env` that got past that file would be a credential
+  # in a registry *and* a configuration the deployment silently inherits from
+  # whoever happened to build the image — which is the failure the file's first
+  # line exists to prevent, and the reason this asserts it rather than trusting it.
+  dotenv=$(prod exec -T api sh -c 'ls -a /app/.env 2>/dev/null' | tr -d '\r' || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ -z "$dotenv" ] && echo ok || echo FAIL)" \
+    "the api image carries no .env" "${dotenv:-<absent>}"
+  [ -z "$dotenv" ] || fail=1
+
+  # The key is a file in a volume, never an environment variable: an environment
+  # variable is readable by anything that can call the Docker API, and lands in
+  # `docker inspect` output and in crash dumps. `printenv` rather than a shell
+  # expansion so an *empty* variable and an *unset* one both read as absent.
+  envkey=$(prod exec -T api printenv METALMARK_SECRET_KEY 2>/dev/null | tr -d '\r' || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ -z "$envkey" ] && echo ok || echo FAIL)" \
+    "the key is not an environment variable" "${envkey:+<non-empty>}"
+  [ -z "$envkey" ] || fail=1
+
+  # …and it did in fact arrive, which nothing above proves: a Fernet key is read
+  # lazily — only when an access URL is first encrypted or decrypted — so a
+  # deployment whose secret-init silently wrote nothing would boot, serve, log in
+  # and pass every check above, then fail at the one moment that matters. Asserted
+  # as a set of names, never as contents.
+  secretfiles=$(prod exec -T api sh -c 'ls -1 /secrets' 2>/dev/null | tr -d '\r' | sort | tr '\n' ' ' || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ "$secretfiles" = "app_db_password metalmark_secret_key postgres_password " ] && echo ok || echo FAIL)" \
+    "all three credentials were generated" "${secretfiles:-<none>}"
+  [ "$secretfiles" = "app_db_password metalmark_secret_key postgres_password " ] || fail=1
 
   # The browser half: the only check anywhere that a built frontend registers a
   # service worker. Mounted from the repo rather than /tmp, because /tmp is not a

@@ -63,40 +63,79 @@ docker compose run --rm -e METALMARK_TEST_PG_HOST=db -e METALMARK_SECRET_KEY=tes
 
 Python dependencies are managed with **uv** (`backend/uv.lock`); the image installs from the lock.
 
-## Deploy it
+## Stand up an instance
 
-`docker-compose.prod.yml` layers on the dev stack — it does not replace the file, and it keeps the same
-compose project, so it is the **same database**. Switching between the two moves no data: whatever you
-had in dev is what the deployment is looking at, and going back is `docker compose up -d`.
+**The install is one file and one command.** No clone, no Node, no Python, no `.env` to fill in, and no
+credential to write down: the images come from GHCR and the deployment generates its own secrets and
+applies its own migrations on first boot (ADR-0039).
 
 ```bash
-echo 'METALMARK_SITE=metalmark.local' >> .env    # the hostname you will reach it by
+mkdir metalmark && cd metalmark
+curl -fsSLO https://raw.githubusercontent.com/adishy/metalmark/main/deploy/compose.yaml
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm api alembic upgrade head
+echo 'METALMARK_SITE=metalmark.local' > .env    # the name every device will reach it by
+docker compose up -d
 ```
 
-Then **trust Caddy's CA**, because there is no public DNS name on a LAN for a real CA to validate, so
-Caddy issues from its own root:
+That is the whole thing. `up` does not return until the credentials exist and the schema is current, so
+there is nothing to wait for and nothing to run afterwards.
+
+Open **https://metalmark.local:8443** and sign up — **the first signup creates the household** (ADR-0027),
+so there is nothing to seed either. From the same machine, **http://localhost:8080** works immediately,
+with no certificate to install and still a working service worker.
+
+Then **trust Caddy's CA**, or every device will refuse the connection properly. There is no public DNS
+name on a LAN for a real CA to validate, so Caddy issues from its own root:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-  cp caddy:/data/caddy/pki/authorities/local/root.crt ./metalmark-ca.crt
+docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./metalmark-ca.crt
 # macOS — other platforms have their own trust store command
 sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./metalmark-ca.crt
 ```
 
-Open **https://metalmark.local:8443** — or **http://localhost:8080** from the host itself. Clicking
-through the certificate warning instead is not a shortcut: a certificate error makes the origin refuse
-service workers outright, so notifications keep not working and nothing on screen says why.
+Clicking through the certificate warning instead is not a shortcut: a certificate error makes the origin
+refuse service workers outright, so notifications keep not working and nothing on screen says why.
 
-What the deployment changes, and why none of it is optional:
+A few things worth knowing once it is up:
 
-| | dev stack | deployment |
+- **`METALMARK_SITE` is the name in the certificate.** A request with any other `Host` fails the TLS
+  handshake rather than serving the app under a name the certificate does not cover. Changing it means
+  `docker compose up -d` again — Caddy re-issues on start, and every client has to trust the new root.
+- **`METALMARK_HTTPS_PORT`** (8443) and **`METALMARK_HTTP_PORT`** (8080) move the two doors if something
+  else on the machine has them. Port 80 is not published; the compose file says where to add it if you
+  want an http→https redirect.
+- **Close signup once you are in.** Anyone who can reach the instance can join the household and read all
+  of it, which is fine while it is just you. Add `METALMARK_OPEN_SIGNUP=false` to `.env` and run
+  `docker compose up -d` to shut the door. It has to stay open until the first account exists.
+- **Connecting a bank** is in the app: Settings → Connections, where you paste a SimpleFIN setup token.
+  The token is encrypted at rest with the key generated on first boot; `/admin` is where sync runs, its
+  logs and its schedule live.
+- **Updating** is `docker compose pull && docker compose up -d`. The deployment tracks the `latest` tag;
+  pin `METALMARK_API_IMAGE`/`METALMARK_WEB_IMAGE` in `.env` (both at once) to hold a specific build.
+- **Backups.** `scripts/backup.sh` does an encrypted dump, but it lives in the repo and not in the image,
+  so a bare install cannot reach it. The unconditional version needs no checkout, and there are **two**
+  volumes to take — `db_data` and `metalmark_secrets`:
+
+  ```bash
+  docker compose exec -T db pg_dump -U metalmark metalmark | gzip > metalmark-$(date +%F).sql.gz
+  ```
+
+  A dump without the secrets volume restores the ledger but not the *bank connections*: the Fernet key
+  that decrypts each stored access URL is in that volume, and an access URL whose key is gone cannot be
+  recovered — it is a reconnect, not a restore. Back up both or neither.
+
+### What this is, and what it changes
+
+The deployment is `deploy/compose.yaml`, standalone and complete. It is not an overlay on the dev stack,
+and the two changes that matter most are not about the deployment at all:
+
+| | dev stack | `deploy/compose.yaml` |
 |---|---|---|
 | `web` | Vite dev server, HMR, source bind-mounted | `npm run build` → nginx serving `dist/` |
 | Service worker | none — `vite-plugin-pwa` builds one only for production | `dist/sw.js`, so **notifications can display** |
 | `METALMARK_ENV` | `dev` | `prod`: `Secure` session cookie, no dev CORS, the fake aggregator refuses to exist |
+| Credentials | `secrets/metalmark_secret_key`, created by hand | generated on first boot, never rewritten |
+| Schema | migrated by hand | applied by a one-shot container before the api starts |
 | Reachable at | `http://localhost:5173` | `https://<METALMARK_SITE>:8443` (any device), `http://localhost:8080` (this one) |
 | Installable, works offline | no | yes |
 
@@ -106,15 +145,20 @@ machine cannot log in over plain http at all. The loopback door exists because p
 interface that never leaves the machine, and `localhost` is a *secure context* by specification — so it
 is the one way in that needs no certificate installed and still gets a service worker.
 
-`METALMARK_SITE` is the name in the certificate; a request with any other `Host` fails the TLS
-handshake rather than serving the app under a name the certificate does not cover. Port 8443 rather than
-443 so it does not collide with anything else — `METALMARK_HTTPS_PORT` changes it. Port 80 is not
-published; the compose file says where to add it if you want the http→https redirect.
+### Deploying from a checkout
 
-`./scripts/verify.sh prod` boots all of this from an empty volume and checks it — nginx's cache headers
-and SPA fallback, the `/api` proxy, TLS, the login round trip, and, in a real browser, that the built
-app registers a service worker. That last one is the only test of the thing no other gate can reach.
-See ADR-0038.
+Same file, one extra flag, and it builds from your working tree instead of pulling:
+
+```bash
+docker compose -f deploy/compose.yaml up -d --build
+```
+
+The project is named after the directory the file is in, which for a checkout is `deploy` — so this
+stands *beside* the dev stack rather than replacing it, on its own volume and its own database. That is
+also what `./scripts/verify.sh prod` does, along with checking it: nginx's cache headers and SPA
+fallback, the `/api` proxy, TLS, the login round trip, that the generated credentials actually landed,
+that the published image carries no `.env`, and, in a real browser, that the built app registers a
+service worker — the only test of the thing no other gate can reach. See ADR-0038 and ADR-0039.
 
 ## Stack (boring on purpose)
 
@@ -130,17 +174,18 @@ See ADR-0038.
   Hypothesis/fast-check property tests for money & FX. Coverage + contract (schemathesis) gates in CI.
 - **Performance targets:** API p95 < 150ms on warm cache; transaction list virtualized at 60fps; swipe uses
   optimistic updates. Keyset pagination, precomputed net-worth/report rollups, cached FX.
-- **Ops:** docker-compose (`db`, `api`, `worker`, `web`), Caddy reverse proxy (§"Deploy it"), Tailscale,
-  nightly **encrypted** `pg_dump` backups, **admin sync-observability** dashboard (per-run logs, counts,
-  timings).
+- **Ops:** docker-compose (`db`, `api`, `worker`, `web`), Caddy reverse proxy (§"Stand up an instance"),
+  Tailscale, nightly **encrypted** `pg_dump` backups, **admin sync-observability** dashboard (per-run
+  logs, counts, timings).
 
 ## Repository layout
 
 ```
 metalmark/
   docker-compose.yml        # the dev stack: Vite dev server, source bind-mounted
-  docker-compose.prod.yml   # the deployment overlay: built PWA on nginx + Caddy (ADR-0038)
-  Caddyfile                 # TLS for the deployment; the site address names the host
+  deploy/compose.yaml       # the deployment, standalone and complete (ADR-0038, ADR-0039)
+                            #   → the whole install; the Caddyfile and the generated
+                            #     credentials are inside it, so there is nothing to copy
   backend/                  # FastAPI app, SQLAlchemy models, Alembic migrations, worker
   frontend/                 # Vite + React + TS PWA; Dockerfile has dev/build/prod stages
   contracts/                # OpenAPI spec (source of truth) + generated TS client
