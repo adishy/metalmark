@@ -93,9 +93,14 @@ reset without running anything else.
 `prod` needs no stack running and touches no dev data: it boots deploy/docker-compose.yaml
 — the standalone deployment file, the same one a target machine fetches — under
 its own project name (metalmark-prod), builds the production images, waits for
-the file's own secret generation and migration, seeds a fresh volume, checks what
-nginx and Caddy serve, and tears the whole thing down. It is the only gate that
-costs a full image build.
+the file's own secret generation and migration, seeds a fresh volume, and checks
+what nginx and Caddy serve. Then it does the same on the *other* kind of backing
+store: `METALMARK_DB_DIR`, `METALMARK_SECRETS_DIR` and `METALMARK_CADDY_DIR`
+pointed at directories under a scratch tree in this checkout, booted again from
+nothing, asserting that the ledger, the credentials and Caddy's CA really are on
+those host paths, that a restart reuses them, and cleaning up afterwards through
+a container because the directories are no longer readable by your own account
+(ADR-0040). It is the only gate that costs a full image build.
 
   PROD_IMAGE_PREFIX=ghcr.io/adishy/metalmark PROD_IMAGE_TAG=sha-abc123
   ./scripts/verify.sh prod
