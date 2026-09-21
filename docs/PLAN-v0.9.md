@@ -25,6 +25,7 @@ Every item in the order this plan addresses it, and where it stands. Status as o
 | — | **A standalone install** (appended mid-plan, 2026-09-20) | **Done** (`450bf98`, ADR-0039) — one file, one command, no clone: the images are published to GHCR, and the deployment generates its own credentials and applies its own schema on first boot. `docker-compose.prod.yml` and the root `Caddyfile` are deleted, superseded by `deploy/docker-compose.yaml`. The plan's definition of done said "ready for the user's end-to-end run"; this is what makes that run possible on a machine that is not this one |
 | — | Session unreachable ≠ signed out | **Done** (`029de7e`) — moved out of "what this plan deliberately does not do" below, which had recorded it as a deliberate omission. It was the one `isError` branch that skipped §4.11, so the fix was that shape rather than the new design the earlier note assumed it needed |
 | — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | **Tabled by the user** (2026-09-20) — not started. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
+| — | **Where the state lives, and who can reach the door** (appended mid-plan, 2026-09-21) | **Done** (`4d703be`, `8821eb2`, ADR-0040, ADR-0041) — the deployment stops assuming things about the machine it lands on. `METALMARK_DB_DIR` / `METALMARK_SECRETS_DIR` / `METALMARK_CADDY_DIR` move any of the three persistent locations onto a host path so an operator's existing backup tooling can reach them; unset, each is the named volume it always was. The plain-HTTP door is published on `0.0.0.0` (`METALMARK_HTTP_BIND`) so a reverse proxy of the operator's own can front it — with the honest cost recorded: the `Secure` session cookie means nobody can log in through it from another device. `deploy/compose.yaml` → `deploy/docker-compose.yaml`. The README's install section is rewritten with `.env` as a stated step, and the `prod` gate grew a second phase that boots the deployment onto host paths and asserts the mounts, the credentials, `PG_VERSION` and the modes there rather than describing them. `8821eb2` is that phase's first CI run finding the *assertion* platform-naive rather than the deployment broken — on a Linux runner the operator cannot read their own data directory, which is ADR-0040's first cost arriving in the gate that proves the feature — so it now reads `PG_VERSION` as root, and prints the mode and owner it finds |
 
 **Two notes on the order, both raised rather than taken unilaterally.**
 
@@ -392,10 +393,10 @@ green, CI green, pushed. `reset` between mutating gates.
   move — the failure mode decision A exists to prevent.
 - Ready for the user's end-to-end run against real credentials, reported as counts and statuses only.
 
-**Where it stands, measured rather than asserted, on `66dfd97` (2026-09-20).** All ten gates pass locally
+**Where it stands, measured rather than asserted, on `8821eb2` (2026-09-21).** All ten gates pass locally
 from a cold stack — `secrets`, `lint`, `pytest`, `frontend`, `contract`, `drill`, `e2e`, `walkthrough`,
 `prod`, `reset` — and CI run
-[35554280493](https://github.com/adishy/metalmark/actions/runs/35554280493) is green on all eight jobs,
+[35661255574](https://github.com/adishy/metalmark/actions/runs/35661255574) is green on all eight jobs,
 `publish` included, so the images a stranger pulls are the ones this gate verified. That clears the second
 bullet. The last bullet is deliberately not mine to check: the end-to-end run against real credentials
 happens in the UI, by the user, and is reported back as counts and statuses only.
