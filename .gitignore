@@ -40,6 +40,12 @@ metalmark-ca.crt
 .vscode/
 *.swp
 
+# The `prod` gate's host-path half: a scratch tree under the repo (ADR-0040). It
+# removes its own directories, so this only matters when a run is killed
+# partway — and what is left behind then is a Postgres data directory, which is
+# not something to discover with `git status`.
+.prod-paths.*/
+
 # Test / coverage
 coverage/
 htmlcov/

@@ -40,7 +40,7 @@ NETWORK="${COMPOSE_PROJECT}_default"
 # database volume, so what it tests is the fresh-install path rather than an
 # upgrade of whatever dev left behind.
 PROD_PROJECT="${PROD_PROJECT_NAME:-metalmark-prod}"
-# Must track deploy/compose.yaml's own defaults, or the `prod` gate probes a door
+# Must track deploy/docker-compose.yaml's own defaults, or the `prod` gate probes a door
 # the deployment never opened.
 PROD_HTTPS_PORT="${METALMARK_HTTPS_PORT:-8790}"
 PROD_HTTP_PORT="${METALMARK_HTTP_PORT:-8791}"
@@ -90,7 +90,7 @@ e2e and walkthrough write to the dev database, and the seed never deletes, so
 run ends — and therefore when the next one starts. Pass `reset` explicitly to
 reset without running anything else.
 
-`prod` needs no stack running and touches no dev data: it boots deploy/compose.yaml
+`prod` needs no stack running and touches no dev data: it boots deploy/docker-compose.yaml
 — the standalone deployment file, the same one a target machine fetches — under
 its own project name (metalmark-prod), builds the production images, waits for
 the file's own secret generation and migration, seeds a fresh volume, checks what
@@ -307,7 +307,7 @@ gate_walkthrough() {
 
 # ------------------------------------------------------- the deployment gate
 
-# The deployment is one standalone file — deploy/compose.yaml — rather than an
+# The deployment is one standalone file — deploy/docker-compose.yaml — rather than an
 # overlay on the dev stack, so this gate boots exactly what a target machine
 # boots. Only two things differ, and both are stated here rather than in the
 # file: the project name, so this stands up *beside* the dev stack instead of
@@ -326,7 +326,54 @@ if [ -n "${PROD_IMAGE_PREFIX:-}" ]; then
 fi
 
 prod() {
-  docker compose -p "$PROD_PROJECT" -f deploy/compose.yaml "$@"
+  docker compose -p "$PROD_PROJECT" -f deploy/docker-compose.yaml "$@"
+}
+
+# Which artifact is under test is the one real fork in this gate, so it lives in
+# one place and both halves boot through it. Normally it is a build of the
+# checkout: compose builds only when asked, so `--build` is what selects it (with
+# `image:` and `build:` both present, a plain `up` pulls and never touches the
+# builder — measured). When PROD_IMAGE_PREFIX names published images the build is
+# the one thing that must *not* happen: it would replace the artifact under test
+# with a local build of the same source, and the gate would pass without ever
+# having pulled what a stranger pulls.
+prod_up() {
+  if [ -n "${PROD_IMAGE_PREFIX:-}" ]; then
+    prod pull --quiet api worker web || return 1
+    prod up -d || return 1
+  else
+    prod up -d --build || return 1
+  fi
+}
+
+# Both doors, because Caddy is a separate container that can still be starting
+# when nginx is already serving — and a race there would read as "TLS is broken".
+# `/healthz` fails closed in the app: it checks the app role rather than only that
+# the process is up, and nginx proxies it, so a 200 here has already exercised the
+# web container, the proxy and the database.
+prod_wait_healthy() {
+  local base="http://127.0.0.1:${PROD_HTTP_PORT}" tls="https://localhost:${PROD_HTTPS_PORT}"
+  local i code
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$base/healthz" || true)
+    if [ "$code" = "200" ]; then
+      if curl -sk -o /dev/null -w '%{http_code}' "$tls/healthz" | grep -q 200; then return 0; fi
+    fi
+    sleep 2
+  done
+  warn "  the deployment never became healthy (last /healthz: ${code:-none})"
+  return 1
+}
+
+# One mount, read off the running container rather than off the file: a resolved
+# config is what compose *intends*, and this is what it did.
+expect_mount() {  # <container> <container-path> <"type source rw|ro"> <label>
+  local got
+  got=$(docker inspect -f \
+    "{{range .Mounts}}{{if eq .Destination \"$2\"}}{{.Type}} {{.Source}} {{if .RW}}rw{{else}}ro{{end}}{{end}}{{end}}" \
+    "$1" 2>/dev/null || true)
+  printf '  %-4s %-52s %s\n' "$([ "$got" = "$3" ] && echo ok || echo FAIL)" "$4" "${got:-<absent>}"
+  [ "$got" = "$3" ]
 }
 
 # One assertion per line, in the same shape scripts/prod_probe.cjs prints, so the
@@ -392,18 +439,37 @@ gate_prod() {
   # otherwise surface minutes later as a container that restarts forever with a
   # config error in a log nobody has looked at yet.
   if ! prod config >/dev/null; then
-    warn "  deploy/compose.yaml does not resolve"
+    warn "  deploy/docker-compose.yaml does not resolve"
     return 1
   fi
+
+  # The default half has to be testing the default. This gate inherits whatever
+  # environment it is run from, and `docker compose -f deploy/docker-compose.yaml` also
+  # reads `deploy/.env` — the very file the README now tells an operator to create.
+  # Either one naming a path would leave the named-volume install, the one thing
+  # this half exists to keep working, silently untested.
+  #
+  # Set to *empty* rather than unset, and that is the point: `${VAR:-default}`
+  # reads an empty value as absent, and an exported value outranks `deploy/.env`.
+  # Unsetting would defeat the first source and not the second.
+  #
+  # `METALMARK_HTTP_BIND` is here for the other reason of the two: not a default
+  # that would go untested, but a probe that would go to the wrong address. A
+  # caller whose environment (or `deploy/.env`) named one interface would have the
+  # gate dialling 127.0.0.1 on a door that is not listening there, and it would
+  # read as a deployment that never became healthy.
+  export METALMARK_DB_DIR= METALMARK_SECRETS_DIR= METALMARK_CADDY_DIR= METALMARK_HTTP_BIND=
 
   # From nothing, every time: the gate's subject is a deployment booting, and a
   # stack that is already up answers a different question.
   prod down -v --remove-orphans >/dev/null 2>&1 || true
 
   # The checks leave containers running if they abort, so the status is recorded
-  # and the teardown happens either way.
+  # and the teardown happens either way. The storage half leaves three directories
+  # behind that `-v` cannot remove, so it cleans up after itself.
   local rc=0
   prod_checks || rc=1
+  prod_path_checks || rc=1
   prod down -v --remove-orphans >/dev/null 2>&1 || true
   return $rc
 }
@@ -411,7 +477,7 @@ gate_prod() {
 prod_checks() {
   local fail=0
   local base="http://127.0.0.1:${PROD_HTTP_PORT}" tls="https://localhost:${PROD_HTTPS_PORT}"
-  local i code asset jar setcookie authcode web_ip envkey secretfiles dotenv
+  local asset jar setcookie authcode web_ip envkey secretfiles dotenv bind
 
   # No `alembic upgrade head` here any more, and its absence is the assertion: the
   # deployment file generates its own credentials and applies its own migrations,
@@ -421,34 +487,9 @@ prod_checks() {
   # gate is for — untested, which is precisely the step a stranger's
   # `docker compose up -d` depends on.
   #
-  # Which image is under test is the one real fork in this gate. Normally it is a
-  # build of the checkout: compose builds only when asked, so `--build` is what
-  # selects it (with `image:` and `build:` both present a plain `up` pulls and
-  # never touches the builder — measured). When PROD_IMAGE_PREFIX names published
-  # images the build is the one thing that must *not* happen: it would replace the
-  # artifact under test with a local build of the same source, and the gate would
-  # pass without ever having pulled what a stranger pulls.
-  if [ -n "${PROD_IMAGE_PREFIX:-}" ]; then
-    prod pull --quiet api worker web || return 1
-    prod up -d || return 1
-  else
-    prod up -d --build || return 1
-  fi
+  prod_up || return 1
 
-  # `/healthz` fails closed in the app — it checks the app role, not just that the
-  # process is up — and nginx proxies it, so a 200 here has already exercised the
-  # web container, the proxy and the database. Both doors are waited on: Caddy is
-  # a separate container that can still be starting when nginx is already serving,
-  # and a race there would read as "TLS is broken".
-  for i in $(seq 1 60); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' "$base/healthz" || true)
-    if [ "$code" = "200" ]; then
-      if curl -sk -o /dev/null -w '%{http_code}' "$tls/healthz" | grep -q 200; then break; fi
-    fi
-    sleep 2
-  done
-  if [ "$code" != "200" ]; then
-    warn "  the deployment never became healthy (last /healthz: ${code:-none})"
+  if ! prod_wait_healthy; then
     prod logs --tail 40 web api >&2
     return 1
   fi
@@ -564,6 +605,18 @@ prod_checks() {
     "all three credentials were generated" "${secretfiles:-<none>}"
   [ "$secretfiles" = "app_db_password metalmark_secret_key postgres_password " ] || fail=1
 
+  # Which interface the plain-HTTP door is published on. Nothing else here can see
+  # the difference — every probe above dials 127.0.0.1, which a loopback bind and a
+  # `0.0.0.0` bind both answer — so without this line, restoring the old
+  # loopback-only default would be a silent change (ADR-0041).
+  bind=$(docker inspect -f \
+    '{{range $c := .NetworkSettings.Ports}}{{range $c}}{{.HostIp}}:{{.HostPort}}{{end}}{{end}}' \
+    "${PROD_PROJECT}-web-1" 2>/dev/null || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ "$bind" = "0.0.0.0:${PROD_HTTP_PORT}" ] && echo ok || echo FAIL)" \
+    "the plain-HTTP door is published on every interface" "${bind:-<none>}"
+  [ "$bind" = "0.0.0.0:${PROD_HTTP_PORT}" ] || fail=1
+
   # The browser half: the only check anywhere that a built frontend registers a
   # service worker. Mounted from the repo rather than /tmp, because /tmp is not a
   # shared path for every Docker host this runs on.
@@ -588,6 +641,133 @@ prod_checks() {
     sh -c "npm ci --silent >/dev/null 2>&1 && node /probe/prod_probe.cjs http://localhost:8080 localhost $web_ip" \
     || fail=1
 
+  return $fail
+}
+
+# The other half of the deployment gate: the same file, with all three persistent
+# locations pointed at host paths (ADR-0040).
+#
+# This is the only thing anywhere that can prove the override, and it has to be a
+# real boot, because every claim is about what the containers do to a host
+# directory: that Postgres runs `initdb` into one and then re-owns it, that uid 999
+# can read `postgres_password` across a *bind* mount rather than a named volume,
+# that Caddy writes its CA there, and that a `down`/`up` with no `-v` leaves the
+# cluster and the credentials alone — the property an operator is actually buying
+# when they move off the volumes.
+prod_path_checks() {
+  local fail=0 dir
+  # Not /tmp: it is not a shared path for every Docker host this runs on, which is
+  # the same reason the browser half above mounts from the repo.
+  dir=$(mktemp -d "$ROOT/.prod-paths.XXXXXX")
+
+  # A bind mount has no `-v` to undo it, so this half cleans up after itself — and
+  # the removal runs in a container. Once Postgres has initialized the directory it
+  # is mode 700 owned by uid 999, so `rm -rf` from this shell stops partway through
+  # on a Linux host. That is not an annoyance to route around: it is the cost
+  # ADR-0040 records, showing up in the gate that proves the feature.
+  prod_paths_cleanup() {
+    prod down -v --remove-orphans >/dev/null 2>&1 || true
+    docker run --rm --entrypoint rm -v "$dir":/scratch \
+      caddy:2-alpine -rf /scratch/db /scratch/secrets /scratch/caddy >/dev/null 2>&1 || true
+    rm -rf "$dir" 2>/dev/null || true
+    # Back to the default before returning, because an export outlives the
+    # function. The caller's own teardown is a bare `prod down -v`, and run with
+    # a bind path still exported it would be resolving a different deployment —
+    # and would re-create the directories as empty ones on its way past.
+    export METALMARK_DB_DIR= METALMARK_SECRETS_DIR= METALMARK_CADDY_DIR=
+  }
+
+  # The default half's stack is torn down while the variables are still empty, and
+  # the order is the assertion: `prod_checks` left a deployment whose state is
+  # named volumes, and `down -v` run with a bind path configured resolves a project
+  # that no longer declares them — which orphans the volumes instead of removing
+  # them. That is the pruning ADR-0040 records, met here as bookkeeping rather than
+  # as a surprise.
+  prod down -v --remove-orphans >/dev/null 2>&1 || true
+
+  export METALMARK_DB_DIR="$dir/db" \
+         METALMARK_SECRETS_DIR="$dir/secrets" \
+         METALMARK_CADDY_DIR="$dir/caddy"
+
+  if ! prod_up; then prod_paths_cleanup || true; return 1; fi
+  if ! prod_wait_healthy; then
+    warn "  the deployment never became healthy on host paths"
+    prod logs --tail 40 db api >&2
+    prod_paths_cleanup || true
+    return 1
+  fi
+
+  # Where each container path is actually backed, read off the containers rather
+  # than off the file. The `ro` on the secrets mount is asserted rather than
+  # assumed: it is the one mount whose read-only-ness is a security property, and
+  # an edit that dropped it would be invisible everywhere else.
+  expect_mount "${PROD_PROJECT}-db-1" /var/lib/postgresql/data \
+    "bind $dir/db rw" "the database is on the host directory" || fail=1
+  expect_mount "${PROD_PROJECT}-api-1" /secrets \
+    "bind $dir/secrets ro" "…and the credentials, still read-only" || fail=1
+  expect_mount "${PROD_PROJECT}-caddy-1" /data \
+    "bind $dir/caddy rw" "…and Caddy's CA" || fail=1
+
+  # Asserted on the *host*, because that is the operator's actual question — "is my
+  # data where I pointed it" — asked where they would look. `PG_VERSION` is written
+  # by initdb and by nothing else, so its presence is the whole claim that a
+  # cluster was built here rather than in a volume.
+  local name missing=""
+  for name in metalmark_secret_key postgres_password app_db_password; do
+    [ -f "$dir/secrets/$name" ] || missing="$missing $name"
+  done
+  printf '  %-4s %-52s %s\n' "$([ -z "$missing" ] && echo ok || echo FAIL)" \
+    "all three credentials are on the host" "${missing:-<all present>}"
+  [ -z "$missing" ] || fail=1
+
+  printf '  %-4s %-52s %s\n' \
+    "$([ -f "$dir/db/PG_VERSION" ] && echo ok || echo FAIL)" \
+    "Postgres built a cluster on the host" "$(cat "$dir/db/PG_VERSION" 2>/dev/null || echo '<absent>')"
+  [ -f "$dir/db/PG_VERSION" ] || fail=1
+
+  # The modes are load-bearing rather than cosmetic — 0644 on `postgres_password`
+  # is what lets uid 999 read it, and is the reason that one file differs from the
+  # other two — and a bind mount is the first backing store where the directory's
+  # own permissions become the operator's choice. So the contract is asserted here
+  # instead of described.
+  local modes
+  modes=$(prod exec -T api sh -c 'stat -c "%a %n" /secrets/*' 2>/dev/null | tr -d '\r' | sort | tr '\n' ' ' || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ "$modes" = "600 /secrets/app_db_password 600 /secrets/metalmark_secret_key 644 /secrets/postgres_password " ] && echo ok || echo FAIL)" \
+    "…with the modes the database needs" "${modes:-<none>}"
+  [ "$modes" = "600 /secrets/app_db_password 600 /secrets/metalmark_secret_key 644 /secrets/postgres_password " ] || fail=1
+
+  # What the operator is buying. A `down` with no `-v` and an `up` must not
+  # re-initialize the cluster or regenerate the credentials; the inode is the
+  # assertion, because a second `initdb` writes a new `PG_VERSION` and cannot
+  # preserve the old one. The key is compared and never printed — the same
+  # discipline the session cookie above gets, and for the same reason.
+  local inode_before inode_after key_before key_after
+  inode_before=$(prod exec -T db stat -c %i /var/lib/postgresql/data/PG_VERSION 2>/dev/null | tr -d '\r' || true)
+  key_before=$(prod exec -T api sha256sum /secrets/metalmark_secret_key 2>/dev/null | tr -d '\r' | cut -d' ' -f1 || true)
+
+  prod down --remove-orphans >/dev/null 2>&1 || true
+  if ! prod_up || ! prod_wait_healthy; then
+    warn "  the deployment did not come back up on the same host paths"
+    prod logs --tail 40 db api >&2
+    prod_paths_cleanup || true
+    return 1
+  fi
+
+  inode_after=$(prod exec -T db stat -c %i /var/lib/postgresql/data/PG_VERSION 2>/dev/null | tr -d '\r' || true)
+  key_after=$(prod exec -T api sha256sum /secrets/metalmark_secret_key 2>/dev/null | tr -d '\r' | cut -d' ' -f1 || true)
+
+  printf '  %-4s %-52s %s\n' \
+    "$([ -n "$inode_before" ] && [ "$inode_before" = "$inode_after" ] && echo ok || echo FAIL)" \
+    "a restart kept the same cluster" "${inode_before:-<none>} -> ${inode_after:-<none>}"
+  { [ -n "$inode_before" ] && [ "$inode_before" = "$inode_after" ]; } || fail=1
+
+  printf '  %-4s %-52s %s\n' \
+    "$([ -n "$key_before" ] && [ "$key_before" = "$key_after" ] && echo ok || echo FAIL)" \
+    "…and did not regenerate the credentials" "<compared, value not printed>"
+  { [ -n "$key_before" ] && [ "$key_before" = "$key_after" ]; } || fail=1
+
+  prod_paths_cleanup || true
   return $fail
 }
 

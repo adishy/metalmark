@@ -62,6 +62,33 @@ Neither number is load-bearing. Both come from `METALMARK_HTTP_PORT` / `METALMAR
 `scripts/verify.sh` reads those same two variables — so the `prod` gate probes whatever a deployment was
 actually told to open, rather than a default it did not use.
 
+The *interface* the http door opens on has since stopped being loopback-only, so "the loopback http door"
+above names what it was: `deploy/docker-compose.yaml` now publishes it on `0.0.0.0`, overridable with
+`METALMARK_HTTP_BIND`. ADR-0041 records that decision and its one real cost — the LAN can reach an origin
+on which the `Secure` session cookie will not let anyone log in — and is the place to read before assuming
+the door is local.
+
+## A note on the deployment file's name
+
+The deployment has been one file under three names, and two accepted records name one of the older ones:
+
+| Name | Named by | What it was |
+|---|---|---|
+| `docker-compose.prod.yml` | ADR-0038 | an overlay, run with a second `-f` against the dev stack — deleted |
+| `deploy/compose.yaml` | ADR-0039 | the standalone file, fetched on its own — the install |
+| `deploy/docker-compose.yaml` | — | the same file, renamed |
+
+**So where an accepted record names an earlier name, read the last one.** Both records are left as written,
+per the immutability rule above: ADR-0039's body says `deploy/compose.yaml` throughout, and ADR-0038's
+status line says the overlay "is `deploy/compose.yaml` now".
+
+The rename is a `git mv`: a move, not a new file, so the history behind the old path follows it. Other
+changes to that file landed in the same commit — they are edits to the deployment, not part of the rename.
+Compose discovers
+`compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` on its own, and its
+precedence order only matters in a directory holding more than one of them, which is not this one. The
+current spelling is the one the wider self-hosting tooling looks for.
+
 ## Index
 
 | ADR | Title | Status |
@@ -104,5 +131,7 @@ actually told to open, rather than a default it did not use.
 | [0035](0035-reports-read-once.md) | A report reads each thing once, and rounds where it says it rounds | Accepted |
 | [0036](0036-portable-export.md) | A portable export is a document, a backup is the instance, and no id crosses between | Accepted |
 | [0037](0037-desktop-notifications-in-app.md) | Desktop notifications: in-app, not Web Push; the decision to notify is recorded server-side | Accepted |
-| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted, superseded in part by 0039 |
-| [0039](0039-the-deployment-is-standalone.md) | The deployment is a standalone file that carries no credentials, and the image is published | Accepted |
+| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted, superseded in part by 0039 and 0041 |
+| [0039](0039-the-deployment-is-standalone.md) | The deployment is a standalone file that carries no credentials, and the image is published | Accepted, extended by 0040 |
+| [0040](0040-persistent-state-is-overridable.md) | Persistent state is a named volume by default, and a host path when you say so | Accepted |
+| [0041](0041-the-plain-http-door-answers-on-the-lan.md) | The plain-HTTP door answers on the LAN, not only on loopback | Accepted |

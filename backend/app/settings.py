@@ -3,7 +3,7 @@
 Secrets are loaded from files (docker secrets), never plain env vars, per
 ARCHITECTURE §5. ``METALMARK_SECRET_KEY_FILE`` points at the Fernet key, and the
 two database credentials accept the same ``_FILE`` suffix — which is what lets
-``deploy/compose.yaml`` generate every credential at install time instead of
+``deploy/docker-compose.yaml`` generate every credential at install time instead of
 carrying one.
 """
 
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # above already worked this way; these follow because a password passed as an
     # environment variable is a password in `docker inspect` and in every process
     # listing on the host, and because a deployment that *generates* its
-    # credentials (deploy/compose.yaml) has no other way to hand them over.
+    # credentials (deploy/docker-compose.yaml) has no other way to hand them over.
     postgres_password_file: str | None = Field(default=None, alias="POSTGRES_PASSWORD_FILE")
     app_db_password_file: str | None = Field(default=None, alias="APP_DB_PASSWORD_FILE")
 

@@ -5,7 +5,7 @@
 # with `npm install` rather than `npm ci` on purpose — the dev stack is meant to
 # survive a package.json edit without a rebuild.
 #
-# `build` and `prod` are the deployment, selected by deploy/compose.yaml.
+# `build` and `prod` are the deployment, selected by deploy/docker-compose.yaml.
 # The difference that matters between them and `dev` is not image size or startup
 # time: **`npm run build` is the only thing that produces `dist/sw.js`**, and with
 # no service worker the app cannot display a desktop notification at all — the

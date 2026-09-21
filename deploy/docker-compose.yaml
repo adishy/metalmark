@@ -2,13 +2,14 @@
 #
 #   docker compose up -d
 #
-# Nothing else is required. No clone, no `.env`, no build tools, and no
-# credential to write down anywhere: the images come from GHCR (ADR-0039) and the
-# three credentials this stack needs are generated on first boot into a named
-# volume by `secret-init` below. Open https://<METALMARK_SITE>:8790 and sign up —
-# the first signup creates the household (ADR-0027), so there is nothing to seed
-# either. The README has the operator's version of this, including the one
-# command that makes a browser trust the certificate.
+# Nothing else is required. Every value below has a default that works, so this
+# file on its own is a running deployment — no clone, no build tools (the images
+# come from GHCR, ADR-0039), and no credential to write down anywhere, because
+# the three this stack needs are generated on first boot by `secret-init`. Open
+# https://<METALMARK_SITE>:8790 and sign up — the first signup creates the
+# household (ADR-0027), so there is nothing to seed either. The README has the
+# operator's version of this, including the one command that makes a browser
+# trust the certificate.
 #
 # **No `name:` on purpose.** The compose project is named after the directory you
 # run this in, which is what a stranger installing it wants and, more
@@ -25,9 +26,11 @@
 #     migration, and a variable that agrees in six places is a failure that
 #     surfaces as `role "…" does not exist`.
 #   * **Deployment-specific values are interpolated**, and they are exactly the
-#     three things a target machine decides for itself: the hostname on the
-#     certificate, the two published ports, and whether signup stays open. None
-#     has a dev value that could be inherited by mistake.
+#     four things a target machine decides for itself: the hostname on the
+#     certificate, the addresses the two doors open on (their ports, and the
+#     interface the plain-HTTP one binds), whether signup stays open, and where
+#     the persistent state lives. None has a dev value that could be inherited by
+#     mistake.
 #
 # That second rule is not decoration. `METALMARK_ENV: prod` is written as a
 # literal for precisely this reason: it *does* have a dev value, `.env` sets it
@@ -36,12 +39,32 @@
 # would then have been the dev api behind nginx: the localhost CORS allowance
 # still open, the session cookie still `Secure`-less, and the fake aggregator
 # still selectable.
+#
+# The last of those four — storage — is the one place the two rules look like
+# they contradict each other, because a path is repeated across five services
+# exactly as a role name is, so it is worth saying why they do not.
+#
+# An identity that disagrees with itself fails at *runtime*, deep inside a
+# connection attempt, as `role "…" does not exist` — the symptom is three layers
+# from the cause, which is what makes it expensive. A path that resolves wrongly
+# fails at *`up`*, in the open, as a mount that cannot be created. And the
+# container side of every one of these mounts is a literal — `/secrets`,
+# `/var/lib/postgresql/data`, `/data` — so no process reads a path that came from
+# a variable even in principle; what varies is only which host directory backs a
+# fixed name. It is one decision written once and repeated, not five copies of a
+# fact that have to be kept in agreement.
+#
+# The defaults are `db_data`, `metalmark_secrets` and `caddy_data`: Docker-managed
+# named volumes, which is what makes the zero-configuration install above true.
+# Setting any of them to an absolute path moves that state onto a real filesystem
+# instead. The `volumes:` block at the end of this file has the details and the
+# one way to get this wrong.
 
 services:
   # ---------------------------------------------------------------------------
   # The credentials, once, before anything that needs one.
   # ---------------------------------------------------------------------------
-  # Three files into a named volume — the Fernet key that encrypts bank
+  # Three files into the secrets location — the Fernet key that encrypts bank
   # credentials at rest, the Postgres owner's password, and the app role's.
   # `app.bootstrap_secrets` never overwrites an existing file, so restarting the
   # stack cannot rotate the key out from under the data it decrypts; deleting the
@@ -53,9 +76,22 @@ services:
       context: ../backend
     command: ["python", "-m", "app.bootstrap_secrets"]
     environment:
+      # The *container* path, and deliberately a literal. This variable shares a
+      # name with the interpolation variable on the mount below and the two are
+      # different namespaces: `.env` says which host directory backs `/secrets`,
+      # this says where inside the container to put it, and only the first is
+      # ever yours to move. Nothing reads `.env` into a container, so the host
+      # value cannot reach this one.
       METALMARK_SECRETS_DIR: /secrets
     volumes:
-      - metalmark_secrets:/secrets
+      # `${VAR:-default}` — the one shape used for every overridable location in
+      # this file. Compose resolves the source by its own shape rather than by
+      # any setting: a bare name matching a top-level `volumes:` entry is that
+      # named volume, and a leading `/` is a bind mount. Unset therefore means
+      # exactly what it meant before the variable existed, and an absolute path
+      # moves this data onto your own filesystem. The `volumes:` block at the end
+      # has the reasons and the one way to get it wrong.
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets
     restart: "no"
     # The image's healthcheck curls the api's /healthz, which this one-shot does
     # not serve — left on, it would report this container unhealthy every run.
@@ -73,8 +109,8 @@ services:
       # reads this one natively.
       POSTGRES_PASSWORD_FILE: /secrets/postgres_password
     volumes:
-      - db_data:/var/lib/postgresql/data
-      - metalmark_secrets:/secrets:ro
+      - ${METALMARK_DB_DIR:-db_data}:/var/lib/postgresql/data
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets:ro
     depends_on:
       secret-init:
         condition: service_completed_successfully
@@ -116,7 +152,7 @@ services:
       APP_DB_PASSWORD_FILE: /secrets/app_db_password
       METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
     volumes:
-      - metalmark_secrets:/secrets:ro
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets:ro
     depends_on:
       secret-init:
         condition: service_completed_successfully
@@ -155,7 +191,7 @@ services:
       # deployment at fabricated data.
       METALMARK_SIMPLEFIN_PROVIDER: simplefin
     volumes:
-      - metalmark_secrets:/secrets:ro
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets:ro
     depends_on:
       secret-init:
         condition: service_completed_successfully
@@ -186,7 +222,7 @@ services:
       APP_DB_PASSWORD_FILE: /secrets/app_db_password
       METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
     volumes:
-      - metalmark_secrets:/secrets:ro
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets:ro
     depends_on:
       secret-init:
         condition: service_completed_successfully
@@ -216,12 +252,17 @@ services:
     depends_on:
       - api
     ports:
-      # Loopback of the machine running the stack, and nowhere else. Plain http is
-      # acceptable on that interface precisely because it never leaves the
-      # machine, and `localhost` is a secure context by specification — so this is
-      # the one door that needs no certificate installed and still gets a service
-      # worker. It is the door for the machine itself; Caddy below is the one for
-      # every other device.
+      # Published on every interface, so that a reverse proxy of your own can sit
+      # in front of it — and, for the same reason, so can the rest of the LAN.
+      # `METALMARK_HTTP_BIND=127.0.0.1` puts it back on loopback only.
+      #
+      # What the door is *for* is the machine running the stack: plain http is
+      # acceptable there because `localhost` is a secure context by
+      # specification, so this is the one way in that needs no certificate
+      # installed and still gets a service worker. Every other device belongs on
+      # Caddy below, and that is not a preference — `METALMARK_ENV=prod` sets the
+      # session cookie's `Secure` flag, so a browser on another machine can load
+      # the app through this door and then cannot stay logged in on it.
       #
       # 8791 rather than 8080, for the same reason port 80 is not published
       # below: 8080 is the port most likely to be taken on a machine that is also
@@ -229,7 +270,7 @@ services:
       # self-hosted tools — so a default there fails on the very first `up`, for a
       # reason that has nothing to do with this app. `METALMARK_HTTP_PORT`
       # overrides it.
-      - "127.0.0.1:${METALMARK_HTTP_PORT:-8791}:8080"
+      - "${METALMARK_HTTP_BIND:-0.0.0.0}:${METALMARK_HTTP_PORT:-8791}:8080"
     healthcheck:
       # nginx's own image has no healthcheck, and caddy below waits on this one
       # rather than on the container merely existing — otherwise the first request
@@ -263,8 +304,13 @@ services:
       # The local CA and everything it has issued. A named volume rather than an
       # anonymous one, so that `up`/`down` does not regenerate the CA — which
       # would silently invalidate the trust every client installed, and present
-      # as a certificate error that looks like the deployment is broken.
-      - caddy_data:/data
+      # as a certificate error that looks like the deployment is broken. Losing
+      # it is survivable in a way that losing the secrets volume is not: every
+      # client re-trusts a new root, which is tedious rather than destructive.
+      - ${METALMARK_CADDY_DIR:-caddy_data}:/data
+      # The only location here that is deliberately not overridable. Caddy
+      # regenerates it from the Caddyfile above, which is in this file — there is
+      # nothing in it for a backup tool to want.
       - caddy_config:/config
     restart: unless-stopped
 
@@ -346,7 +392,54 @@ configs:
       	reverse_proxy web:8080
       }
 
+# -----------------------------------------------------------------------------
+# Where the persistent state lives, by default.
+# -----------------------------------------------------------------------------
+# These names are the defaults for the three overridable locations above, and
+# declaring them is not optional: compose has to be able to resolve the source of
+# every mount, and the unset branch of `${VAR:-…}` is these names. When you set
+# one of those variables, the volume it names is simply never created.
+#
+# To put any of this on a real filesystem instead — so that whatever already
+# backs up this machine, or the array under it, covers the ledger too — give it
+# an absolute path in `.env` beside this file (or in the environment):
+#
+#   METALMARK_DB_DIR=/srv/metalmark/db
+#   METALMARK_SECRETS_DIR=/srv/metalmark/secrets
+#   METALMARK_CADDY_DIR=/srv/metalmark/caddy
+#
+# Absolute, because compose decides by the shape of the value: a leading `/` is a
+# bind mount and a bare name is a named volume, so anything else — a relative
+# path, or `~`, which compose does not expand — is read as a *volume name* and
+# fails with `refers to undefined volume`. Missing directories are created for
+# you, parents included.
+#
+# Four things follow from the containers running as root and 999 rather than as
+# you:
+#
+#   * **The database directory must be dedicated and empty.** The Postgres
+#     entrypoint `chmod 700`s it and recursively `chown`s everything inside it to
+#     uid 999 before dropping privileges. Point this at a directory holding
+#     anything else and that content is re-owned too.
+#   * **You will not be able to read it afterwards.** Mode 700 owned by uid 999
+#     makes `ls /srv/metalmark/db` as you a `Permission denied` — which is
+#     expected, and is why cleaning one of these up takes a container.
+#   * **The secrets directory, and every parent of it, must be traversable by uid
+#     999** — `o+x`, so 0755 is fine and 0700 is not. Postgres reads
+#     `postgres_password` from there, and when it cannot, it reports an
+#     authentication failure that names neither the directory nor the permission.
+#   * **Not a network share.** Postgres documents network filesystems as unsafe
+#     for its data directory, and the way that fails is corruption rather than an
+#     error. Point this at local disk that your snapshot tooling already covers —
+#     not at a share the database runs on top of.
+#
+# **Setting METALMARK_DB_DIR on a deployment that already has data does not move
+# that data.** It points Postgres at an empty directory, `initdb` runs, and the
+# stack comes up healthy with an empty ledger; the old data is still sitting in
+# the now-unreferenced volume and nothing tells you. Copy it across first — the
+# README has the recipe — or start over deliberately.
 volumes:
+  # Postgres's data directory — the ledger.
   db_data:
   # The generated credentials. Separate from db_data on purpose: it holds the
   # Fernet key, so it is the one volume whose loss is not survivable by
@@ -354,5 +447,8 @@ volumes:
   # exists cannot be recovered, and its absence presents as a sync that fails
   # authentication for no visible reason. Back this up with the database.
   metalmark_secrets:
+  # Caddy's local CA and every certificate it issued.
   caddy_data:
+  # Regenerable from the Caddyfile in this file, so it is deliberately the one
+  # location that is not overridable.
   caddy_config:

@@ -1,6 +1,6 @@
 """Install-time credentials: generated once, never regenerated, never printed.
 
-``app.bootstrap_secrets`` is what makes ``deploy/compose.yaml`` a file with no
+``app.bootstrap_secrets`` is what makes ``deploy/docker-compose.yaml`` a file with no
 credential in it — the deployment runs it as a one-shot container before anything
 that needs a secret, so every test here is about the two ways that could go
 wrong rather than about whether it writes a file.

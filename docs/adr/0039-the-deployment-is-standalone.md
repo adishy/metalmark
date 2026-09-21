@@ -1,6 +1,13 @@
 # ADR 0039: The deployment is a standalone file that carries no credentials, and the image is published
 
-- **Status:** Accepted
+- **Status:** Accepted, **extended by ADR-0040** — which makes the *location* of the persistent state
+  overridable and nothing else. Everything here stands as written for the default install, including "it
+  generates its own credentials on first boot" and the named volume they are written into. Two sentences
+  here stop being true only when an override is in use, and are named in ADR-0040's follow-ups: decision
+  2's "deleting the volume is the only way to get a new key" (the volume, or the directory backing it) and
+  consequence 2's "there are **two** volumes". The "no `.env` to write" in decision 1 is a third: no `.env`
+  is *required*, because every value has a default, but the README now presents the one line
+  `METALMARK_SITE` needs as a step rather than leaving it unsaid.
 - **Date:** 2026-09-20
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0038 (the deployment overlay this replaces — its other decisions stand),

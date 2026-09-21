@@ -1,10 +1,13 @@
 # ADR 0038: The deployment is an overlay on the dev stack: a built frontend, a stated environment, and TLS
 
 - **Status:** Accepted, **superseded in part by ADR-0039** — decision 1 (an overlay on the dev stack) and
-  decision 6 (how the site address reaches the Caddyfile). The file this ADR names,
-  `docker-compose.prod.yml`, no longer exists: it is `deploy/compose.yaml` now. Everything else here —
-  the built frontend and why it is the point, `METALMARK_ENV=prod` stated literally and what it does,
-  TLS being non-optional, and the `prod` gate — stands unchanged.
+  decision 6 (how the site address reaches the Caddyfile) — **and in part by ADR-0041**, which replaces
+  the loopback clause of decision 5: that door is now published on every interface by default, with
+  `METALMARK_HTTP_BIND=127.0.0.1` to put it back. The file this ADR names, `docker-compose.prod.yml`, no
+  longer exists: it became `deploy/compose.yaml`, which is `deploy/docker-compose.yaml` — see the note on
+  the deployment file's name in this directory's `README.md`. Everything else here — the built frontend
+  and why it is the point, `METALMARK_ENV=prod` stated literally and what it does, TLS being non-optional,
+  and the `prod` gate — stands unchanged.
 - **Date:** 2026-09-20
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0037 (desktop notifications, and the deployment consequence it left open),

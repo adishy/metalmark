@@ -1,6 +1,6 @@
 """Reading credentials from files: docker's `_FILE` convention, and its edges.
 
-`deploy/compose.yaml` generates every credential it needs into a volume, so
+`deploy/docker-compose.yaml` generates every credential it needs into a volume, so
 `Settings` has to be able to read all three from a path — the Fernet key could
 already, and the two database passwords are what this covers. The interesting
 cases are not the happy path but the three ways a file-based secret goes wrong in

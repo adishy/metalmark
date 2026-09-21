@@ -271,14 +271,14 @@ jobs:
         run: docker compose down -v
 
   # --------------------------------------------------------------------------
-  # Deployment: boot deploy/compose.yaml from an empty volume and probe it. The
+  # Deployment: boot deploy/docker-compose.yaml from an empty volume and probe it. The
   # only job that builds the frontend for production, serves it the way
   # ARCHITECTURE §1 draws, and therefore the only one that can reach the service
   # worker — which is what makes a desktop notification possible at all, and
   # which no gate could reach before (ADR-0037's gap, closed by ADR-0038).
   #
   # It also boots the deployment the way a *stranger* does: no `secrets/`
-  # directory is created in this job any more, because deploy/compose.yaml
+  # directory is created in this job any more, because deploy/docker-compose.yaml
   # generates its own credentials and applies its own migrations. If either of
   # those regresses, this job is what notices.
   # --------------------------------------------------------------------------

@@ -33,7 +33,7 @@ that updates this document.
   `sync_jobs` rows for on-demand "Sync now"; (c) runs the rules engine on newly ingested transactions;
   (d) snapshots daily balances. Same codebase/image as `api`, different entrypoint.
 - **No inbound webhooks.** Everything the worker needs, it pulls.
-- **This diagram is the deployment, not the dev stack.** `deploy/compose.yaml` (ADR-0038, ADR-0039) is what
+- **This diagram is the deployment, not the dev stack.** `deploy/docker-compose.yaml` (ADR-0038, ADR-0039) is what
   serves the static PWA from nginx behind Caddy; the default `docker-compose.yml` runs Vite's dev server
   over plain HTTP on localhost and has neither. One detail moved: the diagram forks `/api` at Caddy, and
   the deployment forks it inside nginx instead — the browser still sees a single origin, which is the
@@ -522,7 +522,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 - **Untrusted files**: OFX/QFX/CSV are user-supplied. Parse OFX/QFX with a **defused XML parser** (XXE /
   billion-laughs). Validate/limit CSV size and columns.
 - **Transport**: Caddy TLS; reachable only over Tailscale/LAN. No public ingress. Implemented by
-  `deploy/compose.yaml` (ADR-0038, ADR-0039). TLS here is not only about the wire: a service worker and a
+  `deploy/docker-compose.yaml` (ADR-0038, ADR-0039). TLS here is not only about the wire: a service worker and a
   `Secure` session cookie are both gated on a secure context, so the certificate is what makes the app's
   notifications and its login work at all on a second device.
 - **PWA**: cache the app *shell* only; data endpoints are `no-store` — the service worker must never persist
