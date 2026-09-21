@@ -391,6 +391,14 @@ green, CI green, pushed. `reset` between mutating gates.
   move — the failure mode decision A exists to prevent.
 - Ready for the user's end-to-end run against real credentials, reported as counts and statuses only.
 
+**Where it stands, measured rather than asserted, on `a4fa6e9` (2026-09-20).** All ten gates pass locally
+from a cold stack — `secrets`, `lint`, `pytest`, `frontend`, `contract`, `drill`, `e2e`, `walkthrough`,
+`prod`, `reset` — and CI run
+[35553553874](https://github.com/adishy/metalmark/actions/runs/35553553874) is green on all eight jobs,
+`publish` included, so the images a stranger pulls are the ones this gate verified. That clears the second
+bullet. The last bullet is deliberately not mine to check: the end-to-end run against real credentials
+happens in the UI, by the user, and is reported back as counts and statuses only.
+
 ## What this plan deliberately does not do
 
 - **Web Push / notifications when the app is closed** — contradicts ADR-0002; see decision E.
