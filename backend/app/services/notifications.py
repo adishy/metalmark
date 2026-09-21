@@ -1,9 +1,19 @@
-"""Out-of-band notice when a bank connection breaks (ADR-0028).
+"""Notices when a bank connection breaks — the decision, the record, and the read.
 
-Nothing here is load-bearing. A sync succeeds or fails on the bank's answer and
-never on whether a webhook answered, so every failure in this module is swallowed,
-the timeout is short, and the default is a **no-op**: an instance with no
-``METALMARK_NOTIFY_WEBHOOK_URL`` sends nothing and says so at debug level.
+Two sinks and one decision (ADR-0037). The decision is :func:`should_notify`; the
+sinks are the webhook (ADR-0028) and the in-app notification the browser shows.
+The webhook is *delivered* here and the in-app notice is **recorded** here and read
+back later by :func:`list_notices`, because the browser cannot be pushed to: it
+polls a row that says a notice was decided. That is the whole reason the record
+exists — a browser re-deriving `should_notify` in TypeScript would drift from it,
+and it would drift towards notifying too often.
+
+Nothing here is load-bearing for a sync. A sync succeeds or fails on the bank's
+answer and never on whether a webhook answered, so every failure in the delivery
+half is swallowed, the timeout is short, and the default is a **no-op**: an
+instance with no ``METALMARK_NOTIFY_WEBHOOK_URL`` sends nothing and says so at
+debug level. Recording happens regardless of the webhook, which is what makes the
+in-app sink work on an instance that configured nothing.
 
 **Transition-only, not every failure.** A connection whose credential was revoked
 keeps failing: the cron retries it, and the next cron retries it again. Notifying
@@ -28,11 +38,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.logging import get_logger
-from app.models import AccountConnection, SyncRun
+from app.models import AccountConnection, SyncRun, SyncRunEvent
 from app.security.redact import sanitize
 from app.settings import get_settings
 
@@ -47,6 +57,23 @@ REPEAT_AFTER = timedelta(hours=24)
 #: Short on purpose. This runs in the worker's process, and a webhook that hangs
 #: must not become a connection that never retries.
 TIMEOUT_SECONDS = 5.0
+
+#: The ``sync_run_events.event`` that records a decided notice. Namespaced like
+#: every other event the worker writes (``run.failed``, ``run.finished``) — ADR-0037
+#: names the string ``notified``, and this is that decision wearing the naming the
+#: timeline already uses.
+NOTIFIED_EVENT = "run.notified"
+
+#: The event's title when a row somehow has none. A notice with no title is not
+#: worth a notification, but it is worth *something* — the alternative is a
+#: notification whose first line is blank, on a row that only exists because the
+#: worker decided to notify.
+NO_TITLE = "Bank connection problem"
+
+#: One poll's worth. A poll is not an archive: this is a handful of things that
+#: broke recently, and a household past this many unnotified failures is one that
+#: is not reading its notifications anyway.
+NOTICE_LIMIT = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +96,40 @@ class Trouble:
             "connection_id": str(self.connection_id),
             "org_name": self.org_name,
             "message": sanitize(self.message),
+        }
+
+    def notice(self) -> dict:
+        """The detail of the ``run.notified`` row — what the browser will show.
+
+        A second shape rather than the payload above, because the two sinks read
+        differently: a webhook gets fields, a desktop notification gets a title and
+        a line of body text, and composing that line here is what keeps the same
+        facts in one place. It carries **the same facts and no more** — the
+        institution and what is wrong with it (ADR-0037 §6). No balance, no
+        merchant, no amount, no account number: a notification is read over a
+        shoulder, and it is also stored in the browser that showed it, which is the
+        one place this household's bank activity must not end up.
+
+        ``connection_id`` goes with it so the browser can `tag` the notification —
+        a repeat for the same connection replaces the standing one instead of
+        stacking a column of them — and so clicking it can route to that
+        connection rather than to the panel in general.
+
+        The trouble's own name is ``trouble`` here and ``event`` in the webhook
+        payload, and neither spelling is a typo. The detail is splatted into
+        ``RunLog.emit(level, event, **detail)``, so a key named ``event`` is a
+        duplicate keyword argument and a ``TypeError`` at the one moment a
+        connection has just broken — the same collision ``Notifier.send`` records
+        for structlog's positional event. And the row already *has* an ``event``
+        column, whose value is ``run.notified``: a second ``event`` inside its
+        detail, saying something else, is a worse name than a different one.
+        """
+        who = self.org_name or "A bank connection"
+        return {
+            "title": NO_TITLE,
+            "body": f"{who}: {sanitize(self.message)}",
+            "connection_id": str(self.connection_id),
+            "trouble": self.event,
         }
 
 
@@ -142,6 +203,84 @@ async def trouble_for(
         org_name=connection.org_name,
         message=message,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Notice:
+    """A decided notice, read back out of the run event that recorded it.
+
+    Flattened rather than handed to the client as ``event.detail``: the browser
+    should not have to know that a notice's body lives at ``detail["body"]``, and
+    the row's shape is the worker's business — this is the one place that reads it.
+    """
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    ts: datetime
+    connection_id: uuid.UUID | None
+    title: str
+    body: str
+
+
+def notice_from(event: SyncRunEvent) -> Notice:
+    """Read one ``run.notified`` row. Tolerant of a detail that is missing keys.
+
+    Written at write time by :meth:`Trouble.notice`, so the keys are always there
+    in practice — but this is a read path over stored rows, and a row from an older
+    version of that method must not be a 500. A notice with no title still has a
+    title; one with no connection id still shows.
+    """
+    detail = event.detail or {}
+    return Notice(
+        id=event.id,
+        run_id=event.sync_run_id,
+        ts=event.ts,
+        connection_id=_uuid_or_none(detail.get("connection_id")),
+        title=str(detail.get("title") or NO_TITLE),
+        body=str(detail.get("body") or ""),
+    )
+
+
+def _uuid_or_none(value: object) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+async def list_notices(
+    session: AsyncSession, *, since: uuid.UUID | None, limit: int = NOTICE_LIMIT
+) -> list[Notice]:
+    """Notices after ``since``, oldest first — the browser's poll (ADR-0037).
+
+    ``since`` is the id of the last notice a browser showed, and it is an id the
+    caller cannot order by: ``sync_run_events`` is keyed by UUID and its ``ts`` is
+    the *transaction* timestamp, so every event in one run shares it exactly (see
+    ``SyncRunEvent``). So the cursor is **resolved, not compared** — read that
+    row's ``(ts, id)`` and return what is after that pair, which is the total order
+    the two give together.
+
+    A cursor that resolves to nothing — pruned, mistyped, or another household's,
+    which RLS hides — is treated as **no cursor at all**. That re-shows the recent
+    window rather than showing nothing, and it is the right way round: the failure
+    mode of a lost cursor is a repeated notification, and the failure mode of
+    ignoring an unknown one is silence about a broken bank.
+    """
+    stmt = select(SyncRunEvent).where(SyncRunEvent.event == NOTIFIED_EVENT)
+    if since is not None:
+        anchor = (
+            await session.execute(
+                select(SyncRunEvent.ts).where(
+                    SyncRunEvent.id == since, SyncRunEvent.event == NOTIFIED_EVENT
+                )
+            )
+        ).scalar_one_or_none()
+        if anchor is not None:
+            stmt = stmt.where(tuple_(SyncRunEvent.ts, SyncRunEvent.id) > tuple_(anchor, since))
+    rows = (
+        await session.execute(stmt.order_by(SyncRunEvent.ts, SyncRunEvent.id).limit(limit))
+    ).scalars().all()
+    return [notice_from(row) for row in rows]
 
 
 class Notifier:

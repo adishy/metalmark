@@ -1,6 +1,6 @@
 # ADR 0037: Desktop notifications are in-app, not Web Push; the decision to notify is recorded server-side
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-20
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0002 (poll-based, LAN/VPN only), ADR-0016 (admin sync observability),
@@ -46,10 +46,29 @@ record the decision to notify on the server rather than deciding in the browser.
    not a webhook is configured, so an instance with no `METALMARK_NOTIFY_WEBHOOK_URL` still notifies
    in-app.
 
-3. **The browser polls `GET /sync/notifications?since=<id>`**, a scoped, owner-only endpoint returning
-   notices newer than the cursor. The cursor is the last-seen row id, held in `localStorage`. Each
-   notice is shown once per browser; a notice already shown is never re-shown, because the page is
+   *Revised at implementation:* the event string is **`run.notified`**, not `notified`. Every other
+   event the worker writes is namespaced by what it is about (`run.failed`, `run.finished`,
+   `balance.snapshotted`, `transfers.matched`), and an event with no namespace would be the one row in
+   the timeline a reader cannot place. The record's *detail* also names the trouble `trouble` rather
+   than `event`, because the detail is splatted into `RunLog.emit(level, event, **detail)` and a key
+   named `event` is a duplicate keyword argument — a `TypeError` in the failure path, which is the one
+   path a notification must survive. It was found by a test rather than in production.
+
+3. **The browser polls `GET /connections/notifications?since=<id>`**, a scoped, owner-only endpoint
+   returning notices newer than the cursor. The cursor is the last-seen row id, held in `localStorage`.
+   Each notice is shown once per browser; a notice already shown is never re-shown, because the page is
    reading a decision that was already made rather than making one.
+
+   *Revised at implementation:* this ADR first said `/sync/notifications`, and there is no `/sync`
+   namespace — the sync surface lives under `/connections` (`/connections/runs`, `/connections/jobs`),
+   and a namespace invented for one endpoint would be the only thing in the app that does not read
+   like its neighbours.
+
+   A row id is not an ordering, so `since` is resolved rather than compared: the server reads that
+   row's `(ts, id)` and returns events after it. `sync_run_events` is keyed by UUID and its `ts` is the
+   *transaction* timestamp (the model's own docstring says so — every event in one run shares it
+   exactly), so `(ts, id)` is the total order the pair gives, and the client keeps holding an opaque
+   id. An id the server cannot find — pruned, or another household's — is treated as no cursor.
 
 4. **Permission is requested from an explicit action, never on load.** A browser-native permission
    prompt that appears unbidden is the one every user reflexively denies, and a denial is permanent

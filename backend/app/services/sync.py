@@ -1202,6 +1202,14 @@ async def _finish_failed(
                 session, connection=connection, run_id=run_id,
                 status=connection.status, message=safe, now=moment,
             )
+            if trouble is not None:
+                # Recorded where it was decided, in this run's own transaction
+                # (ADR-0037). The record *is* the in-app notice — the browser
+                # cannot be pushed to, so it polls for these rows — and it has to
+                # commit with the run it belongs to: a notice that was only in
+                # this process's memory when it died was never sent, and the run
+                # it would have been filed under is the run that is now gone.
+                await log.emit("info", notifications.NOTIFIED_EVENT, **trouble.notice())
     if trouble is not None:
         await notifications.deliver(trouble)
     return SyncOutcome(status="error", run_id=run_id, error=safe)
@@ -1439,6 +1447,11 @@ async def run_connection_sync(
                         session, connection=connection, run_id=run_id,
                         status=connection_status, message=connection.last_error, now=moment,
                     )
+                    # Recorded here for the same reason as in `_finish_failed`:
+                    # this is the transaction that decides, and the row must
+                    # commit with it (ADR-0037).
+                    if trouble is not None:
+                        await log.emit("info", notifications.NOTIFIED_EVENT, **trouble.notice())
                 else:
                     # A run that reached the bank without a connection-level
                     # complaint clears the previous one: the health column

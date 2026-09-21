@@ -28,12 +28,14 @@ from app.schemas.connections import (
     ConnectionDefaults,
     ConnectionOut,
     ConnectionUpdate,
+    NotificationOut,
     SyncJobOut,
     SyncRunDetail,
     SyncRunEventOut,
     SyncRunOut,
 )
 from app.services import connections as svc
+from app.services import notifications
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
@@ -150,3 +152,25 @@ async def get_run(run_id: uuid.UUID, ctx: RequestContext = Depends(require_owner
         run=SyncRunOut.model_validate(run),
         events=[SyncRunEventOut.model_validate(e) for e in events],
     )
+
+
+@router.get("/notifications", response_model=list[NotificationOut])
+async def list_notifications(
+    since: uuid.UUID | None = Query(default=None),
+    ctx: RequestContext = Depends(require_owner),
+):
+    """Notices newer than the browser's cursor — polled, never pushed (ADR-0037).
+
+    The app asks for this on a timer while a tab is open, because the decision to
+    notify is ``should_notify``'s, in the worker, and a browser left to re-derive
+    it would drift towards notifying too often. ``since`` is the id of the last
+    notice this browser showed, kept in its ``localStorage``; how it is turned
+    into an ordering is ``notifications.list_notices``' business.
+
+    Owner-only like everything else here. A notice names an institution and what is
+    wrong with it, and that is the household's business and not a member's.
+    """
+    return [
+        NotificationOut.model_validate(n)
+        for n in await notifications.list_notices(ctx.session, since=since)
+    ]

@@ -507,6 +507,44 @@ async def test_a_run_for_a_deleted_connection_still_names_its_institution(api):
     assert runs[0]["connection_label"] == "Bridge A"
 
 
+# ---- the notices a failure produced ----------------------------------------
+
+
+async def test_a_broken_connection_leaves_a_notice_the_page_can_poll(api):
+    """The browser's half of ADR-0037, end to end over HTTP.
+
+    Driven through a real failing sync rather than by inserting a row, because
+    the route's job is to read what the worker recorded — a test that wrote its
+    own row would still pass against a route reading the wrong event name.
+
+    The cursor is asserted at the same time, since it is what the page actually
+    stores: the id it just saw, asked again with, and told there is nothing new.
+    """
+    from app.services import sync as sync_svc
+
+    client, household_id, _, provider = api
+    connection = await _connect(client)
+    cid = uuid.UUID(connection["id"])
+
+    provider.raise_on_fetch = ProviderError(
+        "the bridge refused the stored credential", kind="auth", status=403
+    )
+    await sync_svc.run_connection_sync(household_id, cid, provider=provider)
+
+    resp = await client.get("/connections/notifications")
+    assert resp.status_code == 200, resp.text
+    (notice,) = resp.json()
+    assert notice["connection_id"] == connection["id"]
+    assert notice["title"] == "Bank connection problem"
+    assert "refused the stored credential" in notice["body"]
+    assert FAKE_ACCESS_URL not in json.dumps(notice)
+
+    after = await client.get(
+        "/connections/notifications", params={"since": notice["id"]}
+    )
+    assert after.json() == []
+
+
 # ---- disconnect ------------------------------------------------------------
 
 
@@ -631,6 +669,7 @@ def _every_route(connection_id, job_id, claim: dict):
         ("GET", "/connections", {}),
         ("GET", "/connections/defaults", {}),
         ("GET", "/connections/jobs", {}),
+        ("GET", "/connections/notifications", {}),
         ("GET", "/connections/runs", {}),
         ("POST", "/connections/claim", claim),
         ("PATCH", f"/connections/{cid}", {"json": {"is_enabled": False}}),

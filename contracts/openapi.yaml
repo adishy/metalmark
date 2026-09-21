@@ -2374,6 +2374,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /connections/notifications:
+    get:
+      tags:
+      - connections
+      summary: List Notifications
+      description: 'Notices newer than the browser''s cursor — polled, never pushed (ADR-0037).
+
+
+        The app asks for this on a timer while a tab is open, because the decision to
+
+        notify is ``should_notify``''s, in the worker, and a browser left to re-derive
+
+        it would drift towards notifying too often. ``since`` is the id of the last
+
+        notice this browser showed, kept in its ``localStorage``; how it is turned
+
+        into an ordering is ``notifications.list_notices``'' business.
+
+
+        Owner-only like everything else here. A notice names an institution and what is
+
+        wrong with it, and that is the household''s business and not a member''s.'
+      operationId: list_notifications_connections_notifications_get
+      parameters:
+      - name: since
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Since
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationOut'
+                title: Response List Notifications Connections Notifications Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /investments/securities:
     get:
       tags:
@@ -4929,6 +4986,64 @@ components:
         response with nothing failing, and the terms that did land would no longer add
 
         up to the delta. Forbidding extras turns that into a loud error instead.'
+    NotificationOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        run_id:
+          type: string
+          format: uuid
+          title: Run Id
+        ts:
+          type: string
+          format: date-time
+          title: Ts
+        connection_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Connection Id
+        title:
+          type: string
+          title: Title
+        body:
+          type: string
+          title: Body
+      type: object
+      required:
+      - id
+      - run_id
+      - ts
+      - connection_id
+      - title
+      - body
+      title: NotificationOut
+      description: 'One notice the worker decided to send, as the browser shows it (ADR-0037).
+
+
+        Flattened to a title and a body because that is the shape a notification has,
+
+        and composed **server-side** (``Trouble.notice``) because the decision that
+
+        produced it lives in the worker: a browser allowed to build its own wording
+
+        from raw fields is a browser that can be persuaded to put an amount in it.
+
+        Both strings were sanitized at write time and are returned as they were stored.
+
+
+        ``connection_id`` is what the browser passes as the notification''s ``tag``, so
+
+        a repeat about one connection replaces the standing notification rather than
+
+        stacking a column of them. It is nullable, and deliberately not a 500 when it
+
+        is: a connection disconnected since the failure leaves its notices behind,
+
+        which is correct — the notice is history and the failure still happened.'
     OfxCommitOut:
       properties:
         inserted:

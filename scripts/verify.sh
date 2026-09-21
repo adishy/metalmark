@@ -211,7 +211,8 @@ gate_contract() {
   # and a path added to one of them is the drift that quietly breaks that.
   for path in /accounts /transactions /categories /reports/net-worth /owners \
               /household /rules /fx-rates \
-              /connections /connections/runs /connections/jobs; do
+              /connections /connections/runs /connections/jobs \
+              /connections/notifications; do
     # `|| true`: on a refused connection curl exits non-zero and `set -e` would
     # abort the whole run instead of reporting the gate as failed.
     code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8000${path}" || true)

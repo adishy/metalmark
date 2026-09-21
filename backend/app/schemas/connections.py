@@ -178,6 +178,32 @@ class SyncRunDetail(BaseModel):
     events: list[SyncRunEventOut]
 
 
+class NotificationOut(BaseModel):
+    """One notice the worker decided to send, as the browser shows it (ADR-0037).
+
+    Flattened to a title and a body because that is the shape a notification has,
+    and composed **server-side** (``Trouble.notice``) because the decision that
+    produced it lives in the worker: a browser allowed to build its own wording
+    from raw fields is a browser that can be persuaded to put an amount in it.
+    Both strings were sanitized at write time and are returned as they were stored.
+
+    ``connection_id`` is what the browser passes as the notification's ``tag``, so
+    a repeat about one connection replaces the standing notification rather than
+    stacking a column of them. It is nullable, and deliberately not a 500 when it
+    is: a connection disconnected since the failure leaves its notices behind,
+    which is correct — the notice is history and the failure still happened.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    ts: datetime
+    connection_id: uuid.UUID | None
+    title: str
+    body: str
+
+
 class ConnectionDefaults(BaseModel):
     """The cadence floor, ceiling and default, so the UI's slider needs no
     hard-coded copy of them.
