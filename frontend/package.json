@@ -21,7 +21,6 @@
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",
     "framer-motion": "^11.11.0",
-    "@use-gesture/react": "^10.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0"
