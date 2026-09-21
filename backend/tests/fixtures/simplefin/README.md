@@ -130,8 +130,8 @@ which is the value that *trips* the warning rather than the last value that does
 not. Every real connection's first sync reported `partial` for a range the bridge
 had told us was fine.
 
-Re-measured against the live bridge, one fresh demo token per request, `start-date`
-at a fixed offset from now:
+Re-measured against the live bridge — `scripts/probe_live_bridge.py` does it, one
+fresh demo token per request, `start-date` at a fixed offset from now:
 
 | asked for | recommended warning | capped |
 |---|---|---|
