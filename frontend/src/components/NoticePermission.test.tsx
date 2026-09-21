@@ -5,32 +5,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import NoticePermission from "@/components/NoticePermission";
 import * as notify from "@/lib/notify";
 
-// The four answers a browser can give, rendered. It matches the copy loosely —
-// a substring, not the whole sentence — because the sentences are meant to be
-// editable and the *branch* is the thing under test.
+// The four answers a browser can give, rendered. Assertions match the copy
+// loosely — a substring, not the whole sentence — because the sentences are
+// meant to be editable and the *branch* is the thing under test.
 
 /** Put a browser under the component. `registration: false` is a browser that
  *  has the API but no worker: every `vite dev` session, and therefore every
  *  `docker compose up` deployment.
  *
- *  `answers` is what the prompt comes back with, and the stub applies it to
- *  `Notification.permission` itself — which is what a real browser does, and
- *  what makes the click tests below honest. A stub whose `permission` stayed
- *  "default" forever would let "does not claim success" pass for the wrong
- *  reason: the panel would say "cannot" because the stub still reported no
- *  permission, and never because there was no worker. */
+ *  A grant applies itself to `Notification.permission`, because a real one
+ *  does — the stub would be a liar otherwise, and the lie would flatter the
+ *  tests. A stub whose permission stayed `"default"` after a click would let
+ *  "does not claim success" pass for the wrong reason: the panel would say
+ *  "cannot" because the *stub* still reported no permission, and never because
+ *  there was no worker to show through. So `requestPermission` grants, and the
+ *  two click tests below are testing the real question. */
 function browser({
   permission = "default" as NotificationPermission,
   registration = false,
-  answers = "granted" as NotificationPermission,
-}: {
-  permission?: NotificationPermission;
-  registration?: boolean;
-  answers?: NotificationPermission;
-} = {}) {
+}: { permission?: NotificationPermission; registration?: boolean } = {}) {
   let current = permission;
   const requestPermission = vi.fn(async () => {
-    current = answers;
+    current = "granted";
     return current;
   });
   Object.defineProperty(window, "Notification", {
@@ -42,13 +38,26 @@ function browser({
       requestPermission,
     },
   });
+  // `getRegistration` answers from `registered`, and `ready` is a promise the
+  // test settles by hand — so a test can put the component in the state a
+  // production build passes through on its way up: registration in flight, no
+  // worker to show through *yet*.
+  let registered = registration;
+  let workerArrives: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    workerArrives = () => {
+      registered = true;
+      resolve();
+    };
+  });
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
     value: {
-      getRegistration: vi.fn().mockResolvedValue(registration ? { showNotification: vi.fn() } : undefined),
+      getRegistration: vi.fn(async () => (registered ? { showNotification: vi.fn() } : undefined)),
+      ready,
     },
   });
-  return { requestPermission };
+  return { requestPermission, workerArrives };
 }
 
 function renderControl() {
@@ -118,6 +127,22 @@ describe("<NoticePermission />", () => {
     // And it says where the notices actually are, so the state is not a dead
     // end — the run history carries the same sentences.
     expect(said()).toMatch(/run history/i);
+  });
+
+  it("changes its mind when a worker arrives after the page did", async () => {
+    // The pessimistic half of the same bug, and the state a production build
+    // passes through on its way up: `registerSW` has been called but the worker
+    // is not running yet, so `getRegistration()` answers undefined and the first
+    // honest answer is "cannot". Nothing would ever re-ask — `state` has not
+    // changed — so the panel would say "cannot" on a working deployment for the
+    // rest of the session. `navigator.serviceWorker.ready` is what re-asks.
+    const { workerArrives } = browser({ permission: "granted", registration: false });
+    renderControl();
+
+    await waitFor(() => expect(said()).toMatch(/cannot/i));
+
+    workerArrives();
+    await waitFor(() => expect(said()).toMatch(/notifications are on/i));
   });
 
   it("says where a denial can be undone, rather than offering a control", () => {

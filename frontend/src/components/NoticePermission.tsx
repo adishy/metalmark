@@ -57,8 +57,22 @@ export default function NoticePermission() {
       return;
     }
     let live = true;
-    void notify.canShow().then((yes) => {
-      if (live) setShowable(yes);
+    const check = () => {
+      void notify.canShow().then((yes) => {
+        if (live) setShowable(yes);
+      });
+    };
+    check();
+    // Asked once, and then again when a worker becomes *ready* — because
+    // registration is asynchronous and outlives the first paint, so the first
+    // answer can honestly be "no worker yet" on a page that is about to have
+    // one. Without this the panel would say "cannot" on a production build for
+    // the rest of the session: nothing else re-runs this effect, since `state`
+    // did not change. `ready` settles exactly when a worker is active for this
+    // page, and on a page that never gets one — every `vite dev` session — it
+    // simply never settles, leaving the correct answer standing.
+    void navigator.serviceWorker.ready.then(check).catch(() => {
+      /* never ready is the answer, not an error */
     });
     return () => {
       live = false;
