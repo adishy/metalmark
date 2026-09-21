@@ -107,15 +107,57 @@ implementation, so they are recorded here rather than rediscovered later.
    not of SimpleFIN, and it is precisely why CI must sync against the frozen
    fixtures through `FakeProvider` rather than against the live bridge.
 
-## Request window: 45 days, not 90
+## Request window: 44 days, not 90
 
 The bridge answers a long `start-date` with **HTTP 200 and an `errlist` entry** —
 it caps the range rather than failing:
 
-- `> 90 days` → `gen.api: "Requested date range exceeds limit of 90 days and was capped."`
-- `> 45 days` → `gen.api: "Requested date range exceeds recommended range of 45 days. In the future, this may be capped."`
+- `90 days or more` → `gen.api: "Requested date range exceeds limit of 90 days and was capped."`
+- `45 days or more` → `gen.api: "Requested date range exceeds recommended range of 45 days. In the future, this may be capped."`
 
-So the first-sync lookback is **45 days**, not 90: asking for more returns correct
+So the first-sync lookback is **44 days**, not 90: asking for more returns correct
 data plus a warning on every single first sync. And because these arrive on a 200,
 `gen.api` must map to a run status of **`partial`** — a warning about *our* request
 — never to `connections.status`, which is about the connection's health.
+
+### Why 44 and not 45 — a correction to this file
+
+This section originally said `> 45 days`, and both thresholds were read the same
+way: off a *single* capture whose request happened to be `now − 45d`. That capture
+warned, and the rule was inferred as "more than 45". The inference was one day
+wrong, and the error was not free — the first-sync lookback was then set to 45,
+which is the value that *trips* the warning rather than the last value that does
+not. Every real connection's first sync reported `partial` for a range the bridge
+had told us was fine.
+
+Re-measured against the live bridge, one fresh demo token per request, `start-date`
+at a fixed offset from now:
+
+| asked for | recommended warning | capped |
+|---|---|---|
+| 44d, 44d+1h, 44d+2h | no | no |
+| 44d+3h, 44d+23h, 45d−60s, 45d | **yes** | no |
+| 89d | **yes** | no |
+| 90d, 91d, 365d | no | **yes** |
+
+Two things fall out of that table, and both are one-off-by-one corrections to the
+paragraphs above.
+
+**The recommended boundary falls on the calendar date** of `start-date`, not on the
+elapsed duration: the first three rows land on a date 44 days back and the next
+four on one 45 days back, whatever the time of day. So the trigger is "the start
+date is 45 or more days ago", and the largest safe window is 44 days.
+
+**The cap sits at exactly 90, not above it** — and it *replaces* the recommended
+warning rather than joining it: a request for 90 days or more returns one `gen.api`
+entry, about the cap. The outcome is the same (a `gen.api` maps to `partial`
+either way), but a parser that reported "both complaints" would be reporting
+something the bridge does not send.
+
+**The lesson the capture could not teach:** a threshold read off one sample is a
+threshold plus or minus the step you happened to sample at. The capture's *shapes*
+— correction 6's `errlist` objects, correction 2's `payee` — are trustworthy
+because they are verbatim data. Its *boundaries* are not, and this is the one place
+the difference bit. `tests/unit/test_sync.py` now pins
+`FIRST_SYNC_WINDOW_DAYS < RECOMMENDED_WINDOW_DAYS`, which is the invariant that
+would have caught it.

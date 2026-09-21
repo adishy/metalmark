@@ -412,7 +412,7 @@ async def test_a_late_posting_reconciles_and_the_window_is_why(hh) -> None:
     count of zero would also be true if the row had been *expired and deleted*, so
     it would go on passing while quietly testing the wrong path.
     """
-    first, second = scenarios.pending_then_posted_late()
+    first, second = scenarios.pending_then_posted_late(now=NOW)
     connection_id = await _make_connection(hh)
     provider = FakeProvider(script=scenarios.scenario(first, second))
 

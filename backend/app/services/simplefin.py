@@ -46,10 +46,14 @@ from app.services.aggregator import (
     ProviderTransaction,
 )
 
-#: The bridge caps a pull at 90 days and warns above 45 (fixture README — a
-#: capture's own ``errlist`` is where both numbers come from). Sync asks for 45,
-#: the bottom of the recommended range, so the warning is not a fixture of every
-#: install.
+#: The bridge's two figures, not ours: the cap, and the range it says it
+#: recommends. Both are quoted from its own ``errlist`` messages, and
+#: ``RECOMMENDED_WINDOW_DAYS`` stays 45 for that reason even though asking for 45
+#: trips the warning — the check is inclusive, and the exact trigger, measured
+#: against the live bridge, is the **calendar date** of ``start-date`` being 45 or
+#: more days back. What *we* ask for is ``sync.FIRST_SYNC_WINDOW_DAYS``, which is
+#: strictly less than this on purpose; the relationship is asserted in
+#: ``tests/unit/test_sync_policy.py``.
 MAX_WINDOW_DAYS = 90
 RECOMMENDED_WINDOW_DAYS = 45
 

@@ -91,16 +91,35 @@ PROVIDER = "provider"
 #: and it makes a missed or failed run self-healing.
 OVERLAP_DAYS = 5
 
-#: The first-ever window. The bridge caps a pull at 90 days and *warns* above 45
+#: The first-ever window. The bridge caps a pull at 90 days and *warns* from 45
 #: (fixture README), so asking for 90 would put a ``gen.api`` warning — and a
 #: ``partial`` badge — on every first sync of every connection, to fetch history
 #: the account never had.
-FIRST_SYNC_WINDOW_DAYS = 45
+#:
+#: **44, not 45, and that is the entire point of the constant.** Measured against
+#: the live bridge rather than read off the message, which says 45: the warning is
+#: triggered by the *calendar date* of ``start-date``, and a start date 45 days
+#: back warns while 44 does not. So 45 is the boundary rather than safely under
+#: it — the value whose whole purpose is to keep a first sync clean is the one
+#: that makes it ``partial``, and only against a real connection, where the
+#: fixtures cannot say. ``tests/unit/test_sync.py`` pins the relationship with
+#: ``RECOMMENDED_WINDOW_DAYS``, because 44 next to a message that says 45 reads
+#: like a typo until you read this.
+FIRST_SYNC_WINDOW_DAYS = 44
 
 #: A ceiling on how far back an unsettled row can drag the window. Without it, one
 #: pending row a human marked by hand and never cleared would widen the window on
 #: every run until the bridge capped it.
-MAX_LOOKBACK_DAYS = 365
+#:
+#: **89, not a year, and that is what makes the sentence above true.** The cap is
+#: measured at exactly 90 days, and the bridge *truncates* rather than refuses: any
+#: request past it returns 90 days of data under a ``gen.api`` cap warning. So a
+#: round-number ceiling of 365 guaranteed the truncation this constant exists to
+#: avoid — the run would be narrower than its own log claimed, and ``partial`` for
+#: asking for a range it was never going to get. Clamping here changes no data:
+#: anything past 90 days is unreachable either way, so a stale pending row expires
+#: through the TTL path, which is the honest account of what happened to it.
+MAX_LOOKBACK_DAYS = 89
 
 #: A pending row that neither posts nor reappears is expired after this long. Long
 #: enough to survive a weekend and a bank holiday; short enough that a phantom

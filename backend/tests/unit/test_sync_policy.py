@@ -13,7 +13,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.services import sync
+from app.services import simplefin, sync
 from app.services.sync import _jsonable
 
 # ---- backoff --------------------------------------------------------------
@@ -106,6 +106,51 @@ def test_the_code_prefix_decides_and_never_the_message() -> None:
         None,
     )
     assert sync.classify_errlist(["con.auth: all good actually"]) == ("error", "auth_error")
+
+
+# ---- the request window ---------------------------------------------------
+
+
+def test_the_first_window_is_inside_the_recommended_one() -> None:
+    """44 and 45 are not interchangeable, which is the whole reason this exists.
+
+    The bridge warns when ``start-date`` lands on a calendar date 45 or more days
+    back — the warning sits *at* the recommended window rather than above it, so
+    the recommended value is the last one that trips it. Measured against the live
+    bridge; the fixture README's original "``> 45 days``" was read off a single
+    sample and was one day wrong, and the first-sync lookback was then set to 45.
+    Equality is the bug. Equality is what shipped, and only a real connection
+    could have shown it — the fake provider produces no ``errlist``.
+    """
+    assert sync.FIRST_SYNC_WINDOW_DAYS < simplefin.RECOMMENDED_WINDOW_DAYS
+
+
+def test_the_recommended_window_is_under_the_cap() -> None:
+    """The same shape one step up, and a worse failure: over the cap the bridge
+    returns *capped data* on a 200 rather than a warning, so the payload quietly
+    stops being the window that was asked for."""
+    assert simplefin.RECOMMENDED_WINDOW_DAYS < simplefin.MAX_WINDOW_DAYS
+
+
+def test_the_overlap_is_inside_the_first_window() -> None:
+    """A re-sync asks for less than a first sync. Obvious until someone raises the
+    overlap to "catch more", at which point the steady state is wider than the
+    opening state and the first sync is no longer the widest request we make."""
+    assert sync.OVERLAP_DAYS < sync.FIRST_SYNC_WINDOW_DAYS
+
+
+def test_the_deepest_a_pending_row_can_drag_us_is_under_the_cap() -> None:
+    """The lookback ceiling deliberately exceeds the *recommended* window — a
+    charge that has not posted is worth reaching further back for — but it must
+    stay under the *cap*, because past that the bridge truncates on a 200 instead
+    of refusing. A window that claims a reach the bridge will not honour is a log
+    that misdescribes its own run.
+
+    This one shipped as 365, which is the same class of mistake as the first
+    window being 45: a round number chosen against a boundary nobody had measured.
+    """
+    assert sync.MAX_LOOKBACK_DAYS < simplefin.MAX_WINDOW_DAYS
+    assert sync.FIRST_SYNC_WINDOW_DAYS < sync.MAX_LOOKBACK_DAYS
 
 
 # ---- what may be stored in a run event ------------------------------------

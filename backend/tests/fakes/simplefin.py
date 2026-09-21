@@ -218,17 +218,25 @@ def pending_then_posted_new_id() -> tuple[AccountSet, AccountSet]:
     return first, with_transactions(second, DEMO_SAVINGS, [reposted, *_rest(second)])
 
 
-def pending_then_posted_late() -> tuple[AccountSet, AccountSet]:
+def pending_then_posted_late(*, now: datetime) -> tuple[AccountSet, AccountSet]:
     """A pending charge that settles a few days after it was first reported.
 
     The scenario that makes the fetch window load-bearing — and the reason the
     *clock* is what moves, not the transaction. A bank posts a pending charge on
     or before the date it first showed it; nothing about the row travels forward
     in time. What happens is that sync goes quiet and comes back later, so the
-    caller must sync the second fetch at ``NOW + LATE_DAYS``. If it syncs again at
-    ``NOW`` instead, the pending row is still inside any window at all and the
+    caller must sync the second fetch at ``now + LATE_DAYS``. If it syncs again at
+    ``now`` instead, the pending row is still inside any window at all and the
     test proves nothing about the window — which is why the return value is the
     pair and the caller owns the clock.
+
+    **The dates are placed relative to ``now`` rather than taken from the
+    capture.** This scenario is about a window that reaches back a *known* number
+    of days, so a row dated from whenever the capture happened to be taken drifts
+    out of that reach as the pinned clock and the frozen capture diverge — and the
+    test then asserts a reconciliation the bridge's own cap makes impossible. That
+    is not hypothetical: dated from the capture, the posting here sat 95 days back
+    and only reconciled because the lookback ceiling used to be a year.
 
     The posting carries a **new id**, two days after the pending date, so it has
     to be matched on amount, date and description rather than recognised: a fetch
@@ -237,7 +245,13 @@ def pending_then_posted_late() -> tuple[AccountSet, AccountSet]:
     """
     first, second = pending_then_posted_same_id()
     original = _first_txn(first)
-    settled_at = original.transacted_at + timedelta(days=2)
+    settled_at = now + timedelta(days=2)
+
+    first = with_transactions(
+        first,
+        DEMO_SAVINGS,
+        [dataclasses.replace(original, transacted_at=now), *_rest(first)],
+    )
     reposted = dataclasses.replace(
         original,
         external_id=f"new-{original.external_id}",
