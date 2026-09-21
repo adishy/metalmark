@@ -1,5 +1,11 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { useEffect, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { NavLink, useLocation, useNavigationType } from "react-router-dom";
+import {
+  useEffect,
+  useLayoutEffect,
+  type ComponentType,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { MetalMark } from "@/components/MetalMark";
 import { ThemeButton } from "@/components/ThemeToggle";
@@ -49,9 +55,39 @@ const EXTRA_TITLES: Record<string, string> = {
 export default function AppShell({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const { pathname } = useLocation();
+  const navigationType = useNavigationType();
 
   const isAdmin = me?.user.is_admin === true;
   const items = NAV.filter((n) => !n.adminOnly || isAdmin);
+
+  // A client-side route change keeps the scroll position of the page you left,
+  // and nothing else here resets it — the browser only restores scroll for a
+  // *document* navigation, and a `BrowserRouter` click is not one. So: scroll
+  // the ledger to the bottom, tap Review, and you land 400 px into a page you
+  // have not seen, with its heading and its queue count above the fold. The
+  // sticky header is what hid it — navigation stays where you left it, so the
+  // only thing that looks wrong is the content.
+  //
+  // PUSH and REPLACE only — but the exemption is not what Back rides on, and it
+  // would be wrong to say it is. Chromium restores a POP entry's scroll
+  // position *after* this layout effect, within the same frame, so removing the
+  // check changes nothing there: measured, both ways, and the shell spec passes
+  // either way. It is here so Back is correct by construction rather than by
+  // engine ordering — the suite runs one engine, and the alternative is a
+  // `scrollRestoration = "manual"` or a different browser making Back top every
+  // page with no test to notice.
+  //
+  // React Router has no `<ScrollRestoration>` outside a data router; this is
+  // the whole of what that would do here.
+  //
+  // `useLayoutEffect`, not `useEffect`: this has to land before the browser
+  // paints the new route, or the new page is drawn at the old offset for a frame
+  // and then jumps. (Client-rendered app; there is no server pass for the SSR
+  // warning to be about.)
+  useLayoutEffect(() => {
+    if (navigationType === "POP") return;
+    window.scrollTo(0, 0);
+  }, [pathname, navigationType]);
 
   // The primary orientation cue for a screen reader and for a phone's tab
   // switcher, and it was the same string on every route (§7.11).
