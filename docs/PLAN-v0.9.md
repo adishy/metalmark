@@ -10,7 +10,7 @@ M1a (the manual ledger) and M2's SimpleFIN vertical are done and green: ledger, 
 CSV import, sync engine, job queue, worker, admin panel, reports (net worth, cash-flow bars, spending
 donut).
 
-Every item in the order this plan addresses it, and where it stands. Status as of `de1c0f0`:
+Every item in the order this plan addresses it, and where it stands. Status as of `450bf98`:
 
 | # | Item | State today |
 |---|---|---|
@@ -21,7 +21,8 @@ Every item in the order this plan addresses it, and where it stands. Status as o
 | — | Admin panel discoverability | **Done** (`85a043e`) — a nav item, a Settings tab and a document title, all of which say "Admin" |
 | — | Reports time filters, review deck, account marks, pretty dates, app icon and favicon | **Done** (`cafc01e`, `1b2eb51`, `63f92f6`, `b95819a`, `c96885b`) |
 | — | Desktop layout | **Done** (`679a207` for the rules, then `a9da13e`, `93198b2`, `7d153f1`, `10d8331`, `2a05571`) |
-| — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, `6b26638`, ADR-0037) — with two honest limits, both recorded there and neither papered over. **One:** the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all. **Two, found after the first was recorded:** clearing that gate is not enough, because display also needs a registered service worker and `docker compose up` runs `npm run dev`, for which `vite-plugin-pwa` builds none. So notifications do not work on the stack as it ships today; the panel now says that instead of claiming they are on (`canShow()` asks permission *and* registration). **Both gates are now cleared by a second compose file** — `docker-compose.prod.yml` builds `dist/` and serves it from nginx behind Caddy (ADR-0038), and `./scripts/verify.sh prod` boots it from an empty volume and asserts from a browser that the worker registers. The dev stack is untouched, so limit two still describes `docker compose up`, which is what the panel's sentence is about |
+| — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, `6b26638`, ADR-0037) — with two honest limits, both recorded there and neither papered over. **One:** the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all. **Two, found after the first was recorded:** clearing that gate is not enough, because display also needs a registered service worker and `docker compose up` runs `npm run dev`, for which `vite-plugin-pwa` builds none. So notifications do not work on the stack as it ships today; the panel now says that instead of claiming they are on (`canShow()` asks permission *and* registration). **Both gates are now cleared by the deployment file** — `deploy/compose.yaml` builds `dist/` and serves it from nginx behind Caddy (ADR-0038, ADR-0039), and `./scripts/verify.sh prod` boots it from an empty volume and asserts from a browser that the worker registers. The dev stack is untouched, so limit two still describes `docker compose up`, which is what the panel's sentence is about |
+| — | **A standalone install** (appended mid-plan, 2026-09-20) | **Done** (`450bf98`, ADR-0039) — one file, one command, no clone: the images are published to GHCR, and the deployment generates its own credentials and applies its own schema on first boot. `docker-compose.prod.yml` and the root `Caddyfile` are deleted, superseded by `deploy/compose.yaml`. The plan's definition of done said "ready for the user's end-to-end run"; this is what makes that run possible on a machine that is not this one |
 | — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | **Tabled by the user** (2026-09-20) — not started. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
 
 **Two notes on the order, both raised rather than taken unilaterally.**
@@ -43,6 +44,15 @@ Every item in the order this plan addresses it, and where it stands. Status as o
 https://bulma.io/? this should be appended to our todo"*. It is not part of the 4/1/3/2 order — it is a
 seventh workstream appended at the end, and decision M below is where it is scoped. Item 4 is
 **not blocked** by it: OFX import and auto-split rules are backend + a small surface, so they proceed.
+
+**The standalone install.** Requested after item 2 landed: *"is this all packaged such that it is a simple
+docker compose up on the prod image after cloning the repo on the target machine?"* — and then, when the
+answer turned out to be "only after a clone": *"if we still need a script, then that kinda necessitates a
+clone, so that removes any advantage of a ghcr push.. so unless we can just do a docker compose up like
+jellyfin et al standalone, don't publish to ghcr"*. It was provable, so it was built: **ADR-0039** is the
+record, and the one thing in it that is not code is stated there rather than here — GHCR creates packages
+private, so the publish job fails on an anonymous pull until the two packages are flipped to public once in
+the GitHub UI. That step is deliberate and red-then-green, not a warning.
 
 ## Decisions taken
 
