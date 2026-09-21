@@ -50,9 +50,9 @@ docker compose up on the prod image after cloning the repo on the target machine
 answer turned out to be "only after a clone": *"if we still need a script, then that kinda necessitates a
 clone, so that removes any advantage of a ghcr push.. so unless we can just do a docker compose up like
 jellyfin et al standalone, don't publish to ghcr"*. It was provable, so it was built: **ADR-0039** is the
-record, and the one thing in it that is not code is stated there rather than here — GHCR creates packages
-private, so the publish job fails on an anonymous pull until the two packages are flipped to public once in
-the GitHub UI. That step is deliberate and red-then-green, not a warning.
+record. The install is now `curl` one file and `docker compose up -d`, and the published images were
+confirmed anonymously pullable — from outside CI as well as inside it — so nothing stands between a
+stranger and the command the README gives them.
 
 ## Decisions taken
 

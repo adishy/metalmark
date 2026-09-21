@@ -104,14 +104,22 @@ own schema, and the images it runs are published to GHCR so that installing it r
 open signup means the first person to register creates the household, so there is nothing to seed either.
 That is a shorter path than the dev stack's, which needs a migration and a separate seed.
 
-**Three things it costs, all of them stated rather than hidden:**
+**Three things it costs — and, on measurement, one of them it does not:**
 
-1. **A one-time manual step in the GitHub UI.** GHCR creates packages private by default even in a public
-   repository, and a private package breaks `docker compose up -d` on a machine that has never
+1. **A one-time manual step in the GitHub UI — which the first publish that reached it did not need.**
+   The reasoning is why the guard exists and it stands: GHCR creates packages private by default even in a
+   public repository, and a private package breaks `docker compose up -d` on a machine that has never
    authenticated — the one audience with no context to debug it. The publish job therefore asserts
-   anonymity (`docker logout`, then pull) and fails with the URL to click until the package visibility is
-   flipped once. This is deliberately a red job rather than a warning: an install path that silently
-   stops working is worse than a build that says so.
+   anonymity (`docker logout`, then pull) and fails with the URL to click if the package is not public.
+   This is deliberately a red job rather than a warning: an install path that silently stops working is
+   worse than a build that says so.
+
+   **Measured:** both packages were anonymously pullable on the first run that reached the assertion, so
+   the cost recorded here was not paid and nobody has to click anything before the install in the README
+   works. Verified independently of CI as well, because a `docker pull` on the runner could have succeeded
+   from the image cache it had just populated: an anonymous GHCR token fetches `manifests/latest` for both
+   repositories with a `200`. The guard stays — one `docker pull` per run buys a loud failure for a silent
+   one, and the silent version lands on the person least able to diagnose it.
 
 2. **A bare install has no encrypted backup.** `scripts/backup.sh` does the dump-and-encrypt, and
    `scripts/` is outside the image's build context, so reaching it needs a checkout. The README gives the

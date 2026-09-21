@@ -519,8 +519,13 @@ jobs:
       # default even in a public repository, and a private package makes that
       # command fail on a machine that has never authenticated, which is the one
       # audience that cannot debug it. So the anonymity is asserted rather than
-      # assumed, and this is the step that goes red until the package visibility
-      # is flipped once in the GitHub UI.
+      # assumed: if it ever stops holding, this is the step that goes red, and the
+      # message below names the package and the URL to click.
+      #
+      # It is asserted here and not only reasoned about because a `docker pull` on
+      # this runner could pass from the image cache the build step just filled — so
+      # the real check is that logging out first still pulls. When the packages
+      # were first published this passed without anyone flipping anything.
       - name: A stranger can pull it without credentials
         run: |
           docker logout ghcr.io
