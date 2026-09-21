@@ -33,12 +33,12 @@ rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_
 |---|---|---|
 | [0000](0000-template.md) | Template | — |
 | [0001](0001-simplefin-sole-aggregator.md) | SimpleFIN as the sole aggregation provider, behind a pluggable interface | Accepted |
-| [0002](0002-poll-based-lan-only.md) | Poll-based sync over LAN/VPN; no webhooks, no public ingress | Accepted |
+| [0002](0002-poll-based-lan-only.md) | Poll-based sync over LAN/VPN; no webhooks, no public ingress | Accepted (cadence refined by 0028) |
 | [0003](0003-boring-stack.md) | Boring stack: FastAPI + Postgres + React/TS + ECharts | Accepted |
 | [0004](0004-postgres-job-queue-no-redis.md) | Postgres-backed job queue; no Redis | Superseded by 0029 (claim mechanism half) |
 | [0005](0005-money-decimal-never-float.md) | Money as NUMERIC/Decimal; never float | Accepted |
 | [0006](0006-multi-currency-dated-fx.md) | Multi-currency is first-class, converted at dated FX rates | Superseded by 0017 |
-| [0007](0007-field-provenance.md) | Field-level provenance governs sync-vs-human writes | Accepted |
+| [0007](0007-field-provenance.md) | Field-level provenance governs sync-vs-human writes | Accepted (field list widened by 0028) |
 | [0008](0008-transfers-linked-excluded.md) | Transfers are linked groups, excluded from cash-flow | Accepted |
 | [0009](0009-ledger-decoupled-from-connections.md) | The ledger is decoupled from connections | Accepted |
 | [0010](0010-manual-first-and-parity.md) | Manual-first build order and manual-parity principle | Accepted |

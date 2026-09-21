@@ -95,6 +95,6 @@ under the same rule.
   a wire-format regression must be caught by the captured fixture rather than by the fake. The error taxonomy
   is a hand-maintained mapping from provider codes to three states; a new SimpleFIN code defaults to
   `error`/`partial`, which is safe but not self-describing.
-- **Follow-ups:** the `transacted_at` widening should be folded into ADR-0007's list the next time that ADR is
-  touched by a superseding decision. Deferred: ADR-0009's manual "possible duplicate" confirmation step
-  (ambiguity currently inserts a new account and records an event).
+- **Follow-ups:** the `transacted_at` widening is **done** — ADR-0007's status line and its list both carry
+  the pointer now, so a reader who stops at that list is told it is a floor. Deferred: ADR-0009's manual
+  "possible duplicate" confirmation step (ambiguity currently inserts a new account and records an event).

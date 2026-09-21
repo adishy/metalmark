@@ -10,25 +10,28 @@ M1a (the manual ledger) and M2's SimpleFIN vertical are done and green: ledger, 
 CSV import, sync engine, job queue, worker, admin panel, reports (net worth, cash-flow bars, spending
 donut).
 
-What is *not* built, in the order this plan addresses it. Status as of `e2578c9`:
+Every item in the order this plan addresses it, and where it stands. Status as of `0505919`:
 
 | # | Item | State today |
 |---|---|---|
 | 4 | OFX/QFX import, auto-split rules | **Done** (`ea80d13`) |
-| 1 | Investments (M1b) | **Models, services, API and the write path done** (`391eaf0`, `af92b83`, `cafc01e`); the allocation/portfolio read UI is written and in review |
-| 3 | Cash-flow Sankey | Nothing. Reports has the data layer it needs |
-| 2 | Portable export/import + encrypted backups | Nothing. `pg_dump` appears only in prose |
-| — | Admin panel discoverability | **Done** — it has a nav item, a Settings tab and a document title, all of which say "Admin" |
-| — | Reports time filters, review deck, account marks, pretty dates, desktop layout, desktop notifications, app icon | Foundation laid (`cafc01e`: date vocabulary, account monogram). The range control, review deck, desktop layout and notifications remain |
-| — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | Nothing. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
+| 1 | Investments (M1b) | **Done** — schema (`e1b27dc`), valuation (`af92b83`), write path and API (`391eaf0`), and the allocation view with its cash-ledger terms (`c116d62`, `d28488c`, `bd8a40f`) |
+| 3 | Cash-flow Sankey, with the range and granularity controls | **Done** (`836418f`, `7324e2f`, `2490c8e`, `7ed019b`) |
+| 2 | Portable export/import + encrypted backups | **Done** (`81c06fa`) — and the restore drill is a gate in `verify.sh` rather than a script beside the backup one |
+| — | Admin panel discoverability | **Done** (`85a043e`) — a nav item, a Settings tab and a document title, all of which say "Admin" |
+| — | Reports time filters, review deck, account marks, pretty dates, app icon and favicon | **Done** (`cafc01e`, `1b2eb51`, `63f92f6`, `b95819a`, `c96885b`) |
+| — | Desktop layout | **Done** (`679a207` for the rules, then `a9da13e`, `93198b2`, `7d153f1`, `10d8331`, `2a05571`) |
+| — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, ADR-0037) — with one honest limit, recorded there: the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all, and the panel says so rather than rendering a control that does nothing |
+| — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | **Tabled by the user** (2026-09-20) — not started. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
 
 **Two notes on the order, both raised rather than taken unilaterally.**
 
 - Decision M argues the Bulma shell swap should land *before* the unbuilt UI (the Sankey, the review deck,
-  the export screens) so none of it is written twice. The stated order puts Bulma last, and the stated
-  order stands — but the investments read UI was the first casualty and has already been written in
-  Tailwind. The question is worth answering again before the review deck, which is the next unbuilt
-  surface of any size.
+  the export screens) so none of it is written twice. The stated order put Bulma last, the stated order
+  stood, and the user then tabled Bulma outright (M.2) — so the question closed by default, and the cost
+  decision M predicted was paid in full: every surface named there, and the notification control after
+  them, is hand-rolled Tailwind. That is the state of things, not a complaint about it; if Bulma is picked
+  up again, this is the inventory of what a restyle would touch.
 - The identity in decision A is **superseded in one respect by ADR-0032**: `market appreciation` is now
   computed from positions and prices rather than taken as the residual, and the residual became a fourth
   term, `unexplained`, which is *reported* rather than absorbed. Decision A's reasoning about why
@@ -408,3 +411,9 @@ green, CI green, pushed. `reset` between mutating gates.
   Until there is an ADR for (3), the view shows position value, share and price age and says nothing about
   gain — a "gain/loss" whose currency policy nobody wrote down is worse than its absence.
   `InvestmentsView.tsx`'s header records the same points where the gap was hit.
+- **Telling "signed out" apart from "server unreachable".** `AuthContext`'s session probe treats *any*
+  failure of `GET /auth/me` as "not signed in" — a 5xx, or a dropped connection from an api container
+  being restarted, renders the sign-in page, which reads as an expired session. Found while investigating
+  an e2e flake (the flake itself was a dev-server reload, unrelated). Left undone deliberately: the honest
+  fix is a distinct unreachable state with its own screen, which is a design decision rather than a retry
+  loop, and no user has hit it. A self-hoster who restarts the api meets it once and reloads.

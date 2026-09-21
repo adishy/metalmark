@@ -1,6 +1,6 @@
 # ADR 0002: Poll-based sync over LAN/VPN; no webhooks, no public ingress
 
-- **Status:** Accepted
+- **Status:** Accepted; the "default every 6h" cadence below is refined by ADR-0028, and the rest stands.
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
 - **Related:** ADR-0001, ADR-0004, ARCHITECTURE.md §1, §5
@@ -13,7 +13,8 @@ aggregator webhooks) or keep it private. SimpleFIN is poll-based and has no webh
 ## Decision
 
 We will run the backend **reachable only over LAN/Tailscale (no public ingress)** and **sync by scheduled
-polling** (default every 6h) plus on-demand "Sync now". No inbound webhooks.
+polling** (default every 6h — **superseded by ADR-0028: 24h, floor 1h, because the source data refreshes
+about daily and a 6h cron is 4× the useful rate**) plus on-demand "Sync now". No inbound webhooks.
 
 ## Consequences
 
