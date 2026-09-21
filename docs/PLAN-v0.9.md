@@ -392,13 +392,17 @@ green, CI green, pushed. `reset` between mutating gates.
   move — the failure mode decision A exists to prevent.
 - Ready for the user's end-to-end run against real credentials, reported as counts and statuses only.
 
-**Where it stands, measured rather than asserted, on `a4fa6e9` (2026-09-20).** All ten gates pass locally
+**Where it stands, measured rather than asserted, on `66dfd97` (2026-09-20).** All ten gates pass locally
 from a cold stack — `secrets`, `lint`, `pytest`, `frontend`, `contract`, `drill`, `e2e`, `walkthrough`,
 `prod`, `reset` — and CI run
-[35553553874](https://github.com/adishy/metalmark/actions/runs/35553553874) is green on all eight jobs,
+[35554280493](https://github.com/adishy/metalmark/actions/runs/35554280493) is green on all eight jobs,
 `publish` included, so the images a stranger pulls are the ones this gate verified. That clears the second
 bullet. The last bullet is deliberately not mine to check: the end-to-end run against real credentials
 happens in the UI, by the user, and is reported back as counts and statuses only.
+
+The commit named above is the tip this was measured on, not necessarily the tip you are reading — a
+documentation commit after it does not re-open the claim, and the run for *that* commit is the one to
+check if you want the current answer.
 
 ## What this plan deliberately does not do
 
