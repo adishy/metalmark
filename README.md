@@ -1,11 +1,11 @@
-# MetalMark — Self-Hosted Monarch Money
+# MetalMark — Self-Hosted Personal Finance
 
-> Named for the butterfly family, like the app it replaces — **MetalMark**, self-hosted.
+> Named for the butterfly family — **MetalMark**, self-hosted.
 
 A self-hostable personal-finance app for a small household (a few users, some with joined
-finances). Feature target: **Monarch Money's core** — auto-syncing accounts, a bulletproof
-transaction pipeline with categories/owners/splits, shared accounts, swipe-to-review, and
-reporting (Sankey cash flow, category breakdowns, net worth over time).
+finances). Feature target: **what the mainstream personal-finance apps do** — auto-syncing
+accounts, a bulletproof transaction pipeline with categories/owners/splits, shared accounts,
+swipe-to-review, and reporting (Sankey cash flow, category breakdowns, net worth over time).
 
 ## Product decisions (locked)
 
@@ -17,9 +17,9 @@ reporting (Sankey cash flow, category breakdowns, net worth over time).
 | Sharing model | **Household + per-account/transaction ownership**, where an owner is **household data** (a name + `person`/`shared` kind), not a user account (ADR-0026) | Supports joined finances and individual accounts in one place. Adding a kid, a "House" pot or a non-app partner costs a row, not a login; "Shared" is a real owner so attribution is never null. |
 | Auth | Email + password (argon2), httpOnly session cookies, **open signup** — the first signer creates the household, later ones join it; `METALMARK_OPEN_SIGNUP=false` closes it (ADR-0027) | No public registration *and* no invite plumbing to maintain. Honest cost: anyone who can reach the instance can join the household and read all of it — acceptable only because the app is LAN/VPN-only (ADR-0002), so the network is the gate. |
 | Currency | **Multi-currency via single-currency accounts** — each account is one currency; a household base currency; dated FX conversion (current for "now", historical for time series); FX drift shown as a **currency-revaluation line** (ADR-0017) | Real foreign-currency accounts exist here; single-currency-per-account avoids the balance contradiction of per-txn currency. Wallet accounts + full FX P&L deferred. |
-| Manual parity | **Anything automation can do, a human can do by hand** — manual accounts, transactions, holdings (with types), balances, transfers, FX rates | Fixes Monarch's #1 self-hosting gripe (manual/cash is second-class); also makes sync auditable and recoverable. |
+| Manual parity | **Anything automation can do, a human can do by hand** — manual accounts, transactions, holdings (with types), balances, transfers, FX rates | Fixes the common self-hosting gripe that manual/cash is second-class; also makes sync auditable and recoverable. |
 | Build order | **Manual-first, then automate** — build+prove the manual ledger, then add SimpleFIN sync as "just another writer" into the proven model | Correctness before convenience; sync can't corrupt a model it doesn't own. |
-| Robustness | **Transactions are decoupled from connections** — removing/re-adding a connection never destroys history | Directly fixes Monarch's flaky-reconnect + duplicate-transaction pain. |
+| Robustness | **Transactions are decoupled from connections** — removing/re-adding a connection never destroys history | Directly fixes the flaky-reconnect + duplicate-transaction pain of the hosted apps. |
 | Correctness | **Test harness is first-class**: red-green TDD, unit + integration (real Postgres, mock SimpleFIN) + e2e (Playwright), realistic fixtures, CI gates | User's hard requirement; financial correctness is non-negotiable. |
 
 ## Run it locally (container-first)

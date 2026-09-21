@@ -8,9 +8,10 @@
 ## Context
 
 We need to auto-sync balances and transactions for US banks, brokerages, and TreasuryDirect on a
-self-hosted, privacy-respecting system. Options: Plaid/MX/Finicity (what Monarch uses — best coverage but
-hosted, they see your data, and production needs a business application), or SimpleFIN Bridge (the
-self-hosting community standard: $15/yr, read-only, US+Canada, poll-based, privacy-friendly). SimpleFIN's
+self-hosted, privacy-respecting system. Options: Plaid/MX/Finicity (what the big hosted apps use — best
+coverage but hosted, they see your data, and production needs a business application), or SimpleFIN
+Bridge (the self-hosting community standard: $15/yr, read-only, US+Canada, poll-based,
+privacy-friendly). SimpleFIN's
 protocol carries balances + transactions but no investment holdings, and TreasuryDirect coverage is unreliable.
 
 ## Decision

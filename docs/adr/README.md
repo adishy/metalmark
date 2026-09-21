@@ -27,6 +27,26 @@ ADRs ≤0025 (and everything under `agent_record/`) describe the app by its orig
 behavior-neutral commit; these accepted records were deliberately left as written, per the immutability
 rule above. When an older ADR says `KESTREL_SECRET_KEY`, read `METALMARK_SECRET_KEY`, and so on.
 
+## A note on the named comparison
+
+Several ADRs ≤0016 justify a decision by naming the commercial product this app was measured against —
+"the owner's #1 complaint is X", "this closes its biggest gap". Those records were edited in a later
+behavior-neutral pass to describe the category instead ("the hosted apps", "the mainstream
+personal-finance apps"), because the app should describe itself on its own terms rather than as a version
+of somebody else's.
+
+This is an edit to `Accepted` records, which the immutability rule above forbids, so it is recorded here
+rather than left silent — the rule exists so that a reader can see *why* a decision was made, and a
+silent edit is what would actually break that. What changed is the brand name only, and the line wrapping
+it forced: every threshold, alternative and cost in those sections is as written, and no decision
+changed. The de-branding was also applied to the public-facing surfaces that carry a description — the
+`README`, the API description in `backend/app/main.py` (and the `contracts/openapi.yaml` generated from
+it), and `docs/PLAN.md` / `docs/ARCHITECTURE.md`.
+
+`agent_record/` is **not** covered by this. It holds verbatim quotes from the owner and real filesystem
+paths (`…/tmp/monarch_clone`), so the references there are left as-is: rewriting a quotation would make
+the record lie about what was said.
+
 ## Index
 
 | ADR | Title | Status |

@@ -7,8 +7,9 @@
 
 ## Context
 
-The users are a small, trusted group, some with joined finances. Monarch's "Shared Views" model assigns
-ownership to accounts/transactions to personalize views while keeping a joint picture. A stricter model —
+The users are a small, trusted group, some with joined finances. The hosted apps' "Shared Views" model
+assigns ownership to accounts/transactions to personalize views while keeping a joint picture. A stricter
+model —
 accounts a household member genuinely cannot see — is more work and a real access-control system.
 
 ## Decision
@@ -19,6 +20,7 @@ member can read all household data. Truly private, member-hidden accounts are ex
 
 ## Consequences
 
-- **Positive:** matches Monarch; simple and correct for joined finances; less authorization surface.
+- **Positive:** matches the hosted apps; simple and correct for joined finances; less authorization
+  surface.
 - **Negative / costs:** no privacy between household members — the UI must not imply privacy it can't enforce.
 - **Follow-ups:** if private accounts are later needed, that's a new access-control model and a superseding ADR.

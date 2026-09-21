@@ -150,8 +150,8 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
   first-class; auto price fetch is optional and pluggable. Prices carry an **age**; a stale price (older than a
   threshold) is flagged in the UI the way sync freshness is — a months-old manual price must not silently
   produce a wrong market value / net worth.
-- **investment_transactions** — individual buy/sell/dividend/interest/fee/transfer events (fixes Monarch's
-  "can't see investment transactions / no dividend category" gap).
+- **investment_transactions** — individual buy/sell/dividend/interest/fee/transfer events (fixes the
+  "can't see investment transactions / no dividend category" gap in the hosted apps).
   `id, account_id, security_id, type (buy|sell|dividend|interest|fee|split|transfer), trade_date, quantity,
    price, amount, currency, notes`. Dividends/interest flow into income reporting; buys/sells adjust cost basis.
   All ent(er)able by hand; sync/import populate the same table.
@@ -408,7 +408,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   `priority`, ties broken on `(created_at, id)` so the order is total and stable — `now()` is the
   *transaction* timestamp, so two rules written in one transaction share a `created_at` exactly and
   `created_at` alone would leave their order to the query planner. Deterministic and tested against a
-  fixture set. Writes are provenance-gated (see §2); Monarch-style auto-split is deferred to M2.
+  fixture set. Writes are provenance-gated (see §2); auto-split is deferred to M2.
 - **Transfers, linked by hand**: `GET /transactions/transfer-candidates?txn_id=&days=` offers the rows that
   could be the other leg, `POST /transactions/transfers` links a pair, `GET /transactions/transfers/{id}`
   reads a group back whole, `DELETE /transactions/transfers/{id}` unlinks it.
@@ -461,8 +461,8 @@ provider is an adapter that produces the *same* writes a human would (tagging it
     two ends are the same width by construction. (`services/reports.py::cash_flow_sankey`.)
   - Spending by category (donut) with click-through drill-down to a filtered transaction list.
   - Income vs. expense trend (stacked bar), month-over-month.
-  - **Investment reporting** (addresses Monarch's weakest area): dividends/interest income, cost-basis vs.
-    market value.
+  - **Investment reporting** (the weakest area of the hosted apps): dividends/interest income, cost-basis
+    vs. market value.
   - **Consolidated holdings / allocation view** (explicit feature request): a single page that aggregates
     every holding across *all* accounts — the same security held in multiple accounts is summed into one row
     (quantity, total market value, cost basis, gain/loss) — with **% allocation** of the whole portfolio, and

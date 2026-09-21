@@ -158,7 +158,8 @@ allocation + richer reporting**, **2 = automation (sync/OFX)**, **3 = polish/ops
 
 ## Open questions to revisit later (not blocking)
 
-- Budgeting (Monarch-style category budgets + rollover) — deferred to v1.1 (schema stub present).
+- Budgeting (the familiar category budgets + rollover of the hosted apps) — deferred to v1.1 (schema stub
+  present).
 - Goals / recurring detection / cash-flow forecasting — v1.2.
 - Second aggregator (Plaid adapter) — only if SimpleFIN coverage gaps bite; interface already supports it.
 - **Truly private accounts** (member-hidden, not just view-filtered) — v1 ownership drives views, not access

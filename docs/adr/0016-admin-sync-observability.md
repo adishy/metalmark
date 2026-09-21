@@ -7,8 +7,9 @@
 
 ## Context
 
-The users are technical and want more control and insight into sync than Monarch offers — logs, what was
-synced, how long it took. With poll-based sync (ADR-0002) and no webhooks, silent staleness is a real risk.
+The users are technical and want more control and insight into sync than the hosted apps offer — logs,
+what was synced, how long it took. With poll-based sync (ADR-0002) and no webhooks, silent staleness is a
+real risk.
 
 ## Decision
 

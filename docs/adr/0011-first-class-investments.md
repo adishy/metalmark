@@ -8,8 +8,9 @@
 
 ## Context
 
-Investment tracking is Monarch's most-complained feature (no allocation view, no dividend category, can't see
-individual investment transactions). SimpleFIN provides no holdings data at all, so this must be modeled
+Investment tracking is the most-complained-about feature of the hosted apps (no allocation view, no
+dividend category, can't see individual investment transactions). SimpleFIN provides no holdings data at
+all, so this must be modeled
 ourselves and be fully manual (ADR-0010). The owner requested a single cross-account holdings/% allocation view.
 
 ## Decision
@@ -23,7 +24,8 @@ reporting.
 
 ## Consequences
 
-- **Positive:** closes Monarch's biggest gap; portfolio-wide allocation; dividends visible.
+- **Positive:** closes the biggest gap in the hosted apps; portfolio-wide allocation; dividends
+  visible.
 - **Negative / costs:** cost-basis method (FIFO vs average) is unspecified and affects gain/loss; same security
   in different currencies and stale prices complicate the allocation view; derived balance may disagree with a
   provider-reported balance if a connected investment account also syncs a balance.

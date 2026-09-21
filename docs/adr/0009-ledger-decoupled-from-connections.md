@@ -7,8 +7,9 @@
 
 ## Context
 
-Aggregator connections are flaky (Monarch's #1 complaint): they break on password change, MFA, or token
-expiry, and re-adding them often mints new account/transaction IDs — causing duplicate accounts and history.
+Aggregator connections are flaky (the #1 complaint about the hosted apps): they break on password change,
+MFA, or token expiry, and re-adding them often mints new account/transaction IDs — causing duplicate
+accounts and history.
 The owner's requirement: integration health may come and go, but the ledger must stay consistent and
 recoverable without ever manually restoring transactions.
 
@@ -21,7 +22,8 @@ reference a connection. Removing a connection preserves all history (its account
 
 ## Consequences
 
-- **Positive:** reconnects and provider hiccups never destroy or duplicate data; kills Monarch pain points #1/#2.
+- **Positive:** reconnects and provider hiccups never destroy or duplicate data; kills the flaky-reconnect
+  and duplicate-transaction pain points named above.
 - **Negative / costs:** remap matching must be robust (institutions rename accounts); a bad match could attach
   to the wrong account — mitigated by conservative keys + a manual confirm step on ambiguity.
 - **Follow-ups:** acceptance test — remove + re-add a connection loses zero transactions and creates zero dupes.

@@ -61,7 +61,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="MetalMark API",
         version="0.1.0",
-        description="Self-hosted personal finance (Monarch-style). LAN/VPN only.",
+        description="Self-hosted household personal finance. LAN/VPN only.",
         lifespan=lifespan,
     )
 

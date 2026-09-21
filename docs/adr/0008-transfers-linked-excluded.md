@@ -9,7 +9,7 @@
 
 Moving money between accounts (checking→savings, card/loan payments) creates two transactions. If they aren't
 linked and excluded, the cash-flow Sankey and income/expense trends show phantom income and phantom expense —
-defeating the point of the reporting. This is a signature Monarch feature.
+defeating the point of the reporting. This is a signature feature of the hosted apps.
 
 ## Decision
 
@@ -19,7 +19,8 @@ reporting excludes transfers**; they still appear in the transaction list.
 
 ## Consequences
 
-- **Positive:** correct cash-flow/net income; matches Monarch behavior; reconciles list vs. report totals.
+- **Positive:** correct cash-flow/net income; matches the hosted apps' behavior; reconciles list vs. report
+  totals.
 - **Negative / costs:** cross-currency transfers are **not** equal-and-opposite (see ADR-0006) — matching and
   any "legs balance" invariant must be currency-aware, comparing base-currency amounts within tolerance.
 - **Follow-ups:** define cross-currency transfer matching + residual (FX difference) handling in a follow-up

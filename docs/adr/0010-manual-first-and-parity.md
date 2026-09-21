@@ -7,8 +7,9 @@
 
 ## Context
 
-Monarch's manual/cash workflow is second-class, a common complaint. The owner wants correctness first and
-nothing that can only be done automatically. Automation that writes into an unproven model risks corrupting it.
+The hosted apps' manual/cash workflow is second-class, a common complaint. The owner wants correctness
+first and nothing that can only be done automatically. Automation that writes into an unproven model risks
+corrupting it.
 
 ## Decision
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: MetalMark API
-  description: Self-hosted personal finance (Monarch-style). LAN/VPN only.
+  description: Self-hosted household personal finance. LAN/VPN only.
   version: 0.1.0
 paths:
   /healthz:
