@@ -986,6 +986,42 @@ binary, and commit the output.
 
 ---
 
+### 4.17 The review deck
+
+The review queue is a deck of cards, not a list you scroll and not a form you fill in.
+The card is the question ("is this one right?"), the throw is the answer, and the deck
+has to say both. `/review` has exactly one job, so the card is the only content on the
+page and everything around it is about the card.
+
+- **A deck has depth.** Two cards sit behind the live one — inset 8 px and 16 px per
+  side, pushed down by the same amount — so their bottom edges show as two steps of a
+  stack. They are empty rounded rectangles on purpose: a stack shows you the *edges* of
+  what is under the top card, and an 8 px strip of a card cannot be read, so rendering
+  contents there would put every merchant in the queue into the accessibility tree
+  three times over to say nothing.
+- **A decision goes somewhere.** Right (Reviewed) and left (Ignore) throw the card off
+  that side over 240 ms, fading over the last third of the distance. The throw is the
+  confirmation: the button you pressed is behind you, and the direction is what tells
+  you which of the two answers you gave.
+- **The card is 288 px tall** (`h-72`), measured rather than chosen — at 320 px the
+  longest realistic merchant wraps four times and the content comes to about 218 px.
+  The identity block centres itself in the room the amount leaves, so a one-line
+  merchant sits on the card's optical centre instead of at the top of an empty box.
+- **The two verdicts are overlays** in the top corners, fading in with drag distance
+  (40 → 160 px). They are not a row of their own: that row cost 26 px of height on
+  every card, always, for two labels that are invisible until the card is dragged.
+- **One card is in the air at a time.** A decided card stays in the deck for the length
+  of its throw, and a second decision during it is ignored rather than applied to a
+  card the user has not been shown yet.
+- **The next card does not arrive until the throw lands.** A card appearing behind one
+  mid-throw spoils the throw, which is the only thing saying where the last decision
+  went.
+- **Keyboard**: ← / → are the same two decisions, for the desktop review pass.
+  **Reduced motion** (§2.8): no throw, no rotation, no badge fade — the card leaves the
+  deck immediately, and the deck is faster for it, never slower.
+
+---
+
 ## 5. Mobile rules
 
 **Breakpoints.** Only two matter: `sm` (640 px) and `lg` (1024 px). Phone is the
@@ -1434,7 +1470,7 @@ a nav, or do not add one.
 
 ### 9.3 What each page does with the room
 
-Four shapes, and they are the whole of it:
+Five shapes, and they are the whole of it:
 
 - **Transactions — list and detail, side by side.** The list takes `lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]`
   with the detail panel in the second column, shown when a row is selected and a quiet
@@ -1448,6 +1484,11 @@ Four shapes, and they are the whole of it:
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first
   column (`lg:w-56`), the active panel in the second. §4.14's roving tabindex and arrow
   keys are unchanged; only the axis changes, and `aria-orientation` goes with it.
+- **Review — a deck, and it stays small.** One card at a time, capped at `max-w-2xl` and
+  centred. This is the one page whose desktop shape is *not* wider: a decision card is
+  read at a glance, and the room would only push the merchant and the amount further
+  apart — which is exactly what the 864 px card this replaced did (§4.17). What the
+  desktop gets instead of width is the keyboard, ← / →.
 
 ### 9.4 The list row at `lg:`
 
