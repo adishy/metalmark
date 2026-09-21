@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
+import { QueryError } from "@/components/QueryStates";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import AppShell from "@/components/AppShell";
@@ -12,12 +13,32 @@ import Admin from "@/pages/Admin";
 import DesignSystem from "@/pages/DesignSystem";
 
 export default function App() {
-  const { me, loading } = useAuth();
+  const { me, loading, probeError, retryProbe } = useAuth();
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-fg-muted" data-testid="loading">
         Loading…
+      </div>
+    );
+  }
+
+  // The session probe failed, and not with a 401 — so this is not "signed out"
+  // and the sign-in page would be a lie about it. §4.11's error-plus-retry card,
+  // applied to the one read that used to swallow the distinction. Deliberately
+  // *not* inside `AppShell`: the shell reads `me` for the nav and the user menu,
+  // and there is no user to render. This is the whole screen, below the browser
+  // chrome, which is what it should be — you cannot use the app until the server
+  // answers, and "Try again" is the only thing on the page that can change that.
+  if (probeError) {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <QueryError
+          what="your session"
+          error={probeError}
+          onRetry={retryProbe}
+          testid="session-unreachable"
+        />
       </div>
     );
   }

@@ -801,6 +801,15 @@ Four distinct states, never conflated. Distinguishing them is the whole point.
   use `isFetching` for a subtle top-of-list indicator and keep showing the old rows.
 - Every `isError` branch renders the API's message in `text-negative` with a retry —
   the current pattern in `AddTxnForm` is right; make it universal.
+- **When nothing answered there is no message, and saying so is not an exception to
+  the rule above — it is the rule applied honestly.** `fetch` rejects with a
+  `TypeError` whose message is `"Failed to fetch"`, which is a browser string, not a
+  diagnosis; rendering it verbatim satisfies the letter of "show the API's message"
+  while telling a self-hoster nothing. Replace it *only* in the case where there was
+  no API to speak: an `ApiError` still renders the server's `detail` unchanged.
+  `AuthContext`'s session probe is the worked instance — and the reason the rule now
+  names the distinction, because that probe is the one read whose failure chooses a
+  *screen*, and it was treating a restarting api container as an expired session.
 - **A supplementary read's failure is said out loud too.** When a view's main read
   succeeded and a second one that only *annotates* it did not, the content stays —
   it is still true — but the missing annotation is named and the retry offered.
