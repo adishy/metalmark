@@ -143,9 +143,10 @@ record the decision to notify on the server rather than deciding in the browser.
   state the page cannot reach, which is a worse lie than a button that does nothing because the reader
   has just granted a permission and watched the app confirm it worked. `notify.canShow()` now asks
   permission *and* registration, and the panel splits `granted` in two, saying where the notices actually
-  are (the run history) when there is no worker. The fix is copied — a browser with no worker is told so
-  plainly, and `NoticePermission` is its own component precisely so that branch is reachable by a test,
-  since neither jsdom nor the e2e stack has `navigator.serviceWorker` at all.
+  are (the run history) when there is no worker. A browser with no worker is thus told so plainly, and
+  `NoticePermission` is its own component precisely so that branch is reachable by a test — since neither
+  jsdom nor the e2e stack has `navigator.serviceWorker` at all, the two of them can only ever render the
+  `unsupported` sentence.
   **Consequence for the deployment, unresolved and deliberately not papered over:** notifications do not
   work under `docker compose up`, and cannot until the `web` service runs a production build. That is a
   container change, and the architecture doc has already settled what it looks like —

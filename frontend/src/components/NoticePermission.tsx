@@ -48,7 +48,9 @@ export default function NoticePermission() {
   const state = answered ?? notify.support();
   const refresh = useRefreshNotices();
   // Whether a notification could actually be displayed, as opposed to merely
-  // allowed. `null` is "not answered yet", which lasts one microtask.
+  // allowed. `null` is "not answered yet" — one microtask in the ordinary case,
+  // and on a page whose worker is still registering as long as that takes.
+  // Renders nothing meanwhile, which is the one state that cannot be wrong.
   const [showable, setShowable] = useState<boolean | null>(null);
 
   useEffect(() => {

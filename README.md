@@ -46,6 +46,15 @@ syncs without it, and a stack whose worker is gone looks exactly like a healthy 
 Then open **http://localhost:5173** and sign in with `owner@example.com` / `devpassword123`.
 The API is at http://localhost:8000 (`/healthz`, `/docs`). The Vite dev server proxies `/api` → the API.
 
+**This stack is the development one, so it is a PWA with no service worker.** `web` runs `npm run dev`;
+`vite-plugin-pwa` builds the worker only for a production build, and `npm run build` → `frontend/dist/`
+is what produces one. Two things follow, and the app says both rather than pretending otherwise:
+**desktop notifications cannot be displayed here** (the panel says so on `/admin` instead of offering a
+switch that would change nothing), and neither can the app be installed or used offline. Reaching it over
+plain `http://` on a LAN hostname is a second, independent block — the browser's notification API sits
+behind a secure-context gate, so `https://` or `localhost` is required as well. ADR-0037 records both and
+`docs/ARCHITECTURE.md` draws the shape that clears them (`Caddy (TLS)` in front of a static build).
+
 Run the backend test suite (real Postgres via the `db` service, isolated `metalmark_test` DB):
 
 ```bash
