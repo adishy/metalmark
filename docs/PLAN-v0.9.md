@@ -10,7 +10,7 @@ M1a (the manual ledger) and M2's SimpleFIN vertical are done and green: ledger, 
 CSV import, sync engine, job queue, worker, admin panel, reports (net worth, cash-flow bars, spending
 donut).
 
-Every item in the order this plan addresses it, and where it stands. Status as of `6b26638`:
+Every item in the order this plan addresses it, and where it stands. Status as of `de1c0f0`:
 
 | # | Item | State today |
 |---|---|---|
@@ -21,7 +21,7 @@ Every item in the order this plan addresses it, and where it stands. Status as o
 | — | Admin panel discoverability | **Done** (`85a043e`) — a nav item, a Settings tab and a document title, all of which say "Admin" |
 | — | Reports time filters, review deck, account marks, pretty dates, app icon and favicon | **Done** (`cafc01e`, `1b2eb51`, `63f92f6`, `b95819a`, `c96885b`) |
 | — | Desktop layout | **Done** (`679a207` for the rules, then `a9da13e`, `93198b2`, `7d153f1`, `10d8331`, `2a05571`) |
-| — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, `6b26638`, ADR-0037) — with two honest limits, both recorded there and neither papered over. **One:** the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all. **Two, found after the first was recorded:** clearing that gate is not enough, because display also needs a registered service worker and `docker compose up` runs `npm run dev`, for which `vite-plugin-pwa` builds none. So notifications do not work on the stack as it ships today; the panel now says that instead of claiming they are on (`canShow()` asks permission *and* registration), and the fix is a deployment change — `docs/ARCHITECTURE.md:10-18` already draws the shape that clears both gates at once |
+| — | Desktop notifications | **Done** (`d687fbb`, `dae1c3b`, `6b26638`, ADR-0037) — with two honest limits, both recorded there and neither papered over. **One:** the API is behind the browser's secure-context gate, so an instance reached over plain `http://` on a LAN hostname cannot notify at all. **Two, found after the first was recorded:** clearing that gate is not enough, because display also needs a registered service worker and `docker compose up` runs `npm run dev`, for which `vite-plugin-pwa` builds none. So notifications do not work on the stack as it ships today; the panel now says that instead of claiming they are on (`canShow()` asks permission *and* registration). **Both gates are now cleared by a second compose file** — `docker-compose.prod.yml` builds `dist/` and serves it from nginx behind Caddy (ADR-0038), and `./scripts/verify.sh prod` boots it from an empty volume and asserts from a browser that the worker registers. The dev stack is untouched, so limit two still describes `docker compose up`, which is what the panel's sentence is about |
 | — | **Bulma as the design system** (appended mid-plan, 2026-09-20) | **Tabled by the user** (2026-09-20) — not started. The app is hand-rolled Tailwind on a CSS-variable token layer. See decision M |
 
 **Two notes on the order, both raised rather than taken unilaterally.**
