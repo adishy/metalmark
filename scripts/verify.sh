@@ -19,6 +19,10 @@
 # `walkthrough` and `contract` need that seeded stack. `lint`, `pytest` and
 # `frontend` need the containers running but no particular data. `pytest` uses a
 # single shared test database, so do not run two of these at once.
+#
+# `e2e` and `walkthrough` claim a bank, so they run the stack on the fake provider
+# (see `use_fake_provider`) and the reset afterwards puts the compose default back
+# — the stack you are left holding is the one a real setup token works against.
 
 set -euo pipefail
 
@@ -105,6 +109,62 @@ require_stack() {
   done
 }
 
+# The provider the running api holds, as the container itself reports it.
+#
+# `exec` rather than reading `.env` or the compose file, because those say what
+# the *next* `up` would use — and the question here is what the process answering
+# requests is actually running. Silent on an error (a restarting container has no
+# answer) and empty when the variable is unset, both of which are "not the value
+# we want" rather than a special case.
+current_provider() {
+  docker compose exec -T api printenv METALMARK_SIMPLEFIN_PROVIDER 2>/dev/null | tr -d '\r'
+}
+
+# Put the running stack on the fake provider, for the two gates whose subject is
+# a *claim*.
+#
+# CI never has to do this: the `e2e` job sets `METALMARK_SIMPLEFIN_PROVIDER: fake`
+# in its own `env:` and every `up` in that job inherits it. A local run is handed
+# whatever stack was last started, and both of these gates POST a made-up setup
+# token to `/connections/claim`. On the real provider that token is decoded as a
+# bridge claim URL and refused — "setup token is not valid base64 of a claim URL"
+# — and the two gates then fail in the two ways that hide it best:
+#
+#   * `sync.spec.ts` fails three tests on a message about the *token*, which
+#     points at the spec rather than at the stack it was run against.
+#   * the walkthrough **skips** its whole bank-sync section and still exits 0, so
+#     the gate reports PASS in two seconds with the M2 vertical unexercised. A
+#     green gate covering nothing is the worse of the two.
+#
+# `sync.spec.ts` says as much in its header and tells the reader to
+# `METALMARK_SIMPLEFIN_PROVIDER=fake docker compose up -d`, which is right and is
+# exactly the step a script exists to perform.
+#
+# Deliberately **not** exported for the whole run. `verify.sh` ends with a reset,
+# and the stack it leaves behind is the one a person is holding: leaving them on
+# the fake would mean the first real setup token they paste into the UI becomes a
+# fake connection full of demo data that looks like it worked. The provider is
+# switched for the gates that need it, and the reset puts the default back.
+use_fake_provider() {
+  if [ "$(current_provider)" = "fake" ]; then return 0; fi
+  printf '  switching the stack to METALMARK_SIMPLEFIN_PROVIDER=fake\n'
+  METALMARK_SIMPLEFIN_PROVIDER=fake docker compose up -d api worker || return 1
+  # `up -d` returns as soon as the new containers are started and the old api
+  # answers /healthz until it is replaced, so a health wait alone would pass
+  # against the very container this call exists to get rid of. Asking the
+  # container for the variable is the check that cannot race: it cannot answer
+  # `fake` before it is the one that will serve the tests.
+  local i
+  for i in $(seq 1 60); do
+    if [ "$(current_provider)" = "fake" ] && curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  warn "  the api never came up on the fake provider"
+  return 1
+}
+
 run_gate() {
   local name="$1"; shift
   case "$MUTATING" in *" $name "*) MUTATED=1 ;; esac
@@ -180,6 +240,7 @@ gate_drill() {
 
 gate_e2e() {
   require_stack
+  use_fake_provider || return 1
   docker run --rm --network "$NETWORK" \
     -e E2E_BASE_URL=http://web:5173 -e CI=1 \
     -v "$ROOT/frontend":/work -w /work \
@@ -189,6 +250,9 @@ gate_e2e() {
 
 gate_walkthrough() {
   require_stack
+  # Its section claims a bank too, and it gets the same provider `e2e` left in
+  # place — this call is a no-op unless the gate is run on its own.
+  use_fake_provider || return 1
   # Inside the compose network the api is `api`, not localhost — and the backend
   # image already has httpx (it installs the dev extra), so there is nothing to
   # set up. scripts/ is outside the api bind-mount, hence the extra volume.
