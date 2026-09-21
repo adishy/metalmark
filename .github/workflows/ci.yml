@@ -248,6 +248,34 @@ jobs:
         run: docker compose down -v
 
   # --------------------------------------------------------------------------
+  # Deployment: boot docker-compose.prod.yml from an empty volume and probe it.
+  # The only job that builds the frontend for production, serves it the way
+  # ARCHITECTURE §1 draws, and therefore the only one that can reach the service
+  # worker — which is what makes a desktop notification possible at all, and
+  # which no gate could reach before (ADR-0037's gap, closed by ADR-0038).
+  # --------------------------------------------------------------------------
+  prod:
+    runs-on: ubuntu-24.04
+    env:
+      # Its own project, so it stands up beside anything else rather than over
+      # it — and never the dev project, whose teardown is a volume drop.
+      PROD_PROJECT_NAME: metalmark-prod
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create runtime secret (Fernet key)
+        run: |
+          mkdir -p secrets
+          openssl rand -base64 32 | tr '+/' '-_' > secrets/metalmark_secret_key
+
+      # The gate itself rather than a copy of its steps: `scripts/verify.sh` is
+      # what a developer runs, and the whole point of it is that a green run here
+      # and a green run there mean the same thing. It tears its own project down,
+      # on the failure path too.
+      - name: Boot the deployment and check it
+        run: ./scripts/verify.sh prod
+
+  # --------------------------------------------------------------------------
   # E2E: bring up the full stack, seed, run Playwright against it (Chromium).
   # --------------------------------------------------------------------------
   e2e:

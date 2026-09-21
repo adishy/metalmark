@@ -52,8 +52,8 @@ is what produces one. Two things follow, and the app says both rather than prete
 **desktop notifications cannot be displayed here** (the panel says so on `/admin` instead of offering a
 switch that would change nothing), and neither can the app be installed or used offline. Reaching it over
 plain `http://` on a LAN hostname is a second, independent block — the browser's notification API sits
-behind a secure-context gate, so `https://` or `localhost` is required as well. ADR-0037 records both and
-`docs/ARCHITECTURE.md` draws the shape that clears them (`Caddy (TLS)` in front of a static build).
+behind a secure-context gate, so `https://` or `localhost` is required as well. ADR-0037 records both.
+The next section is the deployment that clears them.
 
 Run the backend test suite (real Postgres via the `db` service, isolated `metalmark_test` DB):
 
@@ -62,6 +62,59 @@ docker compose run --rm -e METALMARK_TEST_PG_HOST=db -e METALMARK_SECRET_KEY=tes
 ```
 
 Python dependencies are managed with **uv** (`backend/uv.lock`); the image installs from the lock.
+
+## Deploy it
+
+`docker-compose.prod.yml` layers on the dev stack — it does not replace the file, and it keeps the same
+compose project, so it is the **same database**. Switching between the two moves no data: whatever you
+had in dev is what the deployment is looking at, and going back is `docker compose up -d`.
+
+```bash
+echo 'METALMARK_SITE=metalmark.local' >> .env    # the hostname you will reach it by
+
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm api alembic upgrade head
+```
+
+Then **trust Caddy's CA**, because there is no public DNS name on a LAN for a real CA to validate, so
+Caddy issues from its own root:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  cp caddy:/data/caddy/pki/authorities/local/root.crt ./metalmark-ca.crt
+# macOS — other platforms have their own trust store command
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./metalmark-ca.crt
+```
+
+Open **https://metalmark.local:8443** — or **http://localhost:8080** from the host itself. Clicking
+through the certificate warning instead is not a shortcut: a certificate error makes the origin refuse
+service workers outright, so notifications keep not working and nothing on screen says why.
+
+What the deployment changes, and why none of it is optional:
+
+| | dev stack | deployment |
+|---|---|---|
+| `web` | Vite dev server, HMR, source bind-mounted | `npm run build` → nginx serving `dist/` |
+| Service worker | none — `vite-plugin-pwa` builds one only for production | `dist/sw.js`, so **notifications can display** |
+| `METALMARK_ENV` | `dev` | `prod`: `Secure` session cookie, no dev CORS, the fake aggregator refuses to exist |
+| Reachable at | `http://localhost:5173` | `https://<METALMARK_SITE>:8443` (any device), `http://localhost:8080` (this one) |
+| Installable, works offline | no | yes |
+
+**The two doors are two answers to the same problem.** Caddy's is the one for every device, and it is
+not decoration: `METALMARK_ENV=prod` sets the session cookie's `Secure` flag, so a browser on another
+machine cannot log in over plain http at all. The loopback door exists because plain HTTP is fine on an
+interface that never leaves the machine, and `localhost` is a *secure context* by specification — so it
+is the one way in that needs no certificate installed and still gets a service worker.
+
+`METALMARK_SITE` is the name in the certificate; a request with any other `Host` fails the TLS
+handshake rather than serving the app under a name the certificate does not cover. Port 8443 rather than
+443 so it does not collide with anything else — `METALMARK_HTTPS_PORT` changes it. Port 80 is not
+published; the compose file says where to add it if you want the http→https redirect.
+
+`./scripts/verify.sh prod` boots all of this from an empty volume and checks it — nginx's cache headers
+and SPA fallback, the `/api` proxy, TLS, the login round trip, and, in a real browser, that the built
+app registers a service worker. That last one is the only test of the thing no other gate can reach.
+See ADR-0038.
 
 ## Stack (boring on purpose)
 
@@ -77,22 +130,25 @@ Python dependencies are managed with **uv** (`backend/uv.lock`); the image insta
   Hypothesis/fast-check property tests for money & FX. Coverage + contract (schemathesis) gates in CI.
 - **Performance targets:** API p95 < 150ms on warm cache; transaction list virtualized at 60fps; swipe uses
   optimistic updates. Keyset pagination, precomputed net-worth/report rollups, cached FX.
-- **Ops:** docker-compose (`db`, `api`, `worker`, `web`), Caddy reverse proxy, Tailscale, nightly
-  **encrypted** `pg_dump` backups, **admin sync-observability** dashboard (per-run logs, counts, timings).
+- **Ops:** docker-compose (`db`, `api`, `worker`, `web`), Caddy reverse proxy (§"Deploy it"), Tailscale,
+  nightly **encrypted** `pg_dump` backups, **admin sync-observability** dashboard (per-run logs, counts,
+  timings).
 
-## Repository layout (target)
+## Repository layout
 
 ```
 metalmark/
-  docker-compose.yml
-  Caddyfile
-  backend/            # FastAPI app, SQLAlchemy models, Alembic migrations, worker
-  frontend/           # Vite + React + TS PWA
-  contracts/          # OpenAPI spec (source of truth) + generated TS client
+  docker-compose.yml        # the dev stack: Vite dev server, source bind-mounted
+  docker-compose.prod.yml   # the deployment overlay: built PWA on nginx + Caddy (ADR-0038)
+  Caddyfile                 # TLS for the deployment; the site address names the host
+  backend/                  # FastAPI app, SQLAlchemy models, Alembic migrations, worker
+  frontend/                 # Vite + React + TS PWA; Dockerfile has dev/build/prod stages
+  contracts/                # OpenAPI spec (source of truth) + generated TS client
+  scripts/                  # verify.sh (every gate), walkthrough, backups, the restore drill
   docs/
-    ARCHITECTURE.md    # system design, data model, sync engine, security
-    PLAN.md            # phased, multi-agent execution plan
-    adr/               # Architecture Decision Records — the "why" log (record as we go)
+    ARCHITECTURE.md         # system design, data model, sync engine, security
+    PLAN.md                 # phased, multi-agent execution plan
+    adr/                    # Architecture Decision Records — the "why" log (record as we go)
 ```
 
 ## Read next

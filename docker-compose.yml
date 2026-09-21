@@ -96,6 +96,14 @@ services:
   web:
     build:
       context: ./frontend
+      # Stated, not defaulted, and it has to stay that way. Docker builds the
+      # *last* stage of a Dockerfile when no target is given, and the production
+      # deployment is the last one — so without this line `docker compose up -d
+      # --build` (the command in the README, in CI, and in the `reset` gate) would
+      # quietly replace the dev server with the deployment image: nginx listening
+      # on 8080 while the service publishes 5173, and nothing answering at all.
+      # docker-compose.prod.yml sets `target: prod` in its turn.
+      target: dev
     depends_on:
       - api
     ports:

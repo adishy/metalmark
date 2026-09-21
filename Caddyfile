@@ -1,28 +1,60 @@
-# MetalMark reverse proxy (production: bind to the Tailscale interface only).
-# In dev the stack is reached directly on localhost; this file documents the
-# production topology from ARCHITECTURE §1 (Caddy TLS in front of web + api).
+# The TLS door. Brought up by docker-compose.prod.yml; serves :443 inside the
+# compose network, published on the host as METALMARK_HTTPS_PORT (8443 by
+# default, since 443 is the sort of port something else may already want).
 #
-# Replace <tailscale-name> with the machine's Tailscale MagicDNS name.
-# Caddy will provision a cert via the Tailscale/local CA.
+# Why TLS at all, on an app that is LAN/VPN-only (ADR-0002) and never sees the
+# internet: a browser's service worker — the thing that displays a desktop
+# notification, which is what `dist/sw.js` is for — is gated on a *secure
+# context*. `localhost` counts; a LAN hostname does not, over plain http. And
+# there is a second, harder reason in the same direction: `METALMARK_ENV=prod`
+# sets the session cookie's `Secure` flag (api/auth.py), so a browser on another
+# machine reaching this over http would not store the cookie and could not log
+# in at all. Neither of those is a wire-tapping story. The certificate unlocks
+# the API.
 
-# {$METALMARK_SITE_ADDRESS} e.g. metalmark.<tailnet>.ts.net
-{$METALMARK_SITE_ADDRESS:localhost} {
-	# API
-	handle_path /api/* {
-		reverse_proxy api:8000
-	}
+# The site address has to name the host you will actually type, and it is a
+# variable for that reason: Caddy obtains a certificate for the names it is *told*
+# about, and there is no default that covers a LAN. A bare `:443` — the obvious
+# way to write "any host" — measures as a server with no certificate at all: the
+# TLS handshake is refused with `tlsv1 alert internal error`, which looks like a
+# broken deployment rather than a missing hostname.
+#
+# So a real deployment sets this. `METALMARK_SITE=metalmark.tailnet.ts.net` in
+# `.env`, or the machine's LAN name, and then that is the name in the URL and in
+# the certificate. The default is `localhost`, which is what the machine itself
+# and the `prod` gate use.
+{$METALMARK_SITE:localhost}:443 {
+	# A LAN deployment has no public DNS name for ACME to validate, so Caddy's
+	# own CA issues the certificate instead. The trade is that every client has to
+	# trust that CA once — the README has the two commands, and it is worth doing
+	# properly: a browser that merely clicks through a certificate warning is on
+	# an origin with a *certificate error*, and service workers are refused there
+	# outright. "Ignore it and continue" is the one response that does not work.
+	tls internal
 
-	# Static PWA (built assets served by the web container)
-	handle {
-		reverse_proxy web:5173
-	}
+	encode zstd gzip
 
-	encode gzip zstd
-
-	# Security headers (PWA data endpoints also send no-store from the app)
+	# Carried over from the file this replaced, which had documented these since
+	# before there was a Caddy service to run them — so until now they were a
+	# comment and nothing else. They are applied here rather than in nginx on
+	# purpose: Caddy proxies every response on the door that other devices use,
+	# while nginx's `add_header` is *not* inherited by a location block that sets
+	# one of its own — and this nginx.conf sets Cache-Control in four of them, so
+	# the same three lines would have to be repeated there or they would quietly
+	# apply to some routes and not others. Half-applied security headers read as
+	# applied. The loopback door does not send them; a client that never leaves
+	# the machine is the one case where that costs nothing.
 	header {
 		Referrer-Policy strict-origin-when-cross-origin
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 	}
+
+	# Everything, /api included, goes to the web container, which serves the
+	# built SPA and forwards /api to the api service itself. So the whole
+	# deployment has one origin and no CORS anywhere in it. (ARCHITECTURE §1
+	# draws Caddy splitting /api off one hop earlier; the split happens inside
+	# nginx instead. Same shape, and it puts the fork where the routes already
+	# live.)
+	reverse_proxy web:8080
 }

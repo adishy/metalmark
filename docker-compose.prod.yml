@@ -1,0 +1,136 @@
+# MetalMark — the deployment. Layered on the dev stack, never used alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Everything here changes *how* the same four services run, never what they are.
+# The compose project is deliberately the same one, so this is the same database
+# volume, the same household and the same data — a single machine that switches
+# between "developing it" and "using it" should not end up with two ledgers. Run
+# it under a second project name (`-p`) to keep the two apart; scripts/verify.sh's
+# `prod` gate does exactly that, to boot a deployment beside the dev stack.
+#
+# Three changes, and each one is load-bearing:
+#
+#   * `web` becomes the built PWA on nginx instead of Vite's dev server. This is
+#     the one thing the dev stack cannot do at all — `vite-plugin-pwa` emits
+#     `sw.js` only for a production build, and with no service worker the app
+#     cannot show a desktop notification (ADR-0037), nor be installed, nor work
+#     offline.
+#   * `api` and `worker` stop bind-mounting the source, and the api stops
+#     reloading. A deployment that serves your working tree is not a deployment.
+#     `METALMARK_ENV=prod` follows from that and does three real things: it sets
+#     the session cookie's `Secure` flag (api/auth.py), it drops the dev CORS
+#     allowance for `localhost:5173` (main.py), and it makes the fake aggregator
+#     refuse to exist — `services/fake_simplefin.py` accepts it only in test/dev,
+#     so a deployment can never be pointed at fabricated data by an environment
+#     variable.
+#   * `caddy` is added in front, for the reasons in the Caddyfile. TLS is not
+#     optional here — with `Secure` cookies a browser on another machine cannot
+#     log in over http.
+#
+# The `!override` / `!reset` tags are compose's own. Compose *merges* lists like
+# `volumes` and `ports` by default, which would leave the dev bind mounts and the
+# 127.0.0.1:5173 listener in place underneath these — so replacing a list has to
+# be said out loud.
+
+services:
+  db:
+    # Not published. A deployment's database has no reason to be reachable from
+    # the host — nothing outside the compose network talks to it, and a Postgres
+    # listening on a laptop's interface is reachable from whatever network that
+    # laptop joins next. It is also the port the dev stack already holds, so
+    # leaving it would mean this stack could never run beside the dev one, which
+    # is exactly what scripts/verify.sh's `prod` gate needs to do.
+    ports: !reset []
+    restart: unless-stopped
+
+  api:
+    # No `--reload`: there is no source to reload from.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Both of these are literals rather than `${…}` for one reason: `.env` is the
+    # dev stack's file and it sets `METALMARK_ENV=dev`. An interpolated
+    # `${METALMARK_ENV:-prod}` therefore resolves to `dev` on every checkout that
+    # has a `.env` — which was measured, not assumed — and the deployment would
+    # quietly be the dev api behind nginx, with the localhost CORS allowance still
+    # open and the session cookie still `Secure`-less. A deployment states these.
+    environment:
+      METALMARK_ENV: prod
+      # In prod the fake aggregator is refused outright rather than selected, so
+      # this is documentation as much as configuration: the claim endpoint's
+      # provider is the real one, and there is no environment variable that can
+      # point a deployment at fabricated data.
+      METALMARK_SIMPLEFIN_PROVIDER: simplefin
+    volumes: !override
+      # The source bind mount goes; scripts/ stays. `backup.sh` and `restore.sh`
+      # run the crypto as `docker compose exec -T api python /scripts/backup.py`,
+      # and scripts/ is outside the backend image's build context, so a
+      # deployment without this mount has no working backup.
+      - ./scripts:/scripts:ro
+    # The api is behind nginx now, so its own port is not published. Nothing
+    # should reach it except through the web container.
+    ports: !reset []
+    restart: unless-stopped
+
+  worker:
+    # Literal, for the same reason as the api above. The worker reads it too —
+    # `configure_logging(settings.log_level, settings.env)`.
+    environment:
+      METALMARK_ENV: prod
+    volumes: !reset []
+    # `restart: unless-stopped` is already in the base file, and the reason it is
+    # there — a dead worker fails nothing and is invisible — is only sharper on a
+    # deployment nobody is watching.
+
+  web:
+    build:
+      context: ./frontend
+      target: prod
+    # The image is the artifact now, so the source mount and the anonymous
+    # node_modules volume that shadowed it both go.
+    volumes: !override []
+    ports: !override
+      # Loopback of the machine running the stack, and nowhere else. Plain http
+      # is acceptable on that interface precisely because it never leaves the
+      # machine, and `localhost` is a secure context by specification — so this
+      # is the one door that needs no certificate installed and still gets a
+      # service worker. It is the door to use from the machine itself; Caddy
+      # below is the one for every other device.
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+    # Interpolated, unlike the api's and worker's — and the difference is not an
+    # oversight. This one is a value a deployment *sets*, with no dev value to be
+    # accidentally inherited, so `.env` is exactly where it belongs.
+    #
+    # It has to be passed through at all because a Caddyfile's `{$VAR}` is
+    # resolved by Caddy from **its own** environment at startup; compose does not
+    # interpolate a file it only mounts. Without this line the Caddyfile's
+    # `{$METALMARK_SITE:localhost}` would read the default on every deployment,
+    # and setting the variable would look like it worked while changing nothing.
+    environment:
+      METALMARK_SITE: ${METALMARK_SITE:-localhost}
+    ports:
+      - "${METALMARK_HTTPS_PORT:-8443}:443"
+      # Port 80 is deliberately not published. Its only job would be an
+      # http→https redirect for someone who types a bare hostname, and the cost
+      # is the port most likely to be taken on a machine that is also running
+      # something else. Reach the app at https:// explicitly; add
+      # `- "80:80"` here and a `:80` site to the Caddyfile if you want the
+      # redirect.
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The local CA and everything it has issued. A named volume rather than an
+      # anonymous one, so that `up`/`down` does not regenerate the CA — which
+      # would silently invalidate the trust every client installed, and present
+      # as a certificate error that looks like the deployment is broken.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

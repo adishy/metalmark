@@ -123,6 +123,20 @@ record the decision to notify on the server rather than deciding in the browser.
   `AppShell` → endpoint wire is covered by a unit test with the two APIs stubbed, since neither jsdom
   nor the e2e browser has them; the display path is unit-tested at the decision boundary; the endpoint
   is covered by an integration test; and the real display path is verified by hand.
+  **Amended (measured later, and it corrects the conclusion above rather than the measurement):** the
+  claim that this makes CI able to render only `unsupported` is too strong, and the e2e suite's
+  behaviour is a consequence of the URL it uses, not of the environment. Two measurements:
+  (a) the secure-context gate keys on the **hostname**, so Chromium launched with
+  `--host-resolver-rules=MAP localhost <container-ip>` reaches the dev server as `http://localhost:5173`
+  and reports `isSecureContext: true`, `"serviceWorker" in navigator: true` — `web:5173` is not a secure
+  context, `localhost` is, and they are the same server. (The rule's target must be a literal address;
+  `MAP localhost web` fails with ERR_NAME_NOT_RESOLVED.) (b) `grantPermissions(["notifications"])` is
+  ignored by headless Chromium in the pinned image — permission stays `denied` — but the *same script*
+  under `xvfb-run -a` headed reports `granted`. So the display path is reachable from CI after all, and
+  the absence of a test for it is a decision about cost, not a fact about browsers. What stays true, and
+  is why the e2e assertions are unchanged: `http://web:5173` is still an insecure context, and that is
+  the origin the suite drives. ADR-0038's `prod` gate takes the other road — a production build, which
+  is the half that was actually missing — and `scripts/prod_probe.cjs` carries these two facts.
 - **Follow-ups (a deployment fact, not a test one):** by the same gate, **an instance reached over
   plain HTTP on a LAN hostname cannot show notifications at all** — only `https://` or `localhost` can.
   ADR-0002 puts this app on a LAN behind a VPN, which makes that the *likely* first deployment, so the
@@ -154,5 +168,10 @@ record the decision to notify on the server rather than deciding in the browser.
   clears *both* gates at once, while the compose file today serves the dev server over plain HTTP and so
   fails both. The doc and the stack disagree; this ADR records the disagreement rather than resolving it,
   because the deployment shape is its own decision and not this feature's to make.
+  **Resolved, in the way this bullet predicted:** ADR-0038 makes the doc true — `docker-compose.prod.yml`
+  builds `dist/` and serves it from nginx behind Caddy, and `scripts/verify.sh prod` boots that from an
+  empty volume and asserts from a browser that the worker registers, which is the half this ADR could
+  only describe. The dev stack is deliberately untouched, so this ADR's first bullet still holds for
+  `docker compose up`: no worker, no notifications, and the panel says so.
 - **Follow-ups:** if the webhook is later removed or generalised, this ADR records that it is one sink
   among several, not the owner of the notification rule.

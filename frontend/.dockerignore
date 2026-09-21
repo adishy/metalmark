@@ -1,0 +1,24 @@
+# Nothing here belongs in an image.
+#
+# `node_modules` above all: the `dev` stage installs its own, and a host copy
+# arriving via `COPY . .` would shadow it with a macOS build — which is the exact
+# failure the anonymous `/app/node_modules` volume in docker-compose.yml exists to
+# work around. Keeping it out of the context makes that belt-and-braces rather
+# than load-bearing.
+node_modules
+
+# Build and test output. The `build` stage regenerates `dist`; the rest is only
+# ever written by a run that is already over.
+dist
+playwright-report
+test-results
+.vite
+
+# Anything environment-shaped. `VITE_API_BASE` defaults to `/api` in the source,
+# and that default is the one a deployment wants — the SPA and the API share an
+# origin through nginx. A stray `.env` on the build machine silently re-pointing
+# the bundle at `http://localhost:8000` is a deployment that works on the machine
+# that built it and nowhere else.
+.env
+.env.*
+*.local

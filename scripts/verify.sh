@@ -35,7 +35,14 @@ PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-metalmark}"
 NETWORK="${COMPOSE_PROJECT}_default"
 
-GATES=(lint pytest frontend contract drill e2e walkthrough reset)
+# The deployment's own compose project, so the `prod` gate can boot a full
+# deployment *beside* the dev stack instead of replacing it — and on its own
+# database volume, so what it tests is the fresh-install path rather than an
+# upgrade of whatever dev left behind.
+PROD_PROJECT="${PROD_PROJECT_NAME:-metalmark-prod}"
+PROD_HTTPS_PORT="${METALMARK_HTTPS_PORT:-8443}"
+
+GATES=(lint pytest frontend contract drill e2e walkthrough prod reset)
 RESULTS=()
 FAILED=0
 MUTATED=0
@@ -67,12 +74,18 @@ gates (default: all, in this order):
   drill        back up the live database and restore it into a scratch one
   e2e          Playwright against the compose stack (in the pinned image)
   walkthrough  M1a paths the Playwright suite does not reach, over real HTTP
+  prod         boot the deployment in its own project and probe it in a browser
   reset        drop the volume, migrate, seed demo data
 
 e2e and walkthrough write to the dev database, and the seed never deletes, so
 `reset` runs automatically after them. The database is demo data again when the
 run ends — and therefore when the next one starts. Pass `reset` explicitly to
 reset without running anything else.
+
+`prod` needs no stack running and touches no dev data: it stands up its own
+project (metalmark-prod), builds the production images, migrates and seeds a
+fresh volume, checks what nginx and Caddy serve, and tears the whole thing down.
+It is the only gate that costs a full image build.
 EOF
 }
 
@@ -263,6 +276,212 @@ gate_walkthrough() {
     -e WALKTHROUGH_PASSWORD="${WALKTHROUGH_PASSWORD:-$SEED_PASSWORD}" \
     -v "$ROOT/scripts":/scripts:ro \
     api python /scripts/walkthrough.py
+}
+
+# ------------------------------------------------------- the deployment gate
+
+prod() {
+  docker compose -p "$PROD_PROJECT" -f docker-compose.yml -f docker-compose.prod.yml "$@"
+}
+
+# One assertion per line, in the same shape scripts/prod_probe.cjs prints, so the
+# two halves of the `prod` gate read as one list of what was actually checked.
+# Each returns non-zero on mismatch, for the caller to fold into its `fail`.
+expect_status() {  # <url> <code> <label>
+  local got
+  got=$(curl -sk -o /dev/null -w '%{http_code}' "$1" || true)
+  printf '  %-4s %-52s %s\n' "$([ "$got" = "$2" ] && echo ok || echo FAIL)" "$3" "$got"
+  [ "$got" = "$2" ]
+}
+
+expect_header() {  # <url> <header> <value> <label>
+  local got
+  got=$(curl -skI "$1" | grep -i "^$2:" | tr -d '\r' | sed 's/^[^:]*: *//' || true)
+  printf '  %-4s %-52s %s\n' "$([ "$got" = "$3" ] && echo ok || echo FAIL)" "$4" "${got:-<absent>}"
+  [ "$got" = "$3" ]
+}
+expect_cache() { expect_header "$1" 'cache-control' "$2" "$3"; }
+
+# A status code answers "did something reply", not "did the app reply". A 200
+# from an nginx default page, a stale image, or a proxy that dropped the body
+# all pass `expect_status` and none of them are the SPA — so the two routes that
+# are supposed to be the app are checked for the app's own mount point as well.
+# `id="root"` is in frontend/index.html and nothing else this stack serves.
+expect_body() {  # <url> <fixed-string> <label>
+  local body ok
+  body=$(curl -sk "$1" 2>/dev/null || true)
+  grep -qF -- "$2" <<<"$body" && ok=ok || ok=FAIL
+  printf '  %-4s %-52s %s\n' "$ok" "$3" \
+    "$(grep -oF -- "$2" <<<"$body" | head -1 || true)"
+  [ "$ok" = ok ]
+}
+
+# `-k` throughout, and not as a shortcut: the TLS certificate is issued by
+# Caddy's own CA, which by design nothing on this host trusts. What is being
+# checked is that Caddy terminates TLS and proxies, not that a browser would
+# accept the CA — that part is the operator's, and the README says how.
+
+# A deployment, from nothing. Run under its own compose project so it sits beside
+# the dev stack rather than replacing it.
+#
+# What this proves that no other gate can: that a *built* frontend registers a
+# service worker. `vite-plugin-pwa` emits `sw.js` only for a production build, so
+# on the dev stack `navigator.serviceWorker.ready` never settles and the app
+# cannot display a notification at all (ADR-0037) — which is the entire reason
+# the prod image exists, and until now the one claim in this repo with no test
+# under it. Everything else here is a deployment that boots: a fresh volume,
+# migrations, the seed, nginx, the /api proxy and Caddy, none of which any other
+# gate exercises.
+gate_prod() {
+  # A guard rather than a formality: the teardown is `down -v`, and `-v` on the
+  # dev project would drop the database every other gate has just been using.
+  # Nothing should be able to name it.
+  if [ "$PROD_PROJECT" = "$COMPOSE_PROJECT" ]; then
+    warn "  PROD_PROJECT_NAME must differ from COMPOSE_PROJECT_NAME (${COMPOSE_PROJECT})"
+    return 1
+  fi
+
+  # The overlay is the only place in the repo that uses compose's `!override`
+  # and `!reset` tags. A malformed one otherwise surfaces much later as a service
+  # that quietly kept its dev bind mount, so it is resolved and discarded first.
+  if ! prod config >/dev/null; then
+    warn "  the prod overlay does not resolve"
+    return 1
+  fi
+
+  # From nothing, every time: the gate's subject is a deployment booting, and a
+  # stack that is already up answers a different question.
+  prod down -v --remove-orphans >/dev/null 2>&1 || true
+
+  # The checks leave containers running if they abort, so the status is recorded
+  # and the teardown happens either way.
+  local rc=0
+  prod_checks || rc=1
+  prod down -v --remove-orphans >/dev/null 2>&1 || true
+  return $rc
+}
+
+prod_checks() {
+  local fail=0
+  local base="http://127.0.0.1:8080" tls="https://localhost:${PROD_HTTPS_PORT}"
+  local i code asset jar setcookie authcode web_ip
+
+  prod up -d --build || return 1
+  # Nothing migrates a fresh volume on its own — the api container runs uvicorn
+  # and nothing else, and that is deliberate (migrations are always explicit).
+  prod run --rm api alembic upgrade head || return 1
+
+  # `/healthz` fails closed in the app — it checks the app role, not just that the
+  # process is up — and nginx proxies it, so a 200 here has already exercised the
+  # web container, the proxy and the database. Both doors are waited on: Caddy is
+  # a separate container that can still be starting when nginx is already serving,
+  # and a race there would read as "TLS is broken".
+  for i in $(seq 1 60); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$base/healthz" || true)
+    if [ "$code" = "200" ]; then
+      if curl -sk -o /dev/null -w '%{http_code}' "$tls/healthz" | grep -q 200; then break; fi
+    fi
+    sleep 2
+  done
+  if [ "$code" != "200" ]; then
+    warn "  the deployment never became healthy (last /healthz: ${code:-none})"
+    prod logs --tail 40 web api >&2
+    return 1
+  fi
+
+  prod run --rm \
+    -e METALMARK_SEED_EMAIL="$SEED_EMAIL" \
+    -e METALMARK_SEED_PASSWORD="$SEED_PASSWORD" \
+    -e METALMARK_SEED_HOUSEHOLD="$SEED_HOUSEHOLD" \
+    api python -m app.seed --demo >/dev/null || return 1
+
+  # What nginx serves. The two `/api` answers are the same request to the same
+  # route as the `contract` gate makes against the dev stack — 401 rather than
+  # 404 is what says the prefix was stripped instead of forwarded.
+  expect_status "$base/" 200 "the SPA is served at /" || fail=1
+  expect_status "$base/transactions" 200 "a client-side route falls back to the SPA" || fail=1
+  # …and both are in fact the app, not merely something that answered 200.
+  expect_body "$base/" 'id="root"' "…and / is the built index.html" || fail=1
+  expect_body "$base/transactions" 'id="root"' "…as is the fallback for a client-side route" || fail=1
+  expect_status "$base/healthz" 200 "the api is reachable through the web container" || fail=1
+  expect_status "$base/api/accounts" 401 "…and /api reaches it with the prefix stripped" || fail=1
+  expect_status "$tls/" 200 "Caddy terminates TLS and proxies the SPA" || fail=1
+  expect_status "$tls/api/accounts" 401 "…and /api in front of it" || fail=1
+
+  # The cache headers are load-bearing rather than tidiness. A cached `sw.js`
+  # keeps running the old worker and the old precache manifest until the entry
+  # expires, which makes a deploy look like it did not ship.
+  expect_cache "$base/sw.js" "no-cache" "the service worker is revalidated" || fail=1
+  expect_cache "$base/index.html" "no-cache" "index.html is revalidated" || fail=1
+
+  # The Caddyfile has carried these three lines since before there was a Caddy
+  # service to run them, so until this gate nothing had ever checked they are
+  # served — and a header that is configured but not sent looks exactly like one
+  # that is. Over TLS, because Caddy is where they are set.
+  expect_header "$tls/" "x-content-type-options" "nosniff" \
+    "responses are nosniffed" || fail=1
+  expect_header "$tls/" "x-frame-options" "DENY" \
+    "…and cannot be framed" || fail=1
+  expect_header "$tls/" "referrer-policy" "strict-origin-when-cross-origin" \
+    "…and do not leak the path to other origins" || fail=1
+
+  asset=$(curl -s "$base/" | grep -o '/assets/[A-Za-z0-9._-]*\.js' | head -1 || true)
+  if [ -n "$asset" ]; then
+    expect_cache "$base$asset" "public, max-age=31536000, immutable" \
+      "a content-hashed asset is immutable" || fail=1
+  else
+    printf '  %-4s %-52s\n' "FAIL" "index.html names a hashed asset"
+    fail=1
+  fi
+
+  # The login round trip, over TLS. This is also the check that the api is
+  # running as `prod`: `METALMARK_ENV=prod` is what sets the session cookie's
+  # Secure flag, and it is the whole difference between a deployment and the dev
+  # api behind nginx — a distinction a `.env` file silently collapses if the
+  # overlay interpolates `${METALMARK_ENV}` instead of stating it.
+  jar=$(mktemp)
+  setcookie=$(curl -k -s -D - -o /dev/null -c "$jar" -X POST "$tls/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SEED_EMAIL\",\"password\":\"$SEED_PASSWORD\"}" \
+    | grep -i '^set-cookie:' | tr -d '\r' || true)
+  # Printed from the first `;` onwards — the flags, never the value. A session
+  # token in a build log is a session token in a build log, even one minted
+  # against a demo household, and this repo goes to some trouble not to leak the
+  # other credential it handles. The same discipline costs one parameter
+  # expansion here.
+  printf '  %-4s %-52s %s\n' \
+    "$(grep -qi 'secure' <<<"$setcookie" && echo ok || echo FAIL)" \
+    "the session cookie is Secure" "${setcookie:+<value redacted>}${setcookie#*;}"
+  grep -qi 'secure' <<<"$setcookie" || fail=1
+
+  authcode=$(curl -k -s -o /dev/null -w '%{http_code}' -b "$jar" "$tls/api/accounts" || true)
+  printf '  %-4s %-52s %s\n' \
+    "$([ "$authcode" = "200" ] && echo ok || echo FAIL)" \
+    "a logged-in session reads accounts over TLS" "$authcode"
+  [ "$authcode" = "200" ] || fail=1
+  rm -f "$jar"
+
+  # The browser half: the only check anywhere that a built frontend registers a
+  # service worker. Mounted from the repo rather than /tmp, because /tmp is not a
+  # shared path for every Docker host this runs on.
+  web_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+    "${PROD_PROJECT}-web-1" 2>/dev/null || true)
+  if [ -z "$web_ip" ]; then
+    warn "  could not find the web container's address"
+    return 1
+  fi
+  # `localhost` is *mapped* to that address rather than navigated to directly: a
+  # secure context is decided by the hostname, and `http://web:8080` is not one,
+  # so a service worker is refused there. The rule's target has to be a literal
+  # address — `MAP localhost web` fails to resolve. Both measured; prod_probe.cjs
+  # has the details. `npm ci` output is suppressed because it is not the subject.
+  docker run --rm --network "${PROD_PROJECT}_default" \
+    -v "$ROOT/frontend":/work -v "$ROOT/scripts":/probe:ro -w /work \
+    "$PLAYWRIGHT_IMAGE" \
+    sh -c "npm ci --silent >/dev/null 2>&1 && node /probe/prod_probe.cjs http://localhost:8080 localhost $web_ip" \
+    || fail=1
+
+  return $fail
 }
 
 # Back to demo data. Deliberately a volume drop rather than deleting rows: the

@@ -28,6 +28,12 @@ frontend/dist/
 *.dump
 pg_backups/
 
+# Deployment: Caddy's local CA, exported so a client can be made to trust it
+# (ADR-0038). Per-install, never shared — a committed copy would be a private
+# key's public half sitting in a repo, and trusting the wrong root is worse than
+# trusting none.
+metalmark-ca.crt
+
 # Editor / OS
 .DS_Store
 .idea/
