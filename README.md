@@ -132,6 +132,9 @@ A few things worth knowing once it is up:
   logs and its schedule live.
 - **Updating** is `docker compose pull && docker compose up -d`. The deployment tracks the `latest` tag;
   pin `METALMARK_API_IMAGE`/`METALMARK_WEB_IMAGE` in `.env` (both at once) to hold a specific build.
+  If this directory still holds an older **`compose.yaml`** — the file was called that before 2026-09-21 —
+  delete it. Compose reads `compose.yaml` in preference to `docker-compose.yaml`, warns that it found both,
+  and would otherwise keep starting the old one while the new file sat unused beside it.
 - **Where the data lives.** Everything persistent is in Docker named volumes by default, which is why the
   install above needs no configuration. If this machine already has real backup tooling — ZFS snapshots, a
   NAS, restic — point the state at a filesystem instead, by adding any of these to `.env`:

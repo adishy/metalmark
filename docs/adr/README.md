@@ -85,8 +85,11 @@ status line says the overlay "is `deploy/compose.yaml` now".
 The rename is a `git mv`: a move, not a new file, so the history behind the old path follows it. Other
 changes to that file landed in the same commit — they are edits to the deployment, not part of the rename.
 Compose discovers
-`compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` on its own, and its
-precedence order only matters in a directory holding more than one of them, which is not this one. The
+`compose.yaml`, `compose.yml`, `docker-compose.yaml` and `docker-compose.yml` on its own, and when it finds
+more than one it *warns and takes `compose.yaml`* — measured, in a directory holding all four. That matters
+in exactly one case: an install directory from before this rename, where a re-fetch puts
+`docker-compose.yaml` beside the `compose.yaml` it already had and the old file is the one that keeps
+running. The README says so beside the updating command, because that is where someone will meet it. The
 current spelling is the one the wider self-hosting tooling looks for.
 
 ## Index
