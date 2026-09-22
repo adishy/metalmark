@@ -134,7 +134,8 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0035](0035-reports-read-once.md) | A report reads each thing once, and rounds where it says it rounds | Accepted |
 | [0036](0036-portable-export.md) | A portable export is a document, a backup is the instance, and no id crosses between | Accepted |
 | [0037](0037-desktop-notifications-in-app.md) | Desktop notifications: in-app, not Web Push; the decision to notify is recorded server-side | Accepted |
-| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted, superseded in part by 0039 and 0041 |
+| [0038](0038-the-deployment-is-an-overlay.md) | The deployment is an overlay: a built frontend, a stated environment, and TLS | Accepted, superseded in part by 0039 and 0041, qualified by 0042 |
 | [0039](0039-the-deployment-is-standalone.md) | The deployment is a standalone file that carries no credentials, and the image is published | Accepted, extended by 0040 |
 | [0040](0040-persistent-state-is-overridable.md) | Persistent state is a named volume by default, and a host path when you say so | Accepted |
-| [0041](0041-the-plain-http-door-answers-on-the-lan.md) | The plain-HTTP door answers on the LAN, not only on loopback | Accepted |
+| [0041](0041-the-plain-http-door-answers-on-the-lan.md) | The plain-HTTP door answers on the LAN, not only on loopback | Accepted, one clause qualified by 0042 |
+| [0042](0042-the-session-cookie-flag-is-a-deployment-decision.md) | The session cookie's `Secure` flag is a deployment decision, defaulting to what it was | Accepted |

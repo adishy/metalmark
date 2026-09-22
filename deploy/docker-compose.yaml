@@ -26,11 +26,13 @@
 #     migration, and a variable that agrees in six places is a failure that
 #     surfaces as `role "…" does not exist`.
 #   * **Deployment-specific values are interpolated**, and they are exactly the
-#     four things a target machine decides for itself: the hostname on the
+#     five things a target machine decides for itself: the hostname on the
 #     certificate, the addresses the two doors open on (their ports, and the
-#     interface the plain-HTTP one binds), whether signup stays open, and where
-#     the persistent state lives. None has a dev value that could be inherited by
-#     mistake.
+#     interface the plain-HTTP one binds), whether signup stays open, where the
+#     persistent state lives, and whether the session cookie is marked `Secure`.
+#     None has a dev value that could be inherited by mistake — the last one
+#     defaults to `auto`, which *derives* the answer rather than stating one, so a
+#     value inherited from a `.env` could not weaken it.
 #
 # That second rule is not decoration. `METALMARK_ENV: prod` is written as a
 # literal for precisely this reason: it *does* have a dev value, `.env` sets it
@@ -180,6 +182,18 @@ services:
       APP_DB_PASSWORD_FILE: /secrets/app_db_password
       METALMARK_SECRET_KEY_FILE: /secrets/metalmark_secret_key
       METALMARK_DEFAULT_BASE_CURRENCY: ${METALMARK_DEFAULT_BASE_CURRENCY:-USD}
+      # `auto` — the default — marks the session cookie `Secure` on any deployment
+      # that is not the dev stack, which is right for both doors this file
+      # publishes: Caddy terminates TLS, and the other one is `localhost`.
+      #
+      # Set `METALMARK_SESSION_COOKIE_SECURE=false` when this deployment is
+      # *behind* something that terminates no TLS — a proxy of your own on a
+      # private network, where the origin is `http://` and a browser will not keep
+      # a `Secure` cookie, so a login silently does not stick. Read the cost first:
+      # the session token then crosses that network in cleartext, and the service
+      # worker (notifications, offline) stays refused by the browser either way,
+      # because that gate is about the origin and not about this setting. ADR-0042.
+      METALMARK_SESSION_COOKIE_SECURE: ${METALMARK_SESSION_COOKIE_SECURE:-auto}
       # Open by default, and it has to be: a fresh install has no household and
       # no user, so closing this before the first signup leaves a deployment
       # nobody can enter. Set `METALMARK_OPEN_SIGNUP=false` in the environment

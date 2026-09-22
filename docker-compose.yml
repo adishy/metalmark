@@ -37,6 +37,12 @@ services:
       APP_DB_USER: ${APP_DB_USER:-metalmark_app}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:-metalmark_app_dev_only_change_me}
       METALMARK_DEFAULT_BASE_CURRENCY: ${METALMARK_DEFAULT_BASE_CURRENCY:-USD}
+      # `auto` derives the cookie's `Secure` flag from METALMARK_ENV, which is
+      # `dev` here — so this stack behaves as it always has. The variable exists
+      # for deployments on a private network with no TLS (ADR-0042); it is passed
+      # through here too so that `.env.example` does not describe a setting this
+      # stack ignores.
+      METALMARK_SESSION_COOKIE_SECURE: ${METALMARK_SESSION_COOKIE_SECURE:-auto}
       METALMARK_SECRET_KEY_FILE: /run/secrets/metalmark_secret_key
       # Which provider the *claim* endpoint uses. Only the claim: an existing
       # connection carries its provider on its own row, so the worker dispatches

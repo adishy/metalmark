@@ -463,7 +463,13 @@ gate_prod() {
   # caller whose environment (or `deploy/.env`) named one interface would have the
   # gate dialling 127.0.0.1 on a door that is not listening there, and it would
   # read as a deployment that never became healthy.
-  export METALMARK_DB_DIR= METALMARK_SECRETS_DIR= METALMARK_CADDY_DIR= METALMARK_HTTP_BIND=
+  # `METALMARK_SESSION_COOKIE_SECURE` is here for the first reason: exported
+  # `false` by a developer trying the private-network deployment, it would turn
+  # "the session cookie is Secure" red below and read as a regression, and
+  # exported `true` it would leave the one deployment decision this gate now
+  # measures off in its opt-out half — which sets and clears the variable itself.
+  export METALMARK_DB_DIR= METALMARK_SECRETS_DIR= METALMARK_CADDY_DIR= METALMARK_HTTP_BIND= \
+         METALMARK_SESSION_COOKIE_SECURE=
 
   # From nothing, every time: the gate's subject is a deployment booting, and a
   # stack that is already up answers a different question.
@@ -545,10 +551,10 @@ prod_checks() {
   fi
 
   # The login round trip, over TLS. This is also the check that the api is
-  # running as `prod`: `METALMARK_ENV=prod` is what sets the session cookie's
-  # Secure flag, and it is the whole difference between a deployment and the dev
-  # api behind nginx — a distinction a `.env` file silently collapses if the
-  # overlay interpolates `${METALMARK_ENV}` instead of stating it.
+  # running as `prod`: `METALMARK_ENV=prod` is what the session cookie's Secure
+  # flag is derived from by default, and it is the whole difference between a
+  # deployment and the dev api behind nginx — a distinction a `.env` file silently
+  # collapses if the overlay interpolates `${METALMARK_ENV}` instead of stating it.
   jar=$(mktemp)
   setcookie=$(curl -k -s -D - -o /dev/null -c "$jar" -X POST "$tls/api/auth/login" \
     -H 'Content-Type: application/json' \
@@ -570,6 +576,38 @@ prod_checks() {
     "a logged-in session reads accounts over TLS" "$authcode"
   [ "$authcode" = "200" ] || fail=1
   rm -f "$jar"
+
+  # …and the flag moving when the deployment says so (ADR-0042). Recreating the
+  # api is what makes this a measurement rather than a parse test: the value has
+  # to cross the compose interpolation, the container boundary and the request
+  # path to arrive here, and each of those is a place a typo can live. It costs a
+  # few seconds and no database — the volumes, the cluster and the credentials are
+  # untouched, which a third full boot of the deployment would not be.
+  #
+  # The value is exported rather than prefixed onto the `prod` call: `VAR=x f`
+  # on a *function* leaks into this shell, and everything after this point
+  # resolves this same deployment file.
+  export METALMARK_SESSION_COOKIE_SECURE=false
+  if prod up -d api >/dev/null 2>&1 && prod_wait_healthy; then
+    setcookie=$(curl -k -s -D - -o /dev/null -X POST "$tls/api/auth/login" \
+      -H 'Content-Type: application/json' \
+      -d "{\"email\":\"$SEED_EMAIL\",\"password\":\"$SEED_PASSWORD\"}" \
+      | grep -i '^set-cookie:' | tr -d '\r' || true)
+    # Both halves: a login that hands out no cookie at all would also pass a
+    # `grep -v secure`, and that is a broken deployment rather than an opt-out.
+    printf '  %-4s %-52s %s\n' \
+      "$([ -n "$setcookie" ] && ! grep -qi 'secure' <<<"$setcookie" && echo ok || echo FAIL)" \
+      "…and not Secure when the deployment says so" \
+      "${setcookie:+<value redacted>}${setcookie#*;}"
+    { [ -n "$setcookie" ] && ! grep -qi 'secure' <<<"$setcookie"; } || fail=1
+  else
+    printf '  %-4s %-52s\n' "FAIL" "the api did not come back with the cookie flag off"
+    fail=1
+  fi
+  # Back to the default before returning — an export outlives this function, and
+  # `prod_path_checks` boots the same file next. Empty, not unset, so that it wins
+  # over `deploy/.env` the way the defaults at the top of this gate do.
+  export METALMARK_SESSION_COOKIE_SECURE=
 
   # Where the credentials are, and where they are not. scripts/secret_scan.sh
   # makes three claims about secrets; two of them are about files in the repo and

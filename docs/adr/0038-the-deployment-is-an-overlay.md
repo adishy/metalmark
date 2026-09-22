@@ -8,6 +8,13 @@
   the deployment file's name in this directory's `README.md`. Everything else here — the built frontend
   and why it is the point, `METALMARK_ENV=prod` stated literally and what it does, TLS being non-optional,
   and the `prod` gate — stands unchanged.
+- **Status, continued:** **and qualified by ADR-0042**, in two places, both of them about the session
+  cookie rather than about the deployment. Decision 4's "`auth.py` sets the session cookie's `Secure` flag
+  from it" and decision 5's "with a `Secure` cookie a browser elsewhere cannot log in over http at all"
+  describe what is still the *default*: the flag is derived from `METALMARK_ENV` unless a deployment states
+  `METALMARK_SESSION_COOKIE_SECURE`, which exists for the one topology that terminates no TLS at all.
+  `METALMARK_ENV=prod` marking the cookie, `main.py` dropping the dev CORS allowance and the fake
+  aggregator refusing to exist are untouched.
 - **Date:** 2026-09-20
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0037 (desktop notifications, and the deployment consequence it left open),

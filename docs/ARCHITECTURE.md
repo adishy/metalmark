@@ -524,7 +524,11 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 - **Transport**: Caddy TLS; reachable only over Tailscale/LAN. No public ingress. Implemented by
   `deploy/docker-compose.yaml` (ADR-0038, ADR-0039). TLS here is not only about the wire: a service worker and a
   `Secure` session cookie are both gated on a secure context, so the certificate is what makes the app's
-  notifications and its login work at all on a second device.
+  notifications and its login work at all on a second device. The two halves are not the same kind of thing,
+  though, and only one of them is negotiable: the cookie's `Secure` flag is a deployment's to state
+  (`METALMARK_SESSION_COOKIE_SECURE`, ADR-0042) for a network whose transport is a tunnel rather than a
+  certificate, while the service worker — notifications, install, offline — is refused by the browser on a
+  non-secure origin whatever the app says.
 - **PWA**: cache the app *shell* only; data endpoints are `no-store` — the service worker must never persist
   financial API responses on a (possibly shared) device.
 - **Backups**: nightly `pg_dump` — which is cleartext PII — is **encrypted at the destination**, with a

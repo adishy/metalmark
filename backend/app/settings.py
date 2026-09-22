@@ -11,9 +11,17 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, TypeAdapter, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: What `METALMARK_SESSION_COOKIE_SECURE` parses to. Three values, not two: a
+#: boolean field could not tell "unset" from "false", and unset has to keep
+#: deriving the answer from the environment (ADR-0042).
+CookieSecureMode = Literal["auto", "true", "false"]
+
+_BOOL = TypeAdapter(bool)
 
 
 class Settings(BaseSettings):
@@ -37,6 +45,28 @@ class Settings(BaseSettings):
 
     session_idle_minutes: int = Field(default=1440, alias="METALMARK_SESSION_IDLE_MINUTES")
     session_absolute_hours: int = Field(default=720, alias="METALMARK_SESSION_ABSOLUTE_HOURS")
+
+    # Whether the session cookie carries `Secure` — whether a browser will keep a
+    # login that arrived over plain HTTP. Read it through `cookie_is_secure`, which
+    # resolves `auto`.
+    #
+    # `auto` is the historical rule (`METALMARK_ENV != "dev"`), and leaving it unset
+    # therefore moves nothing: every deployment that terminates TLS keeps the cookie
+    # it has today. The three values exist because one shape has no TLS to terminate
+    # — an instance reachable only on a private network, where the transport is the
+    # tunnel (a tailnet) or the assumption that the LAN is trusted, and the origin is
+    # `http://` because a browser cannot be made to accept a self-issued certificate
+    # for it without the CA dance. There, `Secure` is not a protection and is only a
+    # login that silently does not stick.
+    #
+    # The cost of `false` is that the session token crosses that network in
+    # cleartext, readable by anything on the path: on a tailnet that is WireGuard, on
+    # a LAN it is every device on the segment. ADR-0042 is the record. One thing it
+    # does *not* change: the service worker, and so notifications and offline use,
+    # are refused by the browser on a non-secure origin whatever this says.
+    session_cookie_secure: CookieSecureMode = Field(
+        default="auto", alias="METALMARK_SESSION_COOKIE_SECURE"
+    )
 
     # Signup is open by default (ADR-0027): the first signup creates the household,
     # later ones join it. Turn this off to close the door — the app is LAN/VPN-only
@@ -69,6 +99,30 @@ class Settings(BaseSettings):
 
     _secret_key: str = ""
 
+    @field_validator("session_cookie_secure", mode="before")
+    @classmethod
+    def _cookie_secure_mode(cls, value: object) -> object:
+        """`auto`, a blank value and unset all mean the same thing.
+
+        Delegated to a boolean for everything else rather than spelling the
+        accepted words out, so `1`, `yes` and `on` work here as they do for every
+        other boolean setting — and so that a value that is none of those fails
+        as a validation error naming the field, like any other bad setting.
+
+        Blank counts as unset because both of the places an operator writes this
+        can produce one: `deploy/docker-compose.yaml` passes `${VAR:-auto}`, and a
+        `.env` line with nothing after the `=` is much more likely to mean "leave
+        it alone" than "turn the protection off".
+        """
+        if value is None or (isinstance(value, str) and value.strip().lower() in ("", "auto")):
+            return "auto"
+        try:
+            return "true" if _BOOL.validate_python(value) else "false"
+        except ValidationError:
+            raise ValueError(
+                f"METALMARK_SESSION_COOKIE_SECURE must be auto, true or false — not {value!r}"
+            ) from None
+
     @model_validator(mode="after")
     def _load_secrets(self) -> Settings:
         if self.secret_key_inline:
@@ -87,6 +141,17 @@ class Settings(BaseSettings):
                 _read_secret(self.app_db_password_file) or self.app_db_password
             )
         return self
+
+    @property
+    def cookie_is_secure(self) -> bool:
+        """The `Secure` flag the session cookie is set with — the resolved setting.
+
+        `auto` keeps the rule every deployment has been running on: anything but
+        `dev` terminates TLS, so anything but `dev` marks the cookie `Secure`.
+        """
+        if self.session_cookie_secure == "auto":
+            return self.env != "dev"
+        return self.session_cookie_secure == "true"
 
     @property
     def secret_key(self) -> str:

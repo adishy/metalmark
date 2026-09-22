@@ -91,6 +91,10 @@ Open **https://metalmark.local:8790** and sign up — **the first signup creates
 so there is nothing to seed either. On the machine running it, **http://localhost:8791** works
 immediately, with no certificate to install and still a working service worker.
 
+If this machine already has a proxy holding 443 for names it serves, and the network in front of it is
+private, there is a shape that needs no second certificate at all — one line of `.env`, and reading two
+costs first. That is [the next section](#fronting-it-with-your-own-proxy-and-no-certificate).
+
 Then **trust Caddy's CA**, or every device will refuse the connection properly. There is no public DNS
 name on a LAN for a real CA to validate, so Caddy issues from its own root:
 
@@ -120,10 +124,13 @@ A few things worth knowing once it is up:
   redirect.
 - **The plain-HTTP door is published on every interface**, not only on loopback (`METALMARK_HTTP_BIND`,
   default `0.0.0.0`), so a reverse proxy of your own can sit in front of it. The rest of the LAN can reach
-  it too, and that is worth being clear about rather than discovering: `METALMARK_ENV=prod` sets the
-  session cookie's `Secure` flag, so a browser on another machine **cannot log in** through this door — the
-  app loads and the login does not stick. Every device except this one belongs on Caddy's door.
-  `METALMARK_HTTP_BIND=127.0.0.1` puts it back on loopback only.
+  it too, and that is worth being clear about rather than discovering: `METALMARK_ENV=prod` marks the
+  session cookie `Secure`, and a browser will not keep one from a plain-HTTP origin that is not
+  `localhost`, so a login there **does not stick** — the app loads, the password is right, and every
+  request after it is anonymous. That is the default because Caddy's door is the answer for every other
+  device. If your deployment has its own transport and no certificate, that is a decision you can state
+  instead — see [Fronting it with your own proxy](#fronting-it-with-your-own-proxy-and-no-certificate)
+  below. `METALMARK_HTTP_BIND=127.0.0.1` puts the door back on loopback only.
 - **Close signup once you are in.** Anyone who can reach the instance can join the household and read all
   of it, which is fine while it is just you. Add `METALMARK_OPEN_SIGNUP=false` to `.env` and run
   `docker compose up -d` to shut the door. It has to stay open until the first account exists.
@@ -202,6 +209,49 @@ A few things worth knowing once it is up:
   the directory you installed into. `caddy_data` is worth keeping too, but losing it is merely tedious
   (every client re-trusts a new CA) where losing the other two is not survivable.
 
+### Fronting it with your own proxy, and no certificate
+
+Caddy on `:8790` with its own CA is the deployment's answer for a LAN with no DNS name a public CA will
+validate. It is not the only shape. The one this section is for is a machine that already has a reverse
+proxy holding 80 and 443 for names it serves, on a network that is **already private** — a tailnet, a
+WireGuard VPN, a LAN you would trust with the traffic anyway. There the transport is the tunnel, the names
+it serves are `http://`, and there is no certificate for this app to have and no root for any device to
+trust.
+
+That deployment reaches the app through the plain-HTTP door, which is already published on every
+interface, and it needs one line of `.env`:
+
+```bash
+echo 'METALMARK_SESSION_COOKIE_SECURE=false' >> .env
+docker compose up -d
+```
+
+```caddyfile
+# your existing proxy, wherever it already is
+metalmark.example.lan {
+  reverse_proxy 192.168.1.50:8791    # the plain-HTTP door, on the machine running MetalMark
+}
+```
+
+Without that line the app loads and nobody can log in: `METALMARK_ENV=prod` marks the session cookie
+`Secure`, a browser refuses to keep a `Secure` cookie from a plain-HTTP origin that is not `localhost`,
+and the failure reads as a wrong password rather than as a cookie. The setting says what your network
+already knows — that `http://` here is inside a tunnel, not on the open internet — and it is worth
+reading the two costs before you set it:
+
+- **The session token crosses that network readable by anything on the path**, and an attacker on the
+  path can plant one as well as read one. On a tailnet that path is WireGuard, which is why this is the
+  right trade there; on a LAN it is every device on the segment, so make it a segment you trust. If your
+  proxy terminates TLS, leave the setting alone.
+- **It does not bring notifications back.** A service worker is refused by the browser on a non-secure
+  origin, so notifications, the install prompt and offline use all stay off, and `/admin` keeps saying so.
+  That gate is about where the app was served from, not about the cookie — the only origin that clears it
+  without a certificate is `http://localhost`, which is the machine running the stack.
+
+`METALMARK_SESSION_COOKIE_SECURE` takes `auto` (the default, and the derivation described above), `true`
+or `false`; `1`/`yes`/`on` work as they do for every other boolean setting, and anything else is refused
+with an error naming the variable.
+
 ### What this is, and what it changes
 
 The deployment is `deploy/docker-compose.yaml`, standalone and complete. It is not an overlay on the dev stack,
@@ -211,7 +261,7 @@ and the two changes that matter most are not about the deployment at all:
 |---|---|---|
 | `web` | Vite dev server, HMR, source bind-mounted | `npm run build` → nginx serving `dist/` |
 | Service worker | none — `vite-plugin-pwa` builds one only for production | `dist/sw.js`, so **notifications can display** |
-| `METALMARK_ENV` | `dev` | `prod`: `Secure` session cookie, no dev CORS, the fake aggregator refuses to exist |
+| `METALMARK_ENV` | `dev` | `prod`: `Secure` session cookie (unless `METALMARK_SESSION_COOKIE_SECURE` says otherwise), no dev CORS, the fake aggregator refuses to exist |
 | Credentials | `secrets/metalmark_secret_key`, created by hand | generated on first boot, never rewritten |
 | Persistent state | the `db_data` named volume | named volumes by default; `METALMARK_DB_DIR` / `_SECRETS_DIR` / `_CADDY_DIR` point it at your own paths instead |
 | Schema | migrated by hand | applied by a one-shot container before the api starts |
@@ -219,12 +269,13 @@ and the two changes that matter most are not about the deployment at all:
 | Installable, works offline | no | yes |
 
 **The two doors are two answers to the same problem.** Caddy's is the one for every device, and it is
-not decoration: `METALMARK_ENV=prod` sets the session cookie's `Secure` flag, so a browser on another
+not decoration: `METALMARK_ENV=prod` marks the session cookie `Secure`, so by default a browser on another
 machine cannot log in over plain http at all. The plain-HTTP door is the one for the machine the stack is
 running on, because `localhost` is a *secure context* by specification — so it is the one way in that
 needs no certificate installed and still gets a service worker. It is published on all interfaces rather
 than on loopback, so that a reverse proxy of your own can sit in front of it — and the `Secure` cookie is
-what keeps that from being a second way in for other devices.
+what keeps that from being a second way in for other devices, unless you are the operator of one of those
+proxies and say so deliberately (`METALMARK_SESSION_COOKIE_SECURE`, above).
 
 ### Deploying from a checkout
 

@@ -1,6 +1,13 @@
 # ADR 0041: The plain-HTTP door answers on the LAN, not only on loopback
 
-- **Status:** Accepted
+- **Status:** Accepted, **one clause qualified by ADR-0042** — decision 3's "the LAN can now reach an
+  origin it cannot log in on" is the *default* rather than the rule: a deployment that states
+  `METALMARK_SESSION_COOKIE_SECURE=false` deliberately trades the cleartext session for a login that
+  works there, which is the shape that produced that record. Since it is a thing an operator chooses,
+  the "surface widened, usable surface did not" consequence below is about a default rather than about
+  the door. Everything else here stands: the door, its `0.0.0.0` bind, the reason `localhost` remains
+  the one way in that needs nothing installed, and the `Secure` cookie as what a deployment gets
+  without being asked.
 - **Date:** 2026-09-21
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0038 decision 5 (which published this door on loopback and says why — that clause is

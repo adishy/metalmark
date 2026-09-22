@@ -19,7 +19,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    secure = get_settings().env != "dev"
+    # `Secure` is the difference between "logged in" and "logged in until the next
+    # request" on an origin whose browser will not keep the cookie, and the
+    # deployment on a private network with no TLS is exactly that origin — so the
+    # flag is a deployment decision (ADR-0042) rather than a consequence of
+    # METALMARK_ENV. The derivation it defaults to is the one that was here.
+    secure = get_settings().cookie_is_secure
     response.set_cookie(
         SESSION_COOKIE,
         token,
