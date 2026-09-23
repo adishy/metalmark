@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.db import scoped_session, unscoped_session
 from app.models import Account, FxRate, Owner
@@ -91,13 +91,15 @@ async def test_a_crashing_check_is_a_finding_and_leaks_nothing(household_factory
     hid = await _problems(household_factory)
 
     async def boom(session):
-        raise RuntimeError("UPDATE accounts SET name='Amex Secret' balance=450.37")
+        # A real database error, which aborts the transaction: without each
+        # check's savepoint, every check after this one would fail too.
+        await session.execute(text("SELECT 1/0"))
 
     monkeypatch.setattr(checks, "_stale_accounts", boom)
     async with scoped_session(hid) as s:
         found = _by_id(await checks.run(s, hid))
     assert found["stale_accounts"].status == "fail"
-    assert found["stale_accounts"].summary == "This check could not run (RuntimeError)."
+    assert found["stale_accounts"].summary == "This check could not run (DBAPIError)."
     assert found["migrations_applied"].status == "info"
 
     from app import worker
@@ -111,7 +113,9 @@ async def test_a_crashing_check_is_a_finding_and_leaks_nothing(household_factory
     crashed = [e for e in logs if e.get("event") == "checks.crashed"
                and e.get("household_id") == str(hid)]
     assert crashed and crashed[0]["error_type"] == "RuntimeError"
-    assert crashed[0]["at"].endswith(".py:" + crashed[0]["at"].rsplit(":", 1)[1])
+    # A place in the app package (here the worker's call, since the raise is in
+    # this test file, which is outside it), as a path relative to the package.
+    assert crashed[0]["at"].startswith("worker.py:"), crashed[0]["at"]
     for secret in ("Secret", "450.37", "91000.53"):
         assert secret not in repr(logs), f"{secret!r} reached the log"
 

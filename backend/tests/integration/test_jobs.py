@@ -728,6 +728,42 @@ async def test_the_worker_runs_a_claimed_job_and_links_the_run_to_it(household):
     assert (await _job_row(household, claimed.job_id)).status == "done"
 
 
+async def test_a_sync_through_the_worker_logs_no_names_or_amounts(household, caplog):
+    """ADR-0047: the worker's stdout carries shape only. A real sync — the
+    committed capture, every account and transaction in it — is where a name, a
+    payee or a balance would most plausibly reach a log line, so it is asserted
+    here on both loggers a container's stdout gets: structlog and the stdlib
+    (httpx, apscheduler)."""
+    import logging
+
+    import structlog
+
+    from app import worker
+
+    await _make_connection(household, next_sync_at=NOW - timedelta(minutes=1))
+    async with scoped_session(household) as session:
+        assert await jobs.enqueue_scheduled_syncs(session, now=NOW) == 1
+    async with scoped_session(household) as session:
+        claimed = await jobs.claim_next(session, household, now=NOW)
+
+    caplog.set_level(logging.DEBUG)
+    with structlog.testing.capture_logs() as logs:
+        assert await worker.run_one(claimed) == "done"
+
+    async with scoped_session(household) as session:
+        accounts = (await session.execute(select(Account))).scalars().all()
+        txns = (await session.execute(select(Transaction))).scalars().all()
+    secrets = {a.name for a in accounts} | {t.description for t in txns if t.description}
+    # Amounts as the capture states them — with their cents, which no id or
+    # timestamp in a log line carries.
+    secrets |= {f"{a.current_balance:.2f}" for a in accounts if a.current_balance}
+    secrets |= {f"{abs(t.amount):.2f}" for t in txns if abs(t.amount) >= 10}
+    assert accounts and txns
+    text_logged = repr(logs) + caplog.text
+    leaked = sorted(s for s in secrets if s in text_logged)
+    assert not leaked, f"reached the log: {leaked}"
+
+
 async def test_the_consumer_drains_the_queue_and_stops_when_asked(household, monkeypatch):
     """The loop itself: claim, run, finish, and come back for more.
 

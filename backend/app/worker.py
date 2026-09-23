@@ -331,7 +331,12 @@ def failure(exc: BaseException) -> dict[str, str]:
     ``error``), behind RLS.
     """
     frames = traceback.extract_tb(exc.__traceback__)
-    where = f"{frames[-1].filename.rsplit('/app/', 1)[-1]}:{frames[-1].lineno}" if frames else ""
+    # The deepest frame in *this* package: a database error is raised deep inside
+    # SQLAlchemy or asyncpg, and a line there says nothing about which query of
+    # ours failed.
+    ours = [f for f in frames if "/app/" in f.filename]
+    frame = (ours or frames)[-1] if frames else None
+    where = f"{frame.filename.rsplit('/app/', 1)[-1]}:{frame.lineno}" if frame else ""
     return {"error_type": type(exc).__name__, "at": where}
 
 
