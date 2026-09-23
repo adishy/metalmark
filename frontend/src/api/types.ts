@@ -36,6 +36,9 @@ export interface Account {
   current_balance: Money;
   balance_date: string | null;
   is_asset: boolean;
+  /** The date of the last balance of a synced account the bank has stopped
+   *  reporting — still carried forward on the net-worth line. */
+  stale_since?: string | null;
   /** Always set — an account is the bottom of the ownership chain. */
   owner_id: UUID;
   is_manual: boolean;

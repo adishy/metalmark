@@ -76,6 +76,7 @@ const ACCOUNTS = [
     institution: null,
     current_balance: "-850.0000",
     balance_date: "2026-01-01",
+    stale_since: "2026-01-01",
   },
 ] as unknown as Account[];
 
@@ -343,5 +344,17 @@ describe("liabilities", () => {
     const body = h.update.mock.calls[0][0].body as Record<string, unknown>;
     expect(body.type).toBe("other");
     expect(body).not.toHaveProperty("current_balance");
+  });
+});
+
+describe("stale accounts", () => {
+  it("marks an account the bank stopped reporting", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Accounts />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("not reported since");
+    expect(screen.queryByTestId("account-stale-acct-1")).toBeNull();
   });
 });

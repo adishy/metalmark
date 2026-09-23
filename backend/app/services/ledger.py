@@ -7,7 +7,7 @@ household-scoped session (RLS), except FX rates which are shared reference data.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money import quantize_storage
 from app.models import (
     Account,
+    AccountConnection,
     BalanceSnapshot,
     Category,
     CategoryGroup,
@@ -171,6 +172,39 @@ async def list_accounts(session: AsyncSession,
         # fold in and no inheritance to resolve (ADR-0026).
         stmt = stmt.where(Account.owner_id == owner_id)
     return list((await session.execute(stmt)).scalars().all())
+
+
+#: How far a synced account's balance may lag its connection's last successful
+#: sync before the account is called stale. A week, not a day or three: some
+#: banks do not post a new balance over a weekend or a holiday.
+STALE_AFTER = timedelta(days=7)
+
+
+async def stale_since(session: AsyncSession) -> dict[uuid.UUID, date]:
+    """Synced accounts the bank has stopped reporting → the date of their last
+    balance.
+
+    Its connection still syncs, but this account's balance has not moved with it:
+    closed, or dropped by the bridge. The net-worth line carries that last balance
+    forward — right while it is the last thing known, wrong once the account is
+    gone — so the Accounts page says so, and hiding or closing it stays a person's
+    call. No column: it is a comparison of two dates the ledger already holds.
+    """
+    rows = (
+        await session.execute(
+            select(Account.id, Account.balance_date, AccountConnection.last_synced_at)
+            .join(AccountConnection, AccountConnection.id == Account.connection_id)
+            .where(
+                AccountConnection.last_synced_at.is_not(None),
+                Account.balance_date.is_not(None),
+            )
+        )
+    ).all()
+    return {
+        account_id: balance_date
+        for account_id, balance_date, synced_at in rows
+        if balance_date < synced_at.date() - STALE_AFTER
+    }
 
 
 async def get_account(session: AsyncSession, account_id: uuid.UUID) -> Account:

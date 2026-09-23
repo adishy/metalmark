@@ -15,7 +15,7 @@ Base currency only, deliberately: the headline converts each account at its own
 from __future__ import annotations
 
 import dataclasses
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -25,6 +25,7 @@ from sqlalchemy import select
 from app.db import scoped_session
 from app.models import (
     Account,
+    AccountConnection,
     BalanceSnapshot,
     Holding,
     Security,
@@ -655,3 +656,132 @@ async def test_the_series_stops_at_today(household_factory):
             current_balance=D("10"), balance_date=today))
         r = await reports.net_worth_series(s, hid, today, today.replace(year=today.year + 1))
     assert [p["date"] for p in r["points"]][-1] == today
+
+
+# ---- accounts the bank stops reporting, and accounts it names alike -----------
+
+
+async def _events_named(hid, run_id, event) -> list[SyncRunEvent]:
+    async with scoped_session(hid) as s:
+        return [
+            e for e in (
+                await s.execute(select(SyncRunEvent).where(SyncRunEvent.sync_run_id == run_id))
+            ).scalars()
+            if e.event == event
+        ]
+
+
+async def test_an_account_missing_from_a_fetch_is_reported(household_factory):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    without = dataclasses.replace(demo, accounts=tuple(
+        a for a in demo.accounts if a.name != scenarios.DEMO_CHECKING))
+    provider = FakeProvider(script=[demo, without])
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    second = await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    warned = await _events_named(hid, second.run_id, "account.not_reported")
+    assert [e.detail["name"] for e in warned] == [scenarios.DEMO_CHECKING]
+
+
+async def test_an_account_the_bank_stopped_reporting_is_stale(household_factory):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    await sync.run_connection_sync(
+        hid, conn, provider=FakeProvider(script=[scenarios.demo()]), now=NOW)
+    async with scoped_session(hid) as s:
+        accounts = {a.name: a for a in (await s.execute(select(Account))).scalars()}
+        connection = (
+            await s.execute(select(AccountConnection).where(AccountConnection.id == conn))
+        ).scalar_one()
+        synced = accounts[scenarios.DEMO_SAVINGS].balance_date
+        connection.last_synced_at = datetime(synced.year, synced.month, synced.day,
+                                             tzinfo=UTC) + timedelta(days=3)
+        accounts[scenarios.DEMO_CHECKING].balance_date = synced - timedelta(days=10)
+        await s.flush()
+        stale = await ledger.stale_since(s)
+    assert stale == {accounts[scenarios.DEMO_CHECKING].id: synced - timedelta(days=10)}
+
+
+def _card(template, external_id, balance, txn_ids=()):
+    return dataclasses.replace(
+        template, external_id=external_id, name="Blue Cash", balance=D(balance),
+        transactions=tuple(
+            dataclasses.replace(template.transactions[0], external_id=t) for t in txn_ids
+        ),
+    )
+
+
+async def test_two_cards_named_alike_are_two_accounts(household_factory):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    both = dataclasses.replace(demo, accounts=demo.accounts + (
+        _card(checking, "ACT-a", "-100"), _card(checking, "ACT-b", "-900")))
+    provider = FakeProvider(script=[both, both])
+    first = await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    async with scoped_session(hid) as s:
+        cards = {
+            a.external_id: a
+            for a in (await s.execute(select(Account).where(Account.name == "Blue Cash"))).scalars()
+        }
+    assert {k: v.current_balance for k, v in cards.items()} == {
+        "ACT-a": D("-100.0000"), "ACT-b": D("-900.0000")}
+    warned = await _events_named(hid, first.run_id, "account.key_collision")
+    assert len(warned) == 1 and warned[0].detail["merged"] is False
+
+
+async def test_a_new_card_named_like_an_existing_one_gets_its_own_account(household_factory):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    one = dataclasses.replace(demo, accounts=demo.accounts + (_card(checking, "ACT-a", "-100"),))
+    two = dataclasses.replace(demo, accounts=demo.accounts + (
+        _card(checking, "ACT-a", "-100"), _card(checking, "ACT-b", "-900")))
+    provider = FakeProvider(script=[one, two])
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    async with scoped_session(hid) as s:
+        original = (
+            await s.execute(select(Account).where(Account.name == "Blue Cash"))
+        ).scalar_one()
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    async with scoped_session(hid) as s:
+        cards = {
+            a.external_id: a
+            for a in (await s.execute(select(Account).where(Account.name == "Blue Cash"))).scalars()
+        }
+    # The account that had the row keeps it — and its plain key, and its history.
+    assert cards["ACT-a"].id == original.id
+    assert cards["ACT-a"].external_key == original.external_key
+    assert cards["ACT-b"].current_balance == D("-900.0000")
+
+
+async def test_a_row_two_cards_already_share_is_reported_not_split(household_factory):
+    """Splitting a merged row would start one card's history partway through while
+    the row kept both. It is said, for a person to separate."""
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    a = _card(checking, "ACT-a", "-100", txn_ids=("TX-a1",))
+    b = _card(checking, "ACT-b", "-900", txn_ids=("TX-b1",))
+    provider = FakeProvider(script=[dataclasses.replace(demo, accounts=demo.accounts + (a,))])
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    async with scoped_session(hid) as s:
+        row = (await s.execute(select(Account).where(Account.name == "Blue Cash"))).scalar_one()
+        # What the old sync did with B: its transaction on A's row.
+        _txn(s, hid, row, date(2026, 9, 1), "-5", "-5")
+        await s.flush()
+        (await s.execute(select(Transaction).where(Transaction.amount == D("-5")))).scalar_one(
+        ).external_id = "TX-b1"
+    both = dataclasses.replace(demo, accounts=demo.accounts + (a, b))
+    run = await sync.run_connection_sync(
+        hid, conn, provider=FakeProvider(script=[both]), now=NOW)
+    async with scoped_session(hid) as s:
+        rows = (await s.execute(select(Account).where(Account.name == "Blue Cash"))).scalars().all()
+    assert len(rows) == 1
+    warned = await _events_named(hid, run.run_id, "account.key_collision")
+    assert warned[0].detail["merged"] is True

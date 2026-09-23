@@ -68,6 +68,9 @@ class AccountOut(BaseModel):
     owner_id: uuid.UUID
     is_manual: bool
     is_hidden: bool
+    # Set when the bank has stopped reporting this synced account: the date of its
+    # last balance, which the net-worth line is still carrying forward.
+    stale_since: date | None = None
 
 
 class NetWorthOut(BaseModel):

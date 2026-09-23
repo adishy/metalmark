@@ -3342,6 +3342,12 @@ components:
         is_hidden:
           type: boolean
           title: Is Hidden
+        stale_since:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Stale Since
       type: object
       required:
       - id

@@ -14,6 +14,7 @@ import { formatMoney, negateAmount } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
+import { Day } from "@/components/datetime";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import InvestmentsView from "@/components/InvestmentsView";
@@ -175,6 +176,16 @@ export default function Accounts() {
                         {!a.is_asset && (
                           <span className="ml-1 rounded bg-negative/20 px-1.5 py-0.5 text-negative">
                             liability
+                          </span>
+                        )}
+                        {a.stale_since && (
+                          // The bank stopped reporting it; its last balance is still
+                          // counted. Hiding or closing it is the reader's call.
+                          <span
+                            className="ml-1 rounded bg-warning/20 px-1.5 py-0.5 text-warning"
+                            data-testid={`account-stale-${a.id}`}
+                          >
+                            not reported since <Day value={a.stale_since} />
                           </span>
                         )}
                       </p>
