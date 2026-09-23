@@ -266,9 +266,12 @@ async def net_worth(session: AsyncSession, household_id: uuid.UUID,
     for a in accounts:
         if a.is_hidden:
             continue
+        # Today's rate, not the balance's date's: this is the *current* view, and
+        # ARCHITECTURE §2 values a current view at the latest rate. The chart's
+        # point for today reads the same balance at the same rate, so the two agree.
         conv, _ = await fx.to_base(
             session, amount=a.current_balance, currency=a.currency,
-            on=a.balance_date or today(), base_ccy=base,
+            on=today(), base_ccy=base,
         )
         if conv is None:
             unconverted.add(a.currency)

@@ -594,3 +594,64 @@ async def test_a_position_first_priced_mid_window_is_not_appreciation(household_
     assert r["unexplained"] == D("25000.0000")
     assert [row["name"] for row in r["unexplained_by_account"]] == ["Brokerage"]
     assert any("VTI has no price" in w for w in r["warnings"])
+
+
+async def test_the_headline_converts_at_todays_rate(household_factory):
+    """A current view uses the latest rate (ARCHITECTURE §2) — the headline used
+    each account's balance-date rate, so a foreign balance entered months ago was
+    valued at a months-old rate on the Accounts page and today's on the chart."""
+    hid = await household_factory()
+    today = ledger.today()
+    async with scoped_session(hid) as s:
+        await ledger.upsert_fx_rate(s, hid, base_ccy="CZK", quote_ccy="USD",
+                                    rate_date=date(2026, 1, 1), rate=D("0.04"))
+        await ledger.upsert_fx_rate(s, hid, base_ccy="CZK", quote_ccy="USD",
+                                    rate_date=today, rate=D("0.05"))
+        await ledger.create_account(s, hid, AccountCreate(
+            name="Koruna", type="depository", currency="CZK",
+            current_balance=D("1000"), balance_date=date(2026, 1, 1)))
+        headline = await ledger.net_worth(s, hid)
+        (point,) = await reports.net_worth_points(s, [today], "USD")
+    assert headline["net_worth"] == D("50.0000")
+    assert point == headline["net_worth"]
+
+
+async def test_cash_flow_bars_are_what_each_bucket_says_on_its_own(household_factory):
+    """`cash_flow_series` loads the window once and buckets in memory; each bar must
+    still be exactly `_cash_flow` over that bucket — edges and late-night rows
+    included."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        for day, amount in [(date(2026, 1, 1), "100"), (date(2026, 1, 31), "-40"),
+                            (date(2026, 2, 1), "-15"), (date(2026, 2, 28), "70"),
+                            (date(2026, 3, 15), "-5")]:
+            _txn(s, hid, chk, day, amount, amount)
+        late = datetime(2026, 1, 31, 23, 30, tzinfo=UTC)
+        s.add(Transaction(household_id=hid, account_id=chk.id, transacted_at=late,
+                          posted_at=late, amount=D("-1"), currency="USD",
+                          base_amount=D("-1"), fx_rate_date=late.date(),
+                          description="late", source="manual", import_hash="late"))
+        await s.flush()
+        _b, _g, bars = await reports.cash_flow_series(
+            s, hid, date(2026, 1, 1), date(2026, 3, 31), granularity="month")
+        each = [
+            await reports._cash_flow(s, a, b, "USD")
+            for a, b in [(date(2026, 1, 1), date(2026, 1, 31)),
+                         (date(2026, 2, 1), date(2026, 2, 28)),
+                         (date(2026, 3, 1), date(2026, 3, 31))]
+        ]
+    assert [(p["income"], p["expense"], p["net"]) for p in bars] == [e[:3] for e in each]
+    assert bars[0]["expense"] == D("-41.0000")
+
+
+async def test_the_series_stops_at_today(household_factory):
+    """A window that runs past today draws no level for days that have not happened."""
+    hid = await household_factory()
+    today = ledger.today()
+    async with scoped_session(hid) as s:
+        await ledger.create_account(s, hid, AccountCreate(
+            name="Cash", type="depository", currency="USD",
+            current_balance=D("10"), balance_date=today))
+        r = await reports.net_worth_series(s, hid, today, today.replace(year=today.year + 1))
+    assert [p["date"] for p in r["points"]][-1] == today

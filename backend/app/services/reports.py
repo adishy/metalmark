@@ -69,6 +69,7 @@ from app.models.investments import CASH_SECURITY_TYPE
 from app.services import fx, periods
 from app.services import investments as inv
 from app.services.ledger import base_currency
+from app.services.ledger import today as ledger_today
 from app.services.ownership import account_owner_map, effective_owner_id
 
 #: ADR-0033 §2. The investment events that are cash flow, and the ones that are
@@ -149,7 +150,7 @@ def _entries(
 
 async def _reporting_transactions(
     session: AsyncSession, start: date, end: date, account_ids: set[uuid.UUID] | None
-) -> list[Transaction]:
+) -> list[tuple[Transaction, date]]:
     # Half-open on the upper bound: ``transacted_at`` is a timestamptz and ``end``
     # is a date, which Postgres coerces to midnight — so ``<= end`` silently drops
     # everything posted *after* 00:00 on the range's last day, which is most of a
@@ -162,8 +163,11 @@ async def _reporting_transactions(
     # flow with no account behind them, and the difference would land in
     # `unexplained` wearing a "something is wrong" label when nothing was. One rule,
     # applied here, is what makes the identity exact rather than nearly exact.
+    # The day is cast in SQL, beside the row: the same reading of "which day" as
+    # the bounds below, so bucketing these in Python cannot put a row on a
+    # different day than a per-bucket query would have.
     stmt = (
-        select(Transaction)
+        select(Transaction, Transaction.transacted_at.cast(Date).label("day"))
         .where(
             Transaction.transacted_at >= start,
             Transaction.transacted_at < end + timedelta(days=1),
@@ -176,7 +180,7 @@ async def _reporting_transactions(
     )
     if account_ids is not None:
         stmt = stmt.where(Transaction.account_id.in_(account_ids))
-    return list((await session.execute(stmt)).scalars().all())
+    return [(t, on) for t, on in (await session.execute(stmt)).all()]
 
 
 async def earliest_activity(session: AsyncSession) -> date | None:
@@ -637,6 +641,8 @@ class Flow(NamedTuple):
     owner_id: uuid.UUID
     amount: Decimal
     source: str
+    #: The entry's day — what lets one load of a window be bucketed in memory.
+    on: date
 
 
 async def _investment_flows(
@@ -695,6 +701,7 @@ async def _investment_flows(
                 owner_id=owners[t.account_id],
                 amount=base_amount,
                 source=f"investment:{t.type}",
+                on=t.trade_date,
             )
         )
     return flows, warnings
@@ -740,7 +747,7 @@ async def _load_entries(
     owners = await account_owner_map(session)
 
     flows: list[Flow] = []
-    for t in await _reporting_transactions(session, start, end, account_ids):
+    for t, on in await _reporting_transactions(session, start, end, account_ids):
         if account_ids is None and t.transfer_group_id is not None:
             continue
         for cat_id, bamt, entry_owner in _entries(t, owners):
@@ -755,6 +762,7 @@ async def _load_entries(
                     owner_id=entry_owner,
                     amount=bamt,
                     source="transaction",
+                    on=on,
                 )
             )
 
@@ -1247,6 +1255,10 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     quarters, which is the opposite of a reconciliation.
     """
     base = await base_currency(session, household_id)
+    # A level on a day that has not happened is not data: a "this year" window
+    # used to draw the last balance carried flat to December, which reads as a
+    # forecast. The series — and so the reconciled change — stops at today.
+    end = max(start, min(end, ledger_today()))
     resolved = periods.resolve(granularity, start, end)
     account_ids = None if owner_id is None else await accounts_owned_by(session, owner_id)
 
@@ -1394,17 +1406,28 @@ async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
     """
     base = await base_currency(session, household_id)
     resolved = periods.resolve(granularity, start, end)
+    # One load for the window, bucketed in memory. Loading per bucket re-read the
+    # categories, the owners and the window's rows once for every bar — a daily
+    # chart over a year was 365 of each (ADR-0035). Same entries, same fold, same
+    # rounding as `_cash_flow`, so a bar is what `/reports/cash-flow` would say
+    # about that bucket on its own.
+    flows, _warnings = await _load_entries(session, start, end, base, owner_id=owner_id)
+    buckets = list(periods.buckets(start, end, resolved))
+    starts = [b.start for b in buckets]
+    grouped: list[list[Flow]] = [[] for _ in buckets]
+    for f in flows:
+        # The buckets partition the window, so the last one starting on or before
+        # the entry's day is the one it is in.
+        grouped[bisect_right(starts, f.on) - 1].append(f)
     out = []
-    for bucket in periods.buckets(start, end, resolved):
-        income, expense, net, _by_account, _ = await _cash_flow(
-            session, bucket.start, bucket.end, base, owner_id=owner_id
-        )
+    for bucket, in_bucket in zip(buckets, grouped, strict=True):
+        income, expense, _by_account = _fold(in_bucket)
         out.append(
             {
                 "date": bucket.start,
-                "income": income,
-                "expense": expense,
-                "net": net,
+                "income": quantize_storage(income),
+                "expense": quantize_storage(expense),
+                "net": quantize_storage(income + expense),
             }
         )
     return base, resolved, out
