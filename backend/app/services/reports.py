@@ -58,6 +58,7 @@ from app.models import (
     BalanceSnapshot,
     Category,
     CategoryGroup,
+    Holding,
     InvestmentTransaction,
     Security,
     Transaction,
@@ -242,10 +243,37 @@ async def accounts_owned_by(session: AsyncSession, owner_id: uuid.UUID) -> set[u
     return {r.id for r in rows}
 
 
-def _is_derived_investment(a: Account) -> bool:
-    """An account whose balance the ledger derives from prices, not one a provider
-    states (ADR-0021)."""
-    return a.type == "investment" and a.balance_source == "derived"
+async def _valued_from_holdings(
+    session: AsyncSession, accounts: Iterable[Account]
+) -> set[uuid.UUID]:
+    """The accounts whose value the ledger derives from positions and prices.
+
+    ``derived`` (ADR-0021) **and** something to derive from: at least one holding
+    or one investment transaction. A derived account with neither — a manual
+    investment account whose owner typed a balance and entered nothing else — has
+    no positions to value, and valuing it from them anyway put it at zero on the
+    chart while the Accounts page showed the balance it was given. Until it has a
+    position, its snapshots are the only statement of its value, and it is read
+    like any stated account: carried forward, revalued, left out of appreciation.
+
+    One query for the whole set, and asked once per report, so every term of the
+    reconciliation reads the same answer.
+    """
+    derived = {
+        a.id for a in accounts if a.type == "investment" and a.balance_source == "derived"
+    }
+    if not derived:
+        return set()
+    rows = await session.execute(
+        select(Holding.account_id)
+        .where(Holding.account_id.in_(derived))
+        .union(
+            select(InvestmentTransaction.account_id).where(
+                InvestmentTransaction.account_id.in_(derived)
+            )
+        )
+    )
+    return {account_id for (account_id,) in rows}
 
 
 async def _net_worth_parts(
@@ -279,6 +307,8 @@ async def _net_worth_parts(
     point's date``, recomputed. Reading their stored snapshots instead would give
     a value pinned whenever someone last happened to recompute, which is the "flat
     line that means no new data" ADR-0032 §5 refuses to render as a flat market.
+    A derived account with no positions is not exempt — see
+    ``_valued_from_holdings``.
     """
     accounts = list((await session.execute(select(Account))).scalars().all())
     included = [
@@ -295,7 +325,8 @@ async def _net_worth_parts(
     # Balances: one query for every account's snapshots up to the last date asked
     # about, then a cursor per account. `balance_date` is unique per account, so
     # "latest ≤ date" is well defined without a tie-break.
-    stated = [a for a in included if not _is_derived_investment(a)]
+    from_holdings = await _valued_from_holdings(session, included)
+    stated = [a for a in included if a.id not in from_holdings]
     if stated:
         converter = await fx.converter(
             session,
@@ -343,7 +374,7 @@ async def _net_worth_parts(
                     continue  # no rate: the account is not countable at this date
                 parts[a.id][i] += conv if a.is_asset else -conv
 
-    derived = [a for a in included if _is_derived_investment(a)]
+    derived = [a for a in included if a.id in from_holdings]
     if derived:
         ids = {a.id for a in derived}
         for i, on in enumerate(dates):
@@ -674,8 +705,9 @@ async def _appreciation(
     accounts this exists for. Unwinding the trades to get the *start* value is what
     makes the subtraction mean something.
 
-    **Only ``derived`` accounts.** A ``stated`` account has no holdings to compute
-    from, and inventing a plug that appreciates would be inventing a market return
+    **Only accounts valued from holdings** (``_valued_from_holdings``). A
+    ``stated`` account — or a derived one with no positions yet — has no holdings
+    to compute from, and inventing a plug that appreciates would be inventing a market return
     (ADR-0032 §6). Its balance change stays a stated balance change, and if it does
     not reconcile it belongs in ``unexplained`` where it can be seen.
 
@@ -693,14 +725,10 @@ async def _appreciation(
     cash in the market values, or out of ``net_buys``, are both wrong; only "out of
     both" is the internal transfer it actually is.
     """
-    stmt = select(Account).where(
-        Account.type == "investment",
-        Account.balance_source == "derived",
-        Account.is_hidden.is_(False),
-    )
+    stmt = select(Account).where(Account.is_hidden.is_(False))
     if account_ids is not None:
         stmt = stmt.where(Account.id.in_(account_ids))
-    ids = {a.id for a in (await session.execute(stmt)).scalars().all()}
+    ids = await _valued_from_holdings(session, (await session.execute(stmt)).scalars().all())
     if not ids:
         return Decimal("0"), {}, []
 
@@ -882,15 +910,15 @@ async def _revaluation(
     if account_ids is not None:
         stmt = stmt.where(Account.id.in_(account_ids))
     accounts = list((await session.execute(stmt)).scalars().all())
+    from_holdings = await _valued_from_holdings(session, accounts)
 
     total = Decimal("0")
     by_account: dict[uuid.UUID, Decimal] = {}
     warnings: list[str] = []
     for a in accounts:
-        # A derived investment account's balance is Σ(holdings), so its "opening
-        # balance in its own currency" is not one number and its rate move is
-        # already inside `appreciation`.
-        if a.currency == base_ccy or _is_derived_investment(a):
+        # An account valued from holdings has no one "opening balance in its own
+        # currency", and its rate move is already inside `appreciation`.
+        if a.currency == base_ccy or a.id in from_holdings:
             continue
         rates = await fx.get_multiplier(
             session, from_ccy=a.currency, to_ccy=base_ccy, on=start, base_ccy=base_ccy

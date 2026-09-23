@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.db import scoped_session
 from app.models import (
@@ -1051,19 +1051,29 @@ async def test_a_stated_account_snapshots_its_balance_at_the_providers_date(hh) 
 async def test_a_derived_account_does_not_write_its_statement_balance_into_history(hh) -> None:
     """ADR-0021's interaction with sync.
 
-    The demo's Savings account holds AAPL, so its balance history is derived from
-    holdings. A synced *stated* balance must not put a second, disagreeing series in
-    the same column — while the column itself still moves, because the provider's
-    number is the best one available until holdings are computed.
+    Sync creates investment accounts *stated* — it writes no holdings, so there is
+    nothing to derive from (session 04). The guard is for the other case: an
+    account created derived before migration 0006 that has holdings entered by
+    hand. Its history is its holdings', and a synced stated balance must not put a
+    second, disagreeing series in the same column — while the column itself still
+    moves.
     """
     connection_id = await _make_connection(hh)
-    outcome = await _sync(
-        hh, connection_id, FakeProvider(script=scenarios.scenario(scenarios.demo()))
-    )
+    provider = FakeProvider(script=[scenarios.demo(), scenarios.demo()])
+    await _sync(hh, connection_id, provider)
 
     async with scoped_session(hh) as session:
         savings = (await _accounts(session))[scenarios.DEMO_SAVINGS]
-        assert savings.balance_source == "derived"
+        assert savings.balance_source == "stated"
+        await session.execute(
+            delete(BalanceSnapshot).where(BalanceSnapshot.account_id == savings.id)
+        )
+        savings.balance_source = "derived"
+
+    outcome = await _sync(hh, connection_id, provider)
+
+    async with scoped_session(hh) as session:
+        savings = (await _accounts(session))[scenarios.DEMO_SAVINGS]
         assert savings.current_balance == scenarios.account_named(
             scenarios.demo(), scenarios.DEMO_SAVINGS
         ).balance

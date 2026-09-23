@@ -451,10 +451,12 @@ async def _insert_account(
         available_balance=pa.available_balance,
         balance_date=pa.balance_date,
         is_asset=is_asset_for(account_type),
-        # Same rule as the manual path (``ledger.create_account``): an investment
-        # account's balance is *derived* from its holdings (ADR-0021), which is
-        # why sync skips its snapshot — see ``_apply_balance``.
-        balance_source="derived" if account_type == "investment" else None,
+        # *Stated*, unlike the manual path: ADR-0021's derived default assumes
+        # holdings to derive from, and sync writes none — so a derived synced
+        # account was valued at nothing on the chart while the Accounts page showed
+        # the provider's balance. The provider's number is the only statement of
+        # this account's value there is, so it is snapshotted like any other.
+        balance_source="stated" if account_type == "investment" else None,
         owner_id=owner.id,
         is_manual=False,
     )
@@ -544,10 +546,11 @@ async def _apply_balance(
 
     The ADR-0021 guard is here and is the whole of it: a *derived* account's
     balance series belongs to its holdings, so a synced stated balance must not
-    write a point into it. The balance column still moves — the provider's number
-    is the best one available until M3 computes holdings properly — but the
-    history does not, because a history with two disagreeing sources in it is
-    worse than no history.
+    write a point into it. Sync now creates investment accounts ``stated``, so
+    this fires only for one created ``derived`` before migration 0006 that has
+    holdings entered by hand (0006 left exactly those derived). The balance
+    column still moves, but the history does not, because a history with two
+    disagreeing sources in it is worse than no history.
 
     A snapshot is never written for a date we did not ask about, which is what
     makes a re-sync idempotent: same ``balance_date``, same row, updated in place
