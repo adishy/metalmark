@@ -13,7 +13,7 @@ function series(over: Partial<NetWorthSeries> = {}): NetWorthSeries {
     start: "2026-01-01",
     end: "2026-12-31",
     granularity: "month",
-    points: [{ date: "2026-09-20", net_worth: "1000.0000" }],
+    points: [{ date: "2026-09-20", net_worth: "1000.0000", missing: [] }],
     delta_net_worth: "1000.0000",
     net_cash_flow: "1200.0000",
     currency_revaluation: "-50.0000",

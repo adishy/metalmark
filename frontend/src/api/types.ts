@@ -117,6 +117,14 @@ export interface TransactionPage {
   next_cursor: string | null;
 }
 
+export type MissingReason = "not_started" | "no_balance" | "no_rate" | "no_price";
+
+export interface MissingAccount {
+  account_id: UUID;
+  name: string;
+  reason: MissingReason;
+}
+
 export interface NetWorthSeries extends ReportWindow {
   base_currency: string;
   /**
@@ -125,7 +133,8 @@ export interface NetWorthSeries extends ReportWindow {
    * redraws it without moving a single number in the reconciliation.
    */
   granularity: Granularity;
-  points: { date: string; net_worth: Money }[];
+  /** `missing`: the accounts a point does not fully count, and why (ADR-0045). */
+  points: { date: string; net_worth: Money; missing: MissingAccount[] }[];
   delta_net_worth: Money;
   net_cash_flow: Money;
   currency_revaluation: Money;

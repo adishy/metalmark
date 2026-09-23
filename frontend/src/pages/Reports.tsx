@@ -18,6 +18,7 @@ import {
 import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
+import { coverageNotes, netWorthOption } from "@/lib/netWorthChart";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
 import {
   LEFTOVER_NODE,
@@ -34,7 +35,6 @@ import RangeControl, { useReportRange } from "@/components/RangeControl";
 import Reconciliation from "@/components/Reconciliation";
 import { useChartTokens } from "@/theme/chartTokens";
 import {
-  chartArea,
   chartAxis,
   chartLegend,
   chartTooltip,
@@ -87,30 +87,10 @@ export default function Reports() {
   // switch repaints these. `t` is memoised per theme, so it is a stable dep.
   const t = useChartTokens();
 
-  const nwOption: EChartsOption = useMemo(
-    () => ({
-      grid: { top: 20, right: 16, bottom: 30, left: 60 },
-      tooltip: chartTooltip(t),
-      xAxis: {
-        type: "category",
-        data: bucketLabels(nw.data),
-        ...chartAxis(t),
-      },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
-      series: [
-        {
-          type: "line",
-          smooth: true,
-          areaStyle: chartArea(t),
-          lineStyle: { color: t.accent },
-          itemStyle: { color: t.accent },
-          emphasis: emphasisLine(t, { area: true }),
-          data: nw.data?.points.map((p) => Number(p.net_worth)) ?? [],
-        },
-      ],
-    }),
-    [nw.data, t],
-  );
+  // Built in `lib/netWorthChart`: a time axis, straight segments, and partial
+  // points drawn and named as partial (ADR-0045).
+  const nwOption: EChartsOption = useMemo(() => netWorthOption(nw.data, t), [nw.data, t]);
+  const nwNotes = useMemo(() => coverageNotes(nw.data?.points ?? []), [nw.data]);
 
   const cashFlowOption: EChartsOption = useMemo(
     () => ({
@@ -426,6 +406,16 @@ export default function Reports() {
               </>
             )}
             {hasSeries && <Chart option={nwOption} label={nwLabel} testid="net-worth-chart" />}
+            {hasSeries && nwNotes.length > 0 && (
+              <div className="mt-2 space-y-1 text-xs text-fg-muted" data-testid="net-worth-coverage">
+                {nwNotes.map((note) => (
+                  <p key={note}>
+                    <span aria-hidden="true">⚠ </span>
+                    {note}
+                  </p>
+                ))}
+              </div>
+            )}
             {ownerFilter && nw.data && (
               <p className="mt-2 text-xs text-fg-muted" data-testid="net-worth-attribution">
                 Attribution: {nw.data.attribution} — ownership is held by whole accounts, so this
