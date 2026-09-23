@@ -1,8 +1,8 @@
 # ADR 0045: History before an account's first balance is derived, and every point says what it leaves out
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
-- **Deciders:** Aditya Shylesh (pending review)
+- **Deciders:** Aditya Shylesh
 - **Related:** ARCHITECTURE.md §2 (supersedes "there is no backfill"), ADR-0032 (the reconciliation),
   ADR-0035 (reports read once), ADR-0043, ADR-0044, session 04's audit (findings #3 and #5)
 

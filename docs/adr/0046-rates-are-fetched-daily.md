@@ -1,8 +1,8 @@
 # ADR 0046: Rates are fetched daily, and the most recently stated rate wins in either direction
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
-- **Deciders:** Aditya Shylesh (pending review)
+- **Deciders:** Aditya Shylesh
 - **Related:** ARCHITECTURE.md §2 ("Rates are pulled daily", which this makes true), ADR-0006, ADR-0017,
   ADR-0002 (LAN-only: this is an outbound call, like SimpleFIN), session 04's audit (finding #5)
 

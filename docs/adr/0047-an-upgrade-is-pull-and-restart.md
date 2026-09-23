@@ -1,8 +1,8 @@
 # ADR 0047: An upgrade is a pull and a restart; the deployment backs up, migrates and verifies itself
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
-- **Deciders:** Aditya Shylesh (pending review)
+- **Deciders:** Aditya Shylesh
 - **Related:** ADR-0039 (the deployment is standalone; images come from GHCR), ADR-0040 (persistent state is
   overridable), ADR-0016 (nothing secret in a log), ADR-0043/0044 (migrations 0006/0007 rewrite live rows),
   ADR-0046 (daily FX fetch), session 04's audit

@@ -194,3 +194,7 @@ changing compose was allowed.
   - Playwright against the TLS door: 50/53. The 3 failures are the sync specs, which need the fake provider;
     prod refuses it, so the claim returns 502. That is expected in prod.
   - The Admin Data checks card was screenshotted: all ok, "Schema 0007".
+
+**2026-09-23:** the owner accepted ADR-0045, ADR-0046 and ADR-0047. The defaults already match: the FX fetch
+is on in prod (`auto`), and pull-and-restart runs backup, migrate and checks. The PR runbook now leaves the
+fetch on.
