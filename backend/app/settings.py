@@ -105,6 +105,15 @@ class Settings(BaseSettings):
 
     _secret_key: str = ""
 
+    @field_validator("fx_fetch", mode="before")
+    @classmethod
+    def _fx_fetch_mode(cls, value: object) -> object:
+        """`auto`, blank and unset all mean "on in prod, off elsewhere" — the
+        deployment passes `${METALMARK_FX_FETCH:-auto}`, as it does the cookie flag."""
+        if isinstance(value, str) and value.strip().lower() in ("", "auto"):
+            return None
+        return value
+
     @field_validator("session_cookie_secure", mode="before")
     @classmethod
     def _cookie_secure_mode(cls, value: object) -> object:

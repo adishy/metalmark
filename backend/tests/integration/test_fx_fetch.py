@@ -192,6 +192,10 @@ def test_the_fetch_is_off_outside_prod_unless_asked():
     assert Settings(METALMARK_ENV="prod").fx_fetch_enabled is True
     assert Settings(METALMARK_ENV="prod", METALMARK_FX_FETCH="false").fx_fetch_enabled is False
     assert Settings(METALMARK_ENV="dev", METALMARK_FX_FETCH="true").fx_fetch_enabled is True
+    # What the deployment passes when `.env` says nothing, or says it blank.
+    assert Settings(METALMARK_ENV="prod", METALMARK_FX_FETCH="auto").fx_fetch_enabled is True
+    assert Settings(METALMARK_ENV="prod", METALMARK_FX_FETCH="").fx_fetch_enabled is True
+    assert Settings(METALMARK_ENV="dev", METALMARK_FX_FETCH="auto").fx_fetch_enabled is False
 
 
 async def test_the_daily_job_walks_every_household(household_factory):

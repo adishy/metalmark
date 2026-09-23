@@ -227,6 +227,12 @@ services:
     environment:
       METALMARK_ENV: prod
       METALMARK_LOG_LEVEL: ${METALMARK_LOG_LEVEL:-INFO}
+      # The daily exchange-rate fetch (ADR-0046): `auto` is on, because this is
+      # prod. `METALMARK_FX_FETCH=false` in `.env` keeps the worker off the network
+      # and rates typed-only. Listed here because a variable this file does not
+      # name never reaches the container.
+      METALMARK_FX_FETCH: ${METALMARK_FX_FETCH:-auto}
+      METALMARK_FX_URL: ${METALMARK_FX_URL:-https://api.frankfurter.dev/v2/rates}
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       POSTGRES_DB: metalmark
