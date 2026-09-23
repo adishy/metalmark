@@ -56,8 +56,8 @@
 # fixed name. It is one decision written once and repeated, not five copies of a
 # fact that have to be kept in agreement.
 #
-# The defaults are `db_data`, `metalmark_secrets` and `caddy_data`: Docker-managed
-# named volumes, which is what makes the zero-configuration install above true.
+# The defaults are `db_data`, `metalmark_secrets`, `caddy_data` and `db_backups`:
+# Docker-managed named volumes, which is what makes the zero-configuration install above true.
 # Setting any of them to an absolute path moves that state onto a real filesystem
 # instead. The `volumes:` block at the end of this file has the details and the
 # one way to get this wrong.
@@ -129,6 +129,51 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # A dump of the database, before anything migrates it (ADR-0047).
+  # ---------------------------------------------------------------------------
+  # An upgrade is a pull and a restart, so the moment a migration runs is the
+  # moment nobody is watching. This one-shot runs first on every `up` and
+  # `migrate` waits for it: a `pg_dump -Fc` of the whole database — migration
+  # backups included — into the backups location, newest ten kept. Written to a
+  # `.partial` name and renamed, so a dump interrupted halfway never looks like
+  # a finished one; and if it fails, `migrate` does not run and nothing changes.
+  #
+  # The migrations back up the rows they rewrite regardless (0006/0007 keep them
+  # in the `migration_backup` schema and restore them on downgrade), and an
+  # install on an older copy of this file has only that. This is the whole
+  # database on top: the way back from anything, including a migration nobody
+  # foresaw. Restore — with api and worker stopped — is:
+  #
+  #   docker compose stop api worker
+  #   docker compose run --rm --entrypoint sh backup -c \
+  #     'PGPASSWORD="$(cat /secrets/postgres_password)" pg_restore -h db -U metalmark \
+  #      -d metalmark --clean --if-exists --single-transaction /backups/<file>'
+  #
+  # `postgres:16`, the same image as `db`, so `pg_dump` is never older than the
+  # server it reads. It prints the file name and size, never a row.
+  backup:
+    image: postgres:16
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        umask 077
+        PGPASSWORD="$$(cat /secrets/postgres_password)"
+        export PGPASSWORD
+        f="/backups/metalmark-$$(date -u +%Y%m%dT%H%M%SZ).dump"
+        pg_dump -h db -U metalmark -d metalmark -Fc -f "$$f.partial"
+        mv "$$f.partial" "$$f"
+        ls -1t /backups/metalmark-*.dump | tail -n +11 | xargs -r rm -f
+        echo "backup.written file=$$(basename "$$f") bytes=$$(stat -c %s "$$f")"
+    volumes:
+      - ${METALMARK_BACKUP_DIR:-db_backups}:/backups
+      - ${METALMARK_SECRETS_DIR:-metalmark_secrets}:/secrets:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
   # The schema, applied. The one thing a fresh install cannot skip and the one
   # thing the api deliberately does not do for itself (migrations are always
   # explicit — CI's `contract`, `drill`, `e2e` and `prod` jobs each run it as its
@@ -160,6 +205,8 @@ services:
         condition: service_completed_successfully
       db:
         condition: service_healthy
+      backup:
+        condition: service_completed_successfully
     restart: "no"
     healthcheck:
       disable: true
@@ -415,7 +462,7 @@ configs:
 # -----------------------------------------------------------------------------
 # Where the persistent state lives, by default.
 # -----------------------------------------------------------------------------
-# These names are the defaults for the three overridable locations above, and
+# These names are the defaults for the four overridable locations above, and
 # declaring them is not optional: compose has to be able to resolve the source of
 # every mount, and the unset branch of `${VAR:-…}` is these names. When you set
 # one of those variables, the volume it names is simply never created.
@@ -427,6 +474,7 @@ configs:
 #   METALMARK_DB_DIR=/srv/metalmark/db
 #   METALMARK_SECRETS_DIR=/srv/metalmark/secrets
 #   METALMARK_CADDY_DIR=/srv/metalmark/caddy
+#   METALMARK_BACKUP_DIR=/srv/metalmark/backups
 #
 # Absolute, because compose decides by the shape of the value: a leading `/` is a
 # bind mount and a bare name is a named volume, so anything else — a relative
@@ -461,6 +509,10 @@ configs:
 volumes:
   # Postgres's data directory — the ledger.
   db_data:
+  # `backup`'s dumps, newest ten (ADR-0047). On the same disk as db_data unless
+  # `METALMARK_BACKUP_DIR` says otherwise — point it at a host path to copy them
+  # off the machine, which is what makes them a backup against losing the disk.
+  db_backups:
   # The generated credentials. Separate from db_data on purpose: it holds the
   # Fernet key, so it is the one volume whose loss is not survivable by
   # re-running a migration — an access URL encrypted with a key that no longer

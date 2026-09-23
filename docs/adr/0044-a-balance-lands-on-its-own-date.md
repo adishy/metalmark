@@ -56,7 +56,8 @@ $114,685.51 brokerage account was on the Accounts page and absent from the chart
   dialog says what date the current balance is as of so that is not a surprise.
 - **Migrations 0006/0007 keep their backups** in a `migration_backup` schema; `scripts/backup.sh` dumps the
   whole database, so they survive a backup and restore, and the downgrades work on a restored copy.
-  `scripts/preview_balance_migrations.sql` lists, read-only, everything the two would change.
+  The deployment also dumps the whole database before migrating, and the worker checks the result on start
+  (ADR-0047).
 - **Follow-ups:** a first-position switch could carry the account's stated history up to the holding's
   `as_of` instead (session 04, Phase B); the account-level "unaccounted cash" plug of ADR-0021 is the
   related piece.

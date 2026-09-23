@@ -712,3 +712,30 @@ export interface Holding {
   manual_cost_basis: Money | null;
   as_of: string | null;
 }
+
+/**
+ * One data check (ADR-0047) — a fact the reports rely on, verified by the
+ * worker on every start and live here on every read. `items` names the
+ * accounts behind a finding; the worker's log only ever has `status` and
+ * `count`.
+ */
+export type CheckStatus = "ok" | "warn" | "fail" | "info";
+
+export interface CheckItem {
+  account_id: UUID;
+  name: string;
+}
+
+export interface Check {
+  id: string;
+  status: CheckStatus;
+  count: number;
+  summary: string;
+  items: CheckItem[];
+}
+
+export interface Checks {
+  /** The database's migration revision; null when it could not be read. */
+  schema_version: string | null;
+  checks: Check[];
+}

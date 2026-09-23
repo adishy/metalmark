@@ -24,6 +24,37 @@ paths:
           description: The database is unreachable or the app role cannot authenticate. The process is
             up but the stack is not usable — most often because `alembic upgrade head` has not been run
             against this database.
+  /checks:
+    get:
+      tags:
+      - checks
+      summary: Run Checks
+      description: 'The data checks, run now for this household — the same ones the worker runs
+
+        on every start (ADR-0047), with the accounts behind each finding.'
+      operationId: run_checks_checks_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChecksOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /auth/signup:
     post:
       tags:
@@ -3973,6 +4004,72 @@ components:
         and unlike ``CashFlowPoint.expense``. The direction is carried by the report
 
         being about spending, so a signed figure would be a second place to say it.'
+    CheckItemOut:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - account_id
+      - name
+      title: CheckItemOut
+    CheckOut:
+      properties:
+        id:
+          type: string
+          title: Id
+        status:
+          type: string
+          enum:
+          - ok
+          - warn
+          - fail
+          - info
+          title: Status
+        count:
+          type: integer
+          title: Count
+        summary:
+          type: string
+          title: Summary
+        items:
+          items:
+            $ref: '#/components/schemas/CheckItemOut'
+          type: array
+          title: Items
+      type: object
+      required:
+      - id
+      - status
+      - count
+      - summary
+      - items
+      title: CheckOut
+      description: 'One data check (``services/checks.py``). ``items`` names the accounts behind
+
+        a finding — here, behind the household''s session, and never in a log.'
+    ChecksOut:
+      properties:
+        schema_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Version
+        checks:
+          items:
+            $ref: '#/components/schemas/CheckOut'
+          type: array
+          title: Checks
+      type: object
+      required:
+      - schema_version
+      - checks
+      title: ChecksOut
     ConnectionClaim:
       properties:
         setup_token:

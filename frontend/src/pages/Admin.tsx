@@ -18,6 +18,7 @@ import { useState } from "react";
 
 import {
   useCancelJob,
+  useChecks,
   useConnections,
   useConnectionDefaults,
   useSyncJobs,
@@ -26,7 +27,7 @@ import {
   useTriggerSync,
   useUpdateConnection,
 } from "@/api/sync";
-import type { RunStatus, SyncJob, SyncRun } from "@/api/types";
+import type { Check, CheckStatus, RunStatus, SyncJob, SyncRun } from "@/api/types";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { Instant, Time } from "@/components/datetime";
 import { Button, Select, Spinner } from "@/components/form";
@@ -405,7 +406,91 @@ export default function Admin() {
           </ul>
         )}
       </Card>
+
+      <DataChecks />
     </div>
+  );
+}
+
+// ---- data checks ----------------------------------------------------------
+
+const CHECK_TONES: Record<CheckStatus, Tone> = {
+  ok: "ok",
+  warn: "warn",
+  fail: "bad",
+  info: "idle",
+};
+
+const CHECK_WORDS: Record<CheckStatus, string> = {
+  ok: "ok",
+  warn: "look",
+  fail: "failed",
+  info: "info",
+};
+
+/** The checks' names, for a person. An id the server adds before this list
+ *  learns it still shows, as its id. */
+const CHECK_TITLES: Record<string, string> = {
+  headline_matches_chart: "Accounts total matches the chart",
+  synced_investments_valued: "Synced investments are valued",
+  liabilities_signed: "Synced cards and loans hold debt as negative",
+  manual_liabilities_positive: "Hand-entered cards and loans",
+  accounts_without_rate: "Every currency has a rate",
+  stale_accounts: "Synced accounts still reported",
+  migrations_applied: "Balance model",
+};
+
+/**
+ * What the worker verified on start, read live (ADR-0047). An upgrade is a pull
+ * and a restart, with no script to run — this card is where its result is read,
+ * with the accounts behind each finding named. The worker's own log has only the
+ * statuses and counts, so the names are here and nowhere else.
+ */
+export function DataChecks() {
+  const checks = useChecks();
+  return (
+    <Card
+      title="Data checks"
+      note="Facts the reports rely on, checked each time the worker starts and again whenever this page loads."
+    >
+      {checks.isPending && <Spinner />}
+      {checks.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(checks.error as Error).message}
+        </p>
+      )}
+      {checks.data && (
+        <>
+          <ul className="divide-y divide-border" data-testid="data-checks">
+            {checks.data.checks.map((c) => (
+              <CheckRow key={c.id} check={c} />
+            ))}
+          </ul>
+          <p className="text-xs text-fg-muted" data-testid="schema-version">
+            Schema {checks.data.schema_version ?? "unknown"}
+          </p>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function CheckRow({ check }: { check: Check }) {
+  return (
+    <li className="space-y-1 py-2" data-testid={`check-${check.id}`}>
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-sm text-fg">{CHECK_TITLES[check.id] ?? check.id}</span>
+        <Badge tone={CHECK_TONES[check.status]}>{CHECK_WORDS[check.status]}</Badge>
+      </div>
+      <p className="text-xs text-fg-muted">{check.summary}</p>
+      {check.items.length > 0 && (
+        <ul className="list-inside list-disc text-xs text-fg-muted">
+          {check.items.map((item) => (
+            <li key={item.account_id}>{item.name}</li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

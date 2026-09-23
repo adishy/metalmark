@@ -146,3 +146,51 @@ Known and left:
 `base_amount`s (logged as `fx.refreshed … base_amounts_changed`); undo by deleting `fx_rates` rows with
 `source='auto'` and recomputing. The worker now makes an outbound call to `api.frankfurter.dev`
 (`METALMARK_FX_FETCH=false` to disable).
+
+## Pull-and-restart deploys (ADR-0047, Proposed)
+
+**Asked:** the user said "there should be some startup flow that can verify things (that doesn't leak PII in
+worker logs etc)", and "we can't assume clients have the codebase, just the image — they'll just pull the
+latest images and restart, everything should happen automatically (this is an ADR)". Adding a container or
+changing compose was allowed.
+
+**Built:**
+- **`app/services/checks.py`:** seven data checks.
+  - Each runs in its own savepoint. A crash becomes a `fail` result that names only the exception type.
+  - `GET /checks` serves them.
+  - Admin → **Data checks** shows them, with account names.
+- **Worker `startup_checks`:** runs the FX fetch (when on), then `recompute_all`, then the checks for each
+  household.
+  - It logs `checks.schema` and `checks.completed`: statuses and counts only.
+  - The daily fetch no longer also fires at start.
+- **`app.worker.failure(exc)`:** every exception the worker logs now carries only the type and the
+  file:line. That includes a crashed sync job, whose full message stays on its run row.
+  - **Why:** a SQLAlchemy error message includes the statement's parameters, which are names and amounts.
+- **Deploy compose `backup` service:** `postgres:16` running `pg_dump -Fc` into `db_backups` or
+  `METALMARK_BACKUP_DIR`.
+  - The file is written as `.partial` and renamed; mode 600; the newest 10 are kept.
+  - `migrate` depends on it.
+- **`scripts/preview_balance_migrations.sql` deleted.** The ADR-0044/0046 references and the README now point
+  at ADR-0047.
+
+**Verified:**
+- **Automated gates:**
+  - Backend: 896 passed; ruff clean; contract regenerated.
+  - Frontend: vitest shows only the 14 known `notify.test.ts` failures; typecheck, design lint and build are
+    clean.
+- **Checks tests:**
+  - A mixed-currency household (a divided inverse rate, a hidden account) passes `headline_matches_chart`
+    exactly.
+  - A crashing check leaks no message to the log.
+- **Local prod stack**, project `metalmark-nw`: the deployment file on the GHCR `latest` images, demo seed
+  plus an old-code sync.
+  - Before the upgrade: headline 179,169.54, chart today 64,614.75, liabilities −150.
+  - Then image tags were switched to local builds of this branch, followed by `up -d`.
+  - The steps ran in order: backup written, then migrations 0006 and 0007, then the FX fetch (264 EUR
+    rates), then `checks.completed result=ok`.
+  - After the upgrade: headline = chart = 177,300.26; liabilities 1,850.
+  - No account name or amount appears in the worker or api logs (grepped every account name).
+  - Backup rotation (10 kept) and `pg_restore --clean --single-transaction` were both tested.
+  - Playwright against the TLS door: 50/53. The 3 failures are the sync specs, which need the fake provider;
+    prod refuses it, so the claim returns 502. That is expected in prod.
+  - The Admin Data checks card was screenshotted: all ok, "Schema 0007".

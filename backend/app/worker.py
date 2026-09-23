@@ -37,6 +37,7 @@ import asyncio
 import contextlib
 import signal
 import time
+import traceback
 import uuid
 from datetime import UTC, datetime
 
@@ -46,7 +47,7 @@ from sqlalchemy import text
 from app.db import scoped_session, unscoped_session
 from app.logging import configure_logging, get_logger
 from app.security.redact import sanitize
-from app.services import fx_fetch, jobs, sync
+from app.services import checks, fx_fetch, jobs, sync
 from app.settings import get_settings
 
 log = get_logger("worker")
@@ -278,8 +279,9 @@ async def run_one(job: jobs.ClaimedJob) -> str:
         # otherwise stop every household's sync until a human restarted the
         # container. `sanitize` runs here as well as inside `finish_job` because
         # this message is logged from *this* line, not only stored.
+        # Stored whole on the run (the household's own row); logged as shape only.
         detail = sanitize(f"{type(exc).__name__}: {exc}")
-        log.error("worker.job.crashed", job_id=str(job.job_id), error=detail)
+        log.error("worker.job.crashed", job_id=str(job.job_id), **failure(exc))
         run_status, error = "error", detail
     else:
         run_status, error = outcome.status, outcome.error
@@ -308,28 +310,82 @@ async def consume(stop: asyncio.Event) -> None:
                 # Immediately, rather than after the sleep: a queue that has
                 # work should drain without a poll interval between each item.
                 continue
-        except Exception:  # noqa: BLE001 — the loop must outlive any single pass
+        except Exception as exc:  # noqa: BLE001 — the loop must outlive any single pass
             # Reaching here means the failure was *outside* a job — the claim, a
             # household list, the session setup — since `run_one` handles its own.
-            # Logged with the traceback because there is no other way to see it
-            # and no credential in a stack: no access URL is bound to a frame.
-            log.exception("worker.consume.failed")
+            # The type and the line, not the message: see `failure`.
+            log.error("worker.consume.failed", **failure(exc))
 
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=POLL_SECONDS)
+
+
+def failure(exc: BaseException) -> dict[str, str]:
+    """What the log may say about an exception: its type and where it was raised.
+
+    Never the message or the traceback's locals. A database error's message
+    carries the failed statement's parameters — account names, payees, amounts —
+    and this process's stdout goes wherever the host sends container logs
+    (ADR-0047). The place in the code is enough to find the bug; the full message,
+    where one is worth keeping, goes to the household's own rows (a sync run's
+    ``error``), behind RLS.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = f"{frames[-1].filename.rsplit('/app/', 1)[-1]}:{frames[-1].lineno}" if frames else ""
+    return {"error_type": type(exc).__name__, "at": where}
 
 
 async def heartbeat() -> None:
     log.info("worker.heartbeat")
 
 
-async def recompute_fx_caches() -> None:
-    """Once per start: bring cached base amounts in line with the rate table and
-    the rule that reads it (ADR-0046). Never raises into the scheduler."""
+async def startup_checks() -> None:
+    """Once per start — which is once per upgrade, since an upgrade is a pull and a
+    restart (ADR-0047): bring rates and derived caches up to date, then verify the
+    data.
+
+    In that order, because a check that read a stale rate table or stale caches
+    would report the upgrade's own lag as a finding: the FX fetch first (when it
+    is on — ADR-0046), then every household's cached base amounts (the cache
+    follows the rate table *and* the rule that reads it), then the checks.
+
+    **The log carries shape only** — schema revision, check ids, statuses, counts
+    and, when something crashes, the exception's type and line (`failure`). Never
+    its message: a database error's message carries the statement's parameters,
+    which are account names and amounts. Those stay in the database, where
+    `GET /checks` serves them to the household's own session (Admin → Data
+    checks). Never raises into the scheduler, and a failed check changes nothing
+    about how the worker runs: it is a finding for a person, not a reason to stop
+    syncing.
+    """
+    settings = get_settings()
+    if settings.fx_fetch_enabled:
+        await refresh_fx()
     try:
         await fx_fetch.recompute_all()
-    except Exception:  # noqa: BLE001
-        log.exception("worker.fx_recompute.failed")
+    except Exception as exc:  # noqa: BLE001
+        log.error("worker.fx_recompute.failed", **failure(exc))
+    try:
+        async with unscoped_session() as session:
+            version = await checks.schema_version(session)
+            rows = (await session.execute(text("SELECT id FROM households"))).all()
+    except Exception as exc:  # noqa: BLE001
+        log.error("checks.crashed", **failure(exc))
+        return
+    log.info("checks.schema", version=version, households=len(rows))
+    for (household_id,) in rows:
+        try:
+            async with scoped_session(household_id) as session:
+                results = await checks.run(session, household_id)
+        except Exception as exc:  # noqa: BLE001
+            log.error("checks.crashed", household_id=str(household_id), **failure(exc))
+            continue
+        shape = {c.id: c.log_shape() for c in results}
+        worst = next(
+            (s for s in ("fail", "warn") if any(c.status == s for c in results)), "ok"
+        )
+        log_at = log.warning if worst != "ok" else log.info
+        log_at("checks.completed", household_id=str(household_id), result=worst, checks=shape)
 
 
 async def refresh_fx() -> None:
@@ -337,8 +393,8 @@ async def refresh_fx() -> None:
     that is down today is asked again tomorrow."""
     try:
         await fx_fetch.refresh_all(url=get_settings().fx_url)
-    except Exception:  # noqa: BLE001 — one bad day must not take the job with it
-        log.exception("worker.fx_refresh.failed")
+    except Exception as exc:  # noqa: BLE001 — one bad day must not take the job with it
+        log.error("worker.fx_refresh.failed", **failure(exc))
 
 
 async def main() -> None:
@@ -378,12 +434,11 @@ async def main() -> None:
     scheduler.add_job(
         reap, "interval", minutes=REAP_TICK_MINUTES, id="reap", next_run_time=now,
     )
-    scheduler.add_job(recompute_fx_caches, "date", run_date=now, id="fx_recompute")
+    scheduler.add_job(startup_checks, "date", run_date=now, id="startup_checks")
     if settings.fx_fetch_enabled:
-        scheduler.add_job(
-            refresh_fx, "interval", hours=FX_REFRESH_HOURS, id="fx_refresh",
-            next_run_time=now,
-        )
+        # The first fetch is `startup_checks`'s, so the checks read today's rates;
+        # this one is the daily repeat.
+        scheduler.add_job(refresh_fx, "interval", hours=FX_REFRESH_HOURS, id="fx_refresh")
     log.info("worker.fx_refresh", enabled=settings.fx_fetch_enabled)
     scheduler.start()
 

@@ -51,8 +51,8 @@ would have shadowed every fresher fetched rate indefinitely.
 - **Negative / costs:**
   - **The first start after deploying rewrites cached amounts.** Every foreign transaction without a rate
     gets one, ones converted at a stale typed rate move to that day's market rate, and a pair stored both ways
-    round may convert differently. The counts are logged; `scripts/preview_balance_migrations.sql` lists the
-    both-ways pairs beforehand.
+    round may convert differently. The counts are logged (`fx.refreshed`, `fx.recomputed`), and the fetch runs
+    before the start-up checks (ADR-0047).
   - **The way back is to delete the `source='auto'` rows and recompute** (tested). Typed rates are never
     touched.
   - **A typed rate now stops governing once a newer rate exists in either direction.** Previously, a typed

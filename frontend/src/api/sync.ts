@@ -22,6 +22,7 @@ import { api } from "@/api/client";
 import { useInvalidateLedger } from "@/api/hooks";
 import * as notify from "@/lib/notify";
 import type {
+  Checks,
   Connection,
   ConnectionClaim,
   ConnectionDefaults,
@@ -137,6 +138,15 @@ export function useRefreshNotices() {
 
 /** The cadence bounds, from the CHECK constraint's own constants — the slider
  *  never offers an interval the database would refuse (see ConnectionDefaults). */
+/** The data checks, run live on each read (ADR-0047). Not polled: the answer
+ *  changes when data does, and the page is re-read on focus anyway. */
+export function useChecks() {
+  return useQuery({
+    queryKey: ["checks"],
+    queryFn: () => api.get<Checks>("/checks"),
+  });
+}
+
 export function useConnectionDefaults() {
   return useQuery({
     queryKey: DEFAULTS,

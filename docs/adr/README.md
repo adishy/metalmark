@@ -143,3 +143,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0044](0044-a-balance-lands-on-its-own-date.md) | A balance lands on its own date; an investment account with no positions is read from its balance | Accepted |
 | [0045](0045-history-before-the-first-balance-and-what-a-point-leaves-out.md) | History before an account's first balance is derived; every net-worth point says what it leaves out | Proposed |
 | [0046](0046-rates-are-fetched-daily.md) | Rates are fetched daily; the most recently stated rate wins in either direction | Proposed |
+| [0047](0047-an-upgrade-is-pull-and-restart.md) | An upgrade is a pull and a restart; the deployment backs up, migrates and verifies itself | Proposed |

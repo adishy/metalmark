@@ -137,8 +137,14 @@ A few things worth knowing once it is up:
 - **Connecting a bank** is in the app: Settings → Connections, where you paste a SimpleFIN setup token.
   The token is encrypted at rest with the key generated on first boot; `/admin` is where sync runs, its
   logs and its schedule live.
-- **Updating** is `docker compose pull && docker compose up -d`. The deployment tracks the `latest` tag;
-  pin `METALMARK_API_IMAGE`/`METALMARK_WEB_IMAGE` in `.env` (both at once) to hold a specific build.
+- **Updating** is `docker compose pull && docker compose up -d`, and nothing else (ADR-0047). The
+  deployment tracks the `latest` tag; pin `METALMARK_API_IMAGE`/`METALMARK_WEB_IMAGE` in `.env` (both at
+  once) to hold a specific build. On every `up`, `backup` dumps the database before `migrate` runs. On start,
+  the worker brings exchange rates and cached amounts up to date and then checks the data. Read the result
+  in **Admin → Data checks**, which names the accounts behind any finding. The worker's log says only
+  `checks.completed` with a status and count per check, never an account name or an amount. To go back to
+  an older build, downgrade the schema with the **new** image first
+  (`docker compose run --rm migrate alembic downgrade <revision>`), then pin the old tags and `up -d`.
   If this directory still holds an older **`compose.yaml`** — the file was called that before 2026-09-21 —
   delete it. Compose reads `compose.yaml` in preference to `docker-compose.yaml`, warns that it found both,
   and would otherwise keep starting the old one while the new file sat unused beside it.
@@ -150,6 +156,7 @@ A few things worth knowing once it is up:
   METALMARK_DB_DIR=/srv/metalmark/db           # the ledger
   METALMARK_SECRETS_DIR=/srv/metalmark/secrets # the key that decrypts bank connections
   METALMARK_CADDY_DIR=/srv/metalmark/caddy     # the local CA and the certificates it issued
+  METALMARK_BACKUP_DIR=/srv/metalmark/backups  # the dumps `backup` takes before each migration
   ```
 
   Use **absolute** paths. Compose decides the source by the shape of the value, and one that is not a path
@@ -196,6 +203,11 @@ A few things worth knowing once it is up:
   That is most of the reason to set them — snapshot the database one while the stack is stopped
   (`docker compose stop`), or make sure your filesystem snapshots atomically, because copying the files of
   a *running* Postgres data directory is not a consistent backup.
+
+  Either way, the `backup` service dumps the database on every `up` into `db_backups` (or
+  `METALMARK_BACKUP_DIR`) and keeps the newest ten. Those dumps are there to undo a bad upgrade. They are not
+  an off-machine backup unless you point that directory somewhere that is. The compose file has the restore
+  command beside the service.
 
   If you left the defaults, `scripts/backup.sh` does an encrypted dump but lives in the repo and not in the
   image, so a bare install cannot reach it. The unconditional version needs no checkout and covers the
