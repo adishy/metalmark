@@ -83,13 +83,15 @@ always in one currency.
 - Rates are pulled daily (Frankfurter/ECB) by the worker; **manual rate entry** is a first-class fallback.
 - All conversions use `Decimal` with a documented rounding policy. Never mix currencies without conversion.
 
-**Net worth correctness:** net worth = Σ(asset balances) − Σ(liability balances), using `accounts.is_asset`
-(derived from type) rather than a sign guess. Each account balance is in its own currency and **converted to
-base at that date's rate**. Snapshots are keyed on the provider's `balance_date` (not the worker's wall
-clock), and the net-worth line **carries forward** the last known balance across days with no snapshot (sync
+**Net worth correctness:** net worth = Σ(balances). **Every balance is signed** — a card's or loan's debt is
+negative, and a balance moves by exactly its transactions' amounts (ADR-0043); `accounts.is_asset` (derived
+from type) decides only which side an account is listed on. Each account balance is in its own currency and
+**converted to base at that date's rate**. Snapshots are keyed on the provider's `balance_date` (not the
+worker's wall clock), every writer files a balance through `ledger.record_balance` (ADR-0044: the snapshot at
+the balance's own date; the current balance moves only forward), and the net-worth line **carries forward** the last known balance across days with no snapshot (sync
 outages, stale accounts). SimpleFIN gives current balance only, so history builds forward from first sync —
 there is no backfill (set that expectation in the UI). A manual investment account's balance is derived as
-Σ(`holdings.market_value`) and snapshotted the same way (unless `balance_source='stated'` — see Investments).
+Σ(`holdings.market_value`) once it has a position (until then it is read from its snapshots, ADR-0044) and snapshotted the same way (unless `balance_source='stated'` — see Investments).
 - **Reconciliation with FX:** over any period, Δnet-worth (base) = cash-flow (base) + **currency revaluation**
   (the base-value change of foreign balances from rate moves). Reports show revaluation as its own line;
   single-currency views reconcile exactly, multi-currency views reconcile *including* that line.
