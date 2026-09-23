@@ -69,7 +69,7 @@ from app.services.aggregator import (
     infer_account_type,
 )
 from app.services.errors import LedgerError
-from app.services.ledger import base_currency, upsert_balance_snapshot
+from app.services.ledger import base_currency, record_balance
 from app.services.owners import ensure_shared_owner
 from app.settings import get_settings
 
@@ -540,7 +540,8 @@ async def _rekey_remapped_account(
 
 
 async def _apply_balance(
-    session: AsyncSession, account: Account, pa: ProviderAccount, *, log: RunLog
+    session: AsyncSession, account: Account, pa: ProviderAccount, *, log: RunLog,
+    now: datetime,
 ) -> None:
     """Write the provider's balance onto the account, and snapshot it.
 
@@ -552,17 +553,25 @@ async def _apply_balance(
     column still moves, but the history does not, because a history with two
     disagreeing sources in it is worse than no history.
 
-    A snapshot is never written for a date we did not ask about, which is what
-    makes a re-sync idempotent: same ``balance_date``, same row, updated in place
-    (``upsert_balance_snapshot``).
+    Where it lands is ``ledger.record_balance``'s rule, shared with every other
+    writer: at the provider's ``balance_date``, or the run's day when it sends
+    none — never the account's previous date, which is what used to overwrite the
+    last point with today's number. Same date, same row, updated in place, so a
+    re-sync is idempotent.
     """
-    account.current_balance = pa.balance
-    account.available_balance = pa.available_balance
-    if pa.balance_date is not None:
-        account.balance_date = pa.balance_date
-    await session.flush()
+    derived = account.balance_source == "derived"
+    current = await record_balance(
+        session,
+        account,
+        balance=pa.balance,
+        on=pa.balance_date or now.date(),
+        snapshot=not derived,
+    )
+    if current:
+        account.available_balance = pa.available_balance
+        await session.flush()
 
-    if account.balance_source == "derived":
+    if derived:
         await log.emit(
             "info",
             "balance.derived_skipped",
@@ -570,7 +579,6 @@ async def _apply_balance(
             reason="this account's balance history comes from its holdings (ADR-0021)",
         )
         return
-    await upsert_balance_snapshot(session, account)
     await log.emit("debug", "balance.snapshotted", account_id=str(account.id))
 
 
@@ -1117,7 +1125,7 @@ async def ingest_account_set(
                     account_id=str(account.id),
                 )
 
-        await _apply_balance(session, account, pa, log=log)
+        await _apply_balance(session, account, pa, log=log, now=now)
 
     counts.pendings_expired = await expire_pendings(
         session, account_ids, seen=seen, now=now, log=log

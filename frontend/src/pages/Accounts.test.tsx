@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Account, Allocation, Owner, Portfolio } from "@/api/types";
 import Accounts from "@/pages/Accounts";
 import { formatMoney } from "@/lib/format";
+import { todayIso } from "@/lib/dates";
 
 // The page's own reads, stubbed. `useCreateAccount`/`useUpdateAccount`/`useDeleteAccount`
 // are never driven here, but the page calls them on every render and they reach the
 // network through TanStack Query otherwise.
-const h = vi.hoisted(() => ({ allocation: vi.fn(), portfolio: vi.fn(), holdings: vi.fn() }));
+const h = vi.hoisted(() => ({
+  allocation: vi.fn(),
+  portfolio: vi.fn(),
+  holdings: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+}));
 
 vi.mock("@/api/investments", async () => {
   const actual = await vi.importActual<typeof import("@/api/investments")>("@/api/investments");
@@ -36,8 +44,8 @@ vi.mock("@/api/hooks", async () => {
     useOwners: () => settled(OWNERS),
     useAccounts: () => settled(ACCOUNTS),
     useNetWorth: () => settled(NET_WORTH),
-    useCreateAccount: () => settled(undefined),
-    useUpdateAccount: () => settled(undefined),
+    useCreateAccount: () => ({ ...settled(undefined), mutate: h.create }),
+    useUpdateAccount: () => ({ ...settled(undefined), mutate: h.update }),
     useDeleteAccount: () => settled(undefined),
   };
 });
@@ -55,6 +63,7 @@ const ACCOUNTS = [
     is_hidden: false,
     institution: null,
     current_balance: "100.00",
+    balance_date: "2026-01-01",
   },
 ] as unknown as Account[];
 
@@ -107,6 +116,8 @@ const PORTFOLIO = {
 } as unknown as Portfolio;
 
 beforeEach(() => {
+  h.create.mockReset();
+  h.update.mockReset();
   h.allocation.mockReset();
   h.portfolio.mockReset();
   h.holdings.mockReset();
@@ -209,5 +220,57 @@ describe("<Accounts /> views", () => {
     expect(screen.getByTestId("accounts-view-investments")).toHaveFocus();
     expect(screen.getByTestId("accounts-view-investments")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("investments-view")).toBeInTheDocument();
+  });
+});
+
+// A balance lands on its own date (session 04, audit #4): the edit dialog used to
+// send the account's *old* balance date back with every save, which overwrote that
+// day's point in the net-worth history with today's number.
+describe("balance writes", () => {
+  // The dialogs hold hooks of their own (owner creation, CSV export) that need a
+  // client even though nothing here reaches the network.
+  const renderPage = () =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Accounts />
+      </QueryClientProvider>,
+    );
+  const sentUpdate = () => h.update.mock.calls[0][0].body as Record<string, unknown>;
+
+  it("sends no balance when only the name changed", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("account-edit-acct-1"));
+    const name = screen.getByTestId("edit-account-name");
+    await user.clear(name);
+    await user.type(name, "Everyday");
+    await user.click(screen.getByTestId("edit-account-save"));
+    expect(sentUpdate().name).toBe("Everyday");
+    expect(sentUpdate()).not.toHaveProperty("current_balance");
+    expect(sentUpdate()).not.toHaveProperty("balance_date");
+  });
+
+  it("dates a new balance today, not on the account's last balance date", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("account-edit-acct-1"));
+    const balance = screen.getByTestId("edit-account-balance");
+    await user.clear(balance);
+    await user.type(balance, "250.00");
+    await user.click(screen.getByTestId("edit-account-save"));
+    expect(sentUpdate()).toMatchObject({ current_balance: "250.00", balance_date: todayIso() });
+  });
+
+  it("opens an account with no balance when none was typed", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByTestId("add-account"));
+    const form = screen.getByTestId("add-account-form");
+    await user.type(within(form).getByTestId("account-name"), "Imported card");
+    await user.click(within(form).getByTestId("account-save"));
+    const body = h.create.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.name).toBe("Imported card");
+    expect(body).not.toHaveProperty("current_balance");
+    expect(body).not.toHaveProperty("balance_date");
   });
 });

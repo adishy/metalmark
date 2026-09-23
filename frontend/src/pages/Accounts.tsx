@@ -212,7 +212,11 @@ function AddAccountForm({
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("depository");
   const [currency, setCurrency] = useState("USD");
-  const [balance, setBalance] = useState("0");
+  // Blank, not "0": an opening balance is an observation only when someone gives
+  // one, and a zero nobody typed would put a $0 point on the net-worth chart the
+  // day the account was created (an account opened for an imported statement
+  // takes its balance from the file).
+  const [balance, setBalance] = useState("");
   const [balanceDate, setBalanceDate] = useState(today);
   const [institution, setInstitution] = useState("");
   const [owner, setOwner] = useState<string | null>(null);
@@ -233,7 +237,7 @@ function AddAccountForm({
     const e = {
       name: requiredText(name),
       currency: validCurrency(currency),
-      balance: validAmount(balance),
+      balance: balance.trim() ? validAmount(balance) : null,
     };
     setErrs(e);
     return !e.name && !e.currency && !e.balance;
@@ -250,8 +254,7 @@ function AddAccountForm({
           name,
           type,
           currency: currency.toUpperCase(),
-          current_balance: balance,
-          balance_date: balanceDate,
+          ...(balance.trim() ? { current_balance: balance, balance_date: balanceDate } : {}),
           // Shared is the server's default too, so an unset picker (owners still
           // loading) can just be left off the body.
           owner_id: owner || sharedId || undefined,
@@ -272,7 +275,12 @@ function AddAccountForm({
       <Field label="Currency" htmlFor={ids.currency} required error={errs.currency}>
         <Input id={ids.currency} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value)} data-testid="account-currency" />
       </Field>
-      <Field label="Starting balance" htmlFor={ids.balance} required error={errs.balance}>
+      <Field
+        label="Starting balance"
+        htmlFor={ids.balance}
+        error={errs.balance}
+        hint="Leave blank to take it from an imported statement."
+      >
         <Input id={ids.balance} value={balance} inputMode="decimal" onChange={(e) => setBalance(e.target.value)} data-testid="account-balance" />
       </Field>
       <Field label="Balance date" htmlFor={ids.balanceDate}>
@@ -298,7 +306,11 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
   const [name, setName] = useState(account.name);
   const [institution, setInstitution] = useState(account.institution ?? "");
   const [balance, setBalance] = useState(account.current_balance);
-  const [balanceDate, setBalanceDate] = useState(account.balance_date ?? today());
+  // Today, not the account's last balance date: a balance typed here is what the
+  // account holds *now*, and sending the old date back overwrote that day's point
+  // in the net-worth history. Picking an earlier date is how a past balance is
+  // corrected — the server files it there without moving the current one.
+  const [balanceDate, setBalanceDate] = useState(today());
   const [owner, setOwner] = useState<string | null>(account.owner_id);
   const [hidden, setHidden] = useState(account.is_hidden);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -321,8 +333,10 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         body: {
           name,
           institution: institution || null,
-          current_balance: balance,
-          balance_date: balanceDate,
+          // Only when the reader changed one of them: a rename is not a balance.
+          ...(balance !== account.current_balance || balanceDate !== today()
+            ? { current_balance: balance, balance_date: balanceDate }
+            : {}),
           // Required server-side: keep the account's own owner if the picker is
           // somehow empty rather than sending null.
           owner_id: owner || account.owner_id,
@@ -364,7 +378,15 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         <Field label="Balance" htmlFor={ids.balance} required error={errs.balance} hint={`In ${account.currency}`}>
           <Input id={ids.balance} value={balance} inputMode="decimal" onChange={(e) => setBalance(e.target.value)} data-testid="edit-account-balance" />
         </Field>
-        <Field label="Balance date" htmlFor={ids.balanceDate}>
+        <Field
+          label="Balance date"
+          htmlFor={ids.balanceDate}
+          hint={
+            account.balance_date
+              ? `Current balance is as of ${account.balance_date}. An earlier date corrects that day's balance.`
+              : undefined
+          }
+        >
           <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="edit-account-balance-date" />
         </Field>
         <OwnerSelect value={owner} onChange={setOwner} testid="edit-account-owner" />

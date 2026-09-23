@@ -15,16 +15,17 @@ Base currency only, deliberately: the headline converts each account at its own
 from __future__ import annotations
 
 import dataclasses
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
 from app.db import scoped_session
 from app.models import Account, BalanceSnapshot
-from app.schemas.ledger import AccountCreate
-from app.services import ledger, reports, sync
+from app.schemas.ledger import AccountCreate, AccountUpdate
+from app.services import imports, ledger, reports, sync
 from app.services.fake_simplefin import FakeProvider
 from tests.fakes import simplefin as scenarios
 from tests.integration.test_sync import NOW, _make_connection
@@ -135,3 +136,107 @@ async def test_a_synced_investment_account_keeps_a_history(household_factory):
             )
         ).scalars().all()
     assert balances == [savings.balance, savings.balance + D("1000")]
+
+
+# ---- one rule for where a balance lands ---------------------------------------
+#
+# Every writer — the edit dialog, sync, an OFX statement — goes through
+# `ledger.record_balance`: the snapshot is written at the balance's *own* date, and
+# the account's current balance moves only when that date is not older than the one
+# it has. The dialog used to send the account's old `balance_date` back with a new
+# balance, which overwrote a past point; sync did the same whenever the provider
+# sent no date; an older OFX statement moved the headline backwards.
+
+
+async def _snapshots(session, account_id) -> list[tuple[date, Decimal]]:
+    return list(
+        (
+            await session.execute(
+                select(BalanceSnapshot.balance_date, BalanceSnapshot.balance)
+                .where(BalanceSnapshot.account_id == account_id)
+                .order_by(BalanceSnapshot.balance_date)
+            )
+        ).all()
+    )
+
+
+async def test_a_new_balance_without_a_date_is_recorded_today(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Cash", type="depository", currency="USD",
+            current_balance=D("1000"), balance_date=date(2026, 1, 1)))
+        await ledger.update_account(s, a.id, AccountUpdate(current_balance=D("3000")))
+        today = ledger._today()
+        assert await _snapshots(s, a.id) == [
+            (date(2026, 1, 1), D("1000.0000")), (today, D("3000.0000"))
+        ]
+        assert (a.current_balance, a.balance_date) == (D("3000"), today)
+
+
+async def test_a_backdated_balance_corrects_history_without_moving_the_headline(
+    household_factory,
+):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Cash", type="depository", currency="USD",
+            current_balance=D("1000"), balance_date=date(2026, 3, 1)))
+        await ledger.update_account(s, a.id, AccountUpdate(
+            current_balance=D("700"), balance_date=date(2026, 2, 1)))
+        assert await _snapshots(s, a.id) == [
+            (date(2026, 2, 1), D("700.0000")), (date(2026, 3, 1), D("1000.0000"))
+        ]
+        assert (a.current_balance, a.balance_date) == (D("1000"), date(2026, 3, 1))
+        assert (await ledger.net_worth(s, hid))["net_worth"] == D("1000.0000")
+
+
+async def test_a_rename_writes_no_balance(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Cash", type="depository", currency="USD",
+            current_balance=D("1000"), balance_date=date(2026, 1, 1)))
+        await ledger.update_account(s, a.id, AccountUpdate(name="Wallet"))
+        assert await _snapshots(s, a.id) == [(date(2026, 1, 1), D("1000.0000"))]
+        assert a.balance_date == date(2026, 1, 1)
+
+
+async def test_a_sync_with_no_balance_date_does_not_rewrite_the_last_point(
+    household_factory,
+):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    first = scenarios.demo()
+    checking = scenarios.account_named(first, scenarios.DEMO_CHECKING)
+    undated = scenarios.replace_account(first, dataclasses.replace(
+        checking, balance=checking.balance + D("500"), balance_date=None))
+    provider = FakeProvider(script=[first, undated])
+    await sync.run_connection_sync(hid, conn, provider=provider, now=NOW)
+    later = NOW.replace(year=NOW.year + 1)
+    await sync.run_connection_sync(hid, conn, provider=provider, now=later)
+    async with scoped_session(hid) as s:
+        account = (
+            await s.execute(select(Account).where(Account.name == scenarios.DEMO_CHECKING))
+        ).scalar_one()
+        assert await _snapshots(s, account.id) == [
+            (checking.balance_date, checking.balance),
+            (later.date(), checking.balance + D("500")),
+        ]
+        assert account.balance_date == later.date()
+
+
+async def test_an_older_statement_does_not_move_the_balance_backwards(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Cash", type="depository", currency="USD",
+            current_balance=D("1000"), balance_date=date(2026, 3, 1)))
+        older = SimpleNamespace(
+            ledger_balance=D("400"), ledger_balance_at=datetime(2026, 1, 31, tzinfo=UTC)
+        )
+        await imports._statement_balance(s, a, older)
+        assert await _snapshots(s, a.id) == [
+            (date(2026, 1, 31), D("400.0000")), (date(2026, 3, 1), D("1000.0000"))
+        ]
+        assert (a.current_balance, a.balance_date) == (D("1000"), date(2026, 3, 1))

@@ -57,27 +57,69 @@ async def upsert_balance_snapshot(session: AsyncSession, account: Account) -> No
     snapshotted those, and changing that here to suit sync would silently alter
     behaviour the ledger tests pin.
     """
-    d = account.balance_date or _today()
+    await _upsert_snapshot_at(
+        session, account, on=account.balance_date or _today(), balance=account.current_balance
+    )
+
+
+async def _upsert_snapshot_at(
+    session: AsyncSession, account: Account, *, on: date, balance: Decimal
+) -> None:
     existing = (
         await session.execute(
             select(BalanceSnapshot).where(
-                BalanceSnapshot.account_id == account.id, BalanceSnapshot.balance_date == d
+                BalanceSnapshot.account_id == account.id, BalanceSnapshot.balance_date == on
             )
         )
     ).scalar_one_or_none()
     if existing:
-        existing.balance = account.current_balance
+        existing.balance = balance
         existing.currency = account.currency
     else:
         session.add(
             BalanceSnapshot(
                 household_id=account.household_id,
                 account_id=account.id,
-                balance_date=d,
-                balance=account.current_balance,
+                balance_date=on,
+                balance=balance,
                 currency=account.currency,
             )
         )
+
+
+async def record_balance(
+    session: AsyncSession,
+    account: Account,
+    *,
+    balance: Decimal,
+    on: date,
+    snapshot: bool = True,
+) -> bool:
+    """The one rule for where a balance lands — every writer calls this.
+
+    The snapshot is written at the balance's **own** date, and the account's
+    ``current_balance``/``balance_date`` move to it only when that date is not
+    older than the one the account has. Returns whether it became current.
+
+    Each half fixes a way the net-worth history was being rewritten. The edit
+    dialog sent the account's old ``balance_date`` back with a new balance, which
+    overwrote a past point with today's number; sync did the same whenever the
+    provider sent no date, because the stale date was all it had; and an older OFX
+    statement, imported after a newer one, moved the headline backwards. A balance
+    for an earlier day is a correction to history, and history is where it goes.
+
+    ``snapshot=False`` is ADR-0021's guard for a derived account, whose history is
+    its holdings': the columns still move, the series does not get a second author.
+    """
+    current = account.balance_date is None or on >= account.balance_date
+    if current:
+        account.current_balance = balance
+        account.balance_date = on
+    await session.flush()
+    if snapshot:
+        await _upsert_snapshot_at(session, account, on=on, balance=balance)
+        await session.flush()
+    return current
 
 
 async def create_account(session: AsyncSession, household_id: uuid.UUID,
@@ -99,7 +141,6 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
         subtype=data.subtype,
         institution=data.institution,
         current_balance=data.current_balance,
-        balance_date=data.balance_date or _today(),
         is_asset=is_asset_for(data.type),
         balance_source="derived" if data.type == "investment" else None,
         owner_id=owner_id,
@@ -107,8 +148,15 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
     )
     session.add(acct)
     await session.flush()
-    await upsert_balance_snapshot(session, acct)
-    await session.flush()
+    # An opening balance is an observation only when someone gave one. The default
+    # zero is a placeholder: snapshotting it put a $0 point at today in front of
+    # every account opened to receive an imported statement, so the chart dropped
+    # to zero on the day the account was created and the statement's own, older
+    # balance could never become current.
+    if is_set(data, "current_balance"):
+        await record_balance(
+            session, acct, balance=data.current_balance, on=data.balance_date or _today()
+        )
     return acct
 
 
@@ -134,7 +182,6 @@ async def get_account(session: AsyncSession, account_id: uuid.UUID) -> Account:
 async def update_account(session: AsyncSession, account_id: uuid.UUID,
                          data: AccountUpdate) -> Account:
     acct = await get_account(session, account_id)
-    changed_balance = False
     # is_set, not "is not None": an explicit null clears subtype/institution, and
     # the required fields are guarded by AccountUpdate's validator.
     for field in ("name", "subtype", "institution", "is_hidden"):
@@ -143,16 +190,21 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
     if is_set(data, "owner_id"):
         # Resolved under RLS so a foreign id is a 404, not a foreign-key 500.
         acct.owner_id = (await get_owner(session, data.owner_id)).id
-    if is_set(data, "current_balance"):
-        acct.current_balance = data.current_balance
-        changed_balance = True
-    if is_set(data, "balance_date"):
-        acct.balance_date = data.balance_date
-        changed_balance = True
     await session.flush()
-    if changed_balance:
-        await upsert_balance_snapshot(session, acct)
-        await session.flush()
+    if is_set(data, "current_balance") or is_set(data, "balance_date"):
+        # A balance with no date is today's — never the account's last date, which
+        # would put today's number on a day that already had one. A date with no
+        # balance restates the current balance on that day.
+        await record_balance(
+            session,
+            acct,
+            balance=(
+                data.current_balance
+                if is_set(data, "current_balance")
+                else acct.current_balance
+            ),
+            on=data.balance_date or _today(),
+        )
     return acct
 
 
