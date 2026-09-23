@@ -126,6 +126,22 @@ dev stack of this branch and checked by eye (screenshots at rest, on a partial p
 **Deferred, with reason:** `balance_snapshots.source` — a schema change, and 0005 requires freezing 0001's
 live-metadata DDL first; not needed by anything shipped.
 
+**Final review (advisor) — fixed before reporting:**
+- **C4:** an alike-named row that neither card in the payload owns (a reconnect with re-minted ids) keeps
+  the plain key. Otherwise two new accounts appeared beside an orphan still carrying its balance.
+- **FX:** the worker recomputes every household's cached amounts once at start, because the resolution
+  rule changed. The preview script lists pairs stored both ways round.
+- **Splits:** `recompute_base_amounts` now re-allocates split children. Before, a rate arriving after a
+  split left them at `None`, out of cash flow.
+- Backend: 890 passed.
+
+Known and left:
+- **Reconnect-by-name:** accounts given `key:<provider id>` lose it; after a reconnect their old copies
+  must be hidden or deleted by hand.
+- **Stale accounts under a deleted connection** are not flagged.
+- **Window caption:** `/reports/net-worth` still echoes the requested `end`, so the page caption can say
+  "to Dec 31" while the series stops at today.
+
 **Deploy notes added by B/C:** the first worker start in prod fetches rates and rewrites cached
 `base_amount`s (logged as `fx.refreshed … base_amounts_changed`); undo by deleting `fx_rates` rows with
 `source='auto'` and recomputing. The worker now makes an outbound call to `api.frankfurter.dev`

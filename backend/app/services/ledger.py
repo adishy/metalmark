@@ -12,8 +12,9 @@ from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.money import quantize_storage
+from app.core.money import allocate, quantize_storage
 from app.models import (
     Account,
     AccountConnection,
@@ -439,12 +440,21 @@ async def list_fx_rates(session: AsyncSession) -> list[FxRate]:
 
 
 async def recompute_base_amounts(session: AsyncSession, household_id: uuid.UUID) -> int:
-    """Recompute base_amount for foreign-currency transactions in the household."""
+    """Recompute base_amount for foreign-currency transactions in the household.
+
+    A split parent's children are re-allocated from its new base amount exactly as
+    ``transactions.replace_splits`` allocates them, so they keep summing to it.
+    They are what every report reads for a split, and without this a parent that
+    gained a rate — a typed one, or the daily fetch (ADR-0046) — left children
+    created without one at ``None``, out of cash flow for good.
+    """
     base = await base_currency(session, household_id)
     txns = list(
         (
             await session.execute(
-                select(Transaction).where(Transaction.currency != base)
+                select(Transaction)
+                .where(Transaction.currency != base)
+                .options(selectinload(Transaction.splits))
             )
         ).scalars().all()
     )
@@ -456,6 +466,14 @@ async def recompute_base_amounts(session: AsyncSession, household_id: uuid.UUID)
         )
         t.base_amount = conv
         t.fx_rate_date = rate_date
+        if t.splits:
+            realloc = (
+                allocate(conv, [abs(sp.amount) or Decimal(1) for sp in t.splits], currency=base)
+                if conv is not None
+                else [None] * len(t.splits)
+            )
+            for split, base_amount in zip(t.splits, realloc, strict=True):
+                split.base_amount = base_amount
         n += 1
     await session.flush()
     return n

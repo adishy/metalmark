@@ -60,6 +60,15 @@ WHERE a.type IN ('credit', 'loan')
        OR EXISTS (SELECT 1 FROM balance_snapshots s WHERE s.account_id = a.id AND s.balance > 0))
 ORDER BY a.name;
 
+\echo '== FX pairs stored both ways round (ADR-0046: the more recent now wins) =='
+\echo '   The worker recomputes cached amounts once on start; conversions of these pairs may move.'
+SELECT a.base_currency || '->' || a.quote_currency AS stored, max(a.rate_date) AS latest,
+       b.base_currency || '->' || b.quote_currency AS also_stored, max(b.rate_date) AS latest_other
+FROM fx_rates a JOIN fx_rates b
+  ON a.base_currency = b.quote_currency AND a.quote_currency = b.base_currency
+WHERE a.base_currency < a.quote_currency
+GROUP BY a.base_currency, a.quote_currency, b.base_currency, b.quote_currency;
+
 \echo '== Accounts typed ''other'' with a negative balance: probably a card or loan =='
 \echo '   Counted correctly either way; retype them in Accounts for the right label.'
 SELECT a.name, a.institution, a.current_balance FROM accounts a

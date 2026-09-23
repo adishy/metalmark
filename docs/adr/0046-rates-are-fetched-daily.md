@@ -36,7 +36,11 @@ would have shadowed every fresher fetched rate indefinitely.
    logging it (`fx.refreshed`) — not a per-day `upsert_fx_rate`, which recomputes every foreign transaction
    each call. `fx_rates` is shared by every household, so the recompute runs for any household whose
    currencies anyone's run wrote.
-6. **One request per currency.** A symbol the source rejects (422) is logged and costs only that currency; a
+6. **The worker recomputes every household's cached amounts once when it starts**, fetch on or off: the cache
+   is a function of the rule as well as the rates, and rule 4 changed the rule. Idempotent; the count of
+   changed amounts is logged (`fx.recomputed`). A recompute also re-allocates a split parent's children, which
+   carry what reports sum, so a rate that arrives after a split reaches them.
+7. **One request per currency.** A symbol the source rejects (422) is logged and costs only that currency; a
    failed request is retried on the next run and never raised into the scheduler.
 
 ## Consequences
@@ -45,15 +49,14 @@ would have shadowed every fresher fetched rate indefinitely.
   for any currency the source covers; the headline and chart agree at today's rate (ADR-0045's invariant
   holds for foreign currency).
 - **Negative / costs:**
-  - **The first run after deploying rewrites cached amounts.** Every foreign transaction without a rate gets
-    one, and ones converted at a stale typed rate move to that day's market rate. The count is logged.
+  - **The first start after deploying rewrites cached amounts.** Every foreign transaction without a rate
+    gets one, ones converted at a stale typed rate move to that day's market rate, and a pair stored both ways
+    round may convert differently. The counts are logged; `scripts/preview_balance_migrations.sql` lists the
+    both-ways pairs beforehand.
   - **The way back is to delete the `source='auto'` rows and recompute** (tested). Typed rates are never
     touched.
   - **A typed rate now stops governing once a newer rate exists in either direction.** Previously, a typed
     rate stored in the direct direction kept winning.
   - **It is an outbound call to a third party**, like SimpleFIN. Only currency codes and dates leave the
     instance.
-- **Follow-ups:**
-  - `transaction_splits.base_amount` is not recomputed by `recompute_base_amounts`. That gap predates this
-    ADR and applies to typed rate changes too.
-  - Currencies the source does not cover (crypto, some exotics) still need typed rates.
+- **Follow-ups:** currencies the source does not cover (crypto, some exotics) still need typed rates.

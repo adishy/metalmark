@@ -1074,6 +1074,12 @@ async def _account_keys(
     case) — keeps the plain key; splitting a merged row would start the second
     card's history partway through while the row kept both. That is reported
     (``account.key_collision``) for a person to separate, not guessed apart.
+
+    **Nor is a row nobody in the payload owns.** That is a reconnect whose ids
+    were re-minted: the row is the household's history of one of these cards, and
+    giving both new keys would insert two accounts beside it while it carried its
+    last balance forward — a double count. They keep the plain key, as before this
+    existed, and it is reported the same way.
     """
     keys = {pa.external_id: external_key_for(pa) for pa in accounts}
     groups: dict[str, list[ProviderAccount]] = {}
@@ -1106,6 +1112,8 @@ async def _account_keys(
                 or any(t.external_id in on_row for t in pa.transactions)
             )
         ]
+        if row is not None and not keeps:
+            keeps = list(group)
         for pa in group:
             if pa not in keeps:
                 keys[pa.external_id] = f"{key}:{pa.external_id}"

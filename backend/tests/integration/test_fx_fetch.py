@@ -209,3 +209,34 @@ async def test_the_daily_job_walks_every_household(household_factory):
     ours = next(r for r in results if r.household_id == hid)
     assert (ours.written, ours.failed) == ({}, {})
     assert "RON" in seen
+
+
+async def test_a_rate_that_arrives_later_reaches_split_children(household_factory):
+    """Children carry what reports sum. A foreign parent split before any rate
+    existed had children at None; recomputing now re-allocates them."""
+    from app.schemas.transactions import SplitIn, TransactionCreate
+    from app.services import transactions as txns
+
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        acct = await ledger.create_account(s, hid, AccountCreate(
+            name="Lei", type="depository", currency="RON"))
+        txn = await txns.create_transaction(s, hid, TransactionCreate(
+            account_id=acct.id, amount=D("-100"),
+            transacted_at=datetime(2026, 3, 2, 12, tzinfo=UTC)))
+        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("1")), SplitIn(pct=D("3"))])
+        parent = await txns.get_transaction(s, txn.id)
+        assert [sp.base_amount for sp in parent.splits] == [None, None]
+    await _run(hid, [], {"RON": D("4")})
+    async with scoped_session(hid) as s:
+        parent = await txns.get_transaction(s, txn.id)
+        children = [sp.base_amount for sp in parent.splits]
+    assert parent.base_amount == D("-25.0000")
+    assert sum(children) == parent.base_amount and None not in children
+
+
+async def test_the_start_up_recompute_changes_nothing_when_caches_agree(household_factory):
+    hid = await _ron_household(household_factory)
+    await _run(hid, [], {"RON": D("4.5")})
+    changed = await fx_fetch.recompute_all()
+    assert changed[hid] == 0

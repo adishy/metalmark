@@ -221,6 +221,27 @@ async def _recompute_counting(session: AsyncSession, household_id: uuid.UUID) ->
     return sum(1 for tid, amount in after.items() if before.get(tid) != amount)
 
 
+async def recompute_all() -> dict[uuid.UUID, int]:
+    """Recompute every household's cached base amounts; how many changed in each.
+
+    Run once when the worker starts, whether or not the fetch is on. The cache is
+    a function of the rate table *and* of the rule that reads it, and ADR-0046
+    changed the rule: a pair stored both ways round can now convert at a
+    different rate than when its amounts were cached. Idempotent — on a database
+    whose caches already agree, it changes nothing.
+    """
+    async with unscoped_session() as session:
+        ids = [r[0] for r in (await session.execute(text("SELECT id FROM households"))).all()]
+    changed: dict[uuid.UUID, int] = {}
+    for household_id in ids:
+        async with scoped_session(household_id) as session:
+            changed[household_id] = await _recompute_counting(session, household_id)
+        if changed[household_id]:
+            log.info("fx.recomputed", household_id=str(household_id),
+                     base_amounts_changed=changed[household_id])
+    return changed
+
+
 async def refresh_all(
     *, url: str, transport: httpx.AsyncBaseTransport | None = None, today: date | None = None
 ) -> list[HouseholdFetch]:

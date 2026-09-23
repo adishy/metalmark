@@ -323,6 +323,15 @@ async def heartbeat() -> None:
     log.info("worker.heartbeat")
 
 
+async def recompute_fx_caches() -> None:
+    """Once per start: bring cached base amounts in line with the rate table and
+    the rule that reads it (ADR-0046). Never raises into the scheduler."""
+    try:
+        await fx_fetch.recompute_all()
+    except Exception:  # noqa: BLE001
+        log.exception("worker.fx_recompute.failed")
+
+
 async def refresh_fx() -> None:
     """The daily FX fetch (ADR-0046). Never raises into the scheduler: a source
     that is down today is asked again tomorrow."""
@@ -369,6 +378,7 @@ async def main() -> None:
     scheduler.add_job(
         reap, "interval", minutes=REAP_TICK_MINUTES, id="reap", next_run_time=now,
     )
+    scheduler.add_job(recompute_fx_caches, "date", run_date=now, id="fx_recompute")
     if settings.fx_fetch_enabled:
         scheduler.add_job(
             refresh_fx, "interval", hours=FX_REFRESH_HOURS, id="fx_refresh",

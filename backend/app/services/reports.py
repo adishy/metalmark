@@ -319,6 +319,7 @@ class _BalanceHistory:
     """
 
     snapshots: tuple[tuple[date, Decimal, str], ...]
+    snapshot_days: tuple[date, ...]
     #: Days with transactions, ascending, and the running Σ amount through each.
     txn_days: tuple[date, ...]
     txn_cumulative: tuple[Decimal, ...]
@@ -333,8 +334,7 @@ class _BalanceHistory:
         """``(balance, currency, reason it is missing)`` for ``on``."""
         if not self.snapshots:
             return None, self.currency, NO_BALANCE
-        days = [d for d, _, _ in self.snapshots]
-        j = bisect_right(days, on) - 1
+        j = bisect_right(self.snapshot_days, on) - 1
         if j >= 0:
             _, balance, currency = self.snapshots[j]
             return balance, currency, None
@@ -414,8 +414,10 @@ async def _balance_histories(
         for _on, amount in by_day.get(a.id, []):
             running += amount
             cumulative.append(running)
+        own = tuple(snapshots.get(a.id, []))
         out[a.id] = _BalanceHistory(
-            snapshots=tuple(snapshots.get(a.id, [])),
+            snapshots=own,
+            snapshot_days=tuple(d for d, _, _ in own),
             txn_days=tuple(on for on, _ in by_day.get(a.id, [])),
             txn_cumulative=tuple(cumulative),
             currency=a.currency,

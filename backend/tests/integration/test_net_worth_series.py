@@ -785,3 +785,24 @@ async def test_a_row_two_cards_already_share_is_reported_not_split(household_fac
     assert len(rows) == 1
     warned = await _events_named(hid, run.run_id, "account.key_collision")
     assert warned[0].detail["merged"] is True
+
+
+async def test_alike_cards_after_a_reconnect_do_not_orphan_the_old_row(household_factory):
+    """A re-claim re-mints provider ids, so neither card owns the row by id. New
+    keys for both would leave the old row carrying its balance beside two new
+    accounts; they land on the row instead, and it is reported."""
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    await sync.run_connection_sync(hid, conn, provider=FakeProvider(script=[
+        dataclasses.replace(demo, accounts=demo.accounts + (_card(checking, "OLD-a", "-100"),))
+    ]), now=NOW)
+    both = dataclasses.replace(demo, accounts=demo.accounts + (
+        _card(checking, "NEW-a", "-100"), _card(checking, "NEW-b", "-900")))
+    run = await sync.run_connection_sync(hid, conn, provider=FakeProvider(script=[both]), now=NOW)
+    async with scoped_session(hid) as s:
+        rows = (await s.execute(select(Account).where(Account.name == "Blue Cash"))).scalars().all()
+    assert len(rows) == 1
+    warned = await _events_named(hid, run.run_id, "account.key_collision")
+    assert warned[0].detail["merged"] is True
