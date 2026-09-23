@@ -33,7 +33,8 @@ from app.services.errors import LedgerError
 from app.services.owners import ensure_shared_owner, get_owner
 
 
-def _today() -> date:
+def today() -> date:
+    """The ledger's today — the one ``record_balance`` files an undated balance on."""
     return datetime.now(UTC).date()
 
 
@@ -60,7 +61,7 @@ async def upsert_balance_snapshot(session: AsyncSession, account: Account) -> No
     behaviour the ledger tests pin.
     """
     await _upsert_snapshot_at(
-        session, account, on=account.balance_date or _today(), balance=account.current_balance
+        session, account, on=account.balance_date or today(), balance=account.current_balance
     )
 
 
@@ -157,7 +158,7 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
     # balance could never become current.
     if is_set(data, "current_balance"):
         await record_balance(
-            session, acct, balance=data.current_balance, on=data.balance_date or _today()
+            session, acct, balance=data.current_balance, on=data.balance_date or today()
         )
     return acct
 
@@ -207,7 +208,7 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
                 if is_set(data, "current_balance")
                 else acct.current_balance
             ),
-            on=data.balance_date or _today(),
+            on=data.balance_date or today(),
         )
     return acct
 
@@ -267,7 +268,7 @@ async def net_worth(session: AsyncSession, household_id: uuid.UUID,
             continue
         conv, _ = await fx.to_base(
             session, amount=a.current_balance, currency=a.currency,
-            on=a.balance_date or _today(), base_ccy=base,
+            on=a.balance_date or today(), base_ccy=base,
         )
         if conv is None:
             unconverted.add(a.currency)

@@ -7,7 +7,8 @@
   has valuable data already present (i.e. not empty database)".
 - **Branch:** `fix/net-worth-balance-model` (worktree `../metalmark-nw`, off `241419a`; the main checkout's
   uncommitted login work untouched).
-- **Outcome:** commits `3b3fcd8` (A2), `b4ed041` (A3), `7cbf540` (A1), `3b0342b` (ADRs 0043/0044).
+- **Outcome:** commits `3b3fcd8` (A2), `b4ed041` (A3), `7cbf540` (A1), `3b0342b` (ADRs 0043/0044), then a
+  final-review commit (recompute through `record_balance`, portfolio fallback, migration preview script).
   Phases B and C of the plan are not started.
 
 ---
@@ -62,3 +63,35 @@ no positions, #4 balance edits rewriting history. Advisor revisions adopted:
 - Pre-existing, not fixed: `test_imports.py::test_preview_and_commit_over_multipart_http` fails when run
   after `test_ofx.py` in one session (open signup joins the oldest household, so it sees earlier tests' rows);
   passes in the full-suite order and alone.
+
+## Final review — what it added
+
+- **Upgrade rehearsal with real writers.** A scratch DB was migrated to 0005 and filled by the *old* code
+  (`241419a`, in a second worktree): `app.seed --demo` (manual card stored as +850 owed) plus one sync of the
+  demo capture with a card at −1000 (the $114,685.51 savings account created `derived` with no snapshot).
+  Upgraded with the new code: card −850, synced card untouched at −1000, savings `stated` with one seeded
+  snapshot, and the series equal to the headline over the USD accounts ($174,947.32). Downgraded to 0005:
+  `accounts` and `balance_snapshots` byte-identical to before, backup schema gone.
+- **The deployment migrates on every `docker compose up`** (its `migrate` service runs `alembic upgrade
+  head`), so pulling the image applies 0006/0007 immediately. Hence `scripts/preview_balance_migrations.sql`:
+  read-only, prints every row either migration would change (now → after), and the liabilities 0007 leaves
+  alone. Run on the rehearsal DB it listed exactly what the upgrade then did.
+- **`balance.liability_positive` does not badge or notify:** run status comes from the provider's `errlist`
+  and notifications from connection-failure transitions, so the warning is a run-log line only.
+- `investments.recompute_derived_balance` now goes through `record_balance` (it set the columns directly and
+  used server-local `date.today()`); `ledger.today()` is the one "today".
+- The Investments view applies the same no-position fallback, so a typed-balance investment account shows
+  its balance (as unaccounted cash) instead of $0.
+- `scripts/backup.sh` dumps the whole database, so `migration_backup` survives backup/restore.
+
+## Deploy procedure for an instance with real data
+
+1. `scripts/backup.sh` — an encrypted dump, before anything else.
+2. `docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <
+   scripts/preview_balance_migrations.sql` — read every row it lists; the third section is the accounts that
+   will still count in the household's favour.
+3. Pull and `docker compose up -d` (migrates on the way up).
+4. After the first sync, check Admin → run log for `balance.liability_positive`, and retype any card listed in
+   the preview's last section.
+
+Backend after the review: 862 passed.

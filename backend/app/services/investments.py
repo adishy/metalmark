@@ -51,7 +51,8 @@ from app.models.investments import (
 from app.schemas.patch import is_set
 from app.services import fx
 from app.services.errors import LedgerError
-from app.services.ledger import base_currency, upsert_balance_snapshot
+from app.services.ledger import base_currency, record_balance
+from app.services.ledger import today as ledger_today
 
 ZERO = Decimal("0")
 
@@ -133,7 +134,7 @@ class AccountValuation:
     def balance_account(self) -> Decimal:
         """What the account is worth in its own currency: the stated balance where
         a provider vouches for one, Σ(holdings) where the ledger derives it."""
-        if self.balance_source == "stated":
+        if self.balance_source == "stated" or self.stated_balance_account is not None:
             return self.stated_balance_account or ZERO
         return self.market_value_account
 
@@ -296,8 +297,10 @@ async def value_account(
     if not rows:
         valuation.market_value_base = ZERO
         valuation.market_value_account = ZERO
-        if account.balance_source == "stated":
-            # A stated account with no holdings: the whole balance is the plug.
+        # A stated account with no holdings — or a derived one with no position yet,
+        # which net worth reads from its balance too (ADR-0044): the whole balance
+        # is the plug, so this view and the net-worth line agree about it.
+        if account.balance_source in ("stated", "derived"):
             valuation.stated_balance_account = account.current_balance
             stated = await _convert_ccy(
                 session,
@@ -1040,22 +1043,24 @@ async def recompute_derived_balance(
     sync path must not snapshot a derived account (ADR-0021), and anything else
     that touches holdings calls this rather than doing its own sum.
 
-    The balance is written in the account's currency and a snapshot is taken
-    through ``ledger.upsert_balance_snapshot``, so the historical series and the
-    current value come from one code path.
+    The balance is written in the account's currency through
+    ``ledger.record_balance`` (ADR-0044), the rule every balance writer shares, so
+    the historical series and the current value come from one code path — and
+    "today" is the ledger's today, not this server's local date.
     """
     if account.balance_source != "derived":
         return None
-    d = on or date.today()
+    d = on or ledger_today()
     valuation = await value_account(session, account, d, base_ccy)
-    account.current_balance = valuation.market_value_account
-    # Only stamp the balance date when everything could be valued: a snapshot taken
-    # from a partial sum would enter the net-worth history as a real (too low)
-    # balance that no later recompute would revisit, since snapshots are keyed by
-    # date and this one would look authoritative.
+    # Only file the balance when everything could be valued: a snapshot taken from
+    # a partial sum would enter the net-worth history as a real (too low) balance
+    # that no later recompute would revisit, since snapshots are keyed by date and
+    # this one would look authoritative. The column still shows the partial sum,
+    # undated, as it always has.
     if valuation.is_fully_valued:
-        account.balance_date = d
-        await upsert_balance_snapshot(session, account)
+        await record_balance(session, account, balance=valuation.market_value_account, on=d)
+    else:
+        account.current_balance = valuation.market_value_account
     return account.current_balance
 
 

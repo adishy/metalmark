@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.schemas.ledger import AccountCreate, AccountUpdate
 from app.services import imports, ledger, reports, sync
+from app.services import investments as inv
 from app.services.errors import LedgerError
 from app.services.fake_simplefin import FakeProvider
 from tests.fakes import simplefin as scenarios
@@ -97,6 +98,19 @@ async def test_a_manual_investment_account_with_a_typed_balance_is_in_the_series
         point, headline = await _series_matches_headline(s, hid)
     assert headline == D("80000.0000")
     assert point == headline
+
+
+async def test_the_investments_view_agrees_about_a_typed_balance(household_factory):
+    """The portfolio shows the typed balance as the account's value — the whole of
+    it unaccounted cash, ADR-0021's plug — rather than the $0 of its positions."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        account = await ledger.create_account(s, hid, AccountCreate(
+            name="401k", type="investment", currency="USD",
+            current_balance=D("80000"), balance_date=date(2026, 9, 1)))
+        valuation = await inv.value_account(s, account, date(2026, 9, 1), "USD")
+    assert valuation.balance_account == D("80000")
+    assert valuation.unaccounted_cash_base == D("80000.0000")
 
 
 async def test_the_fallback_still_reconciles(household_factory):
@@ -175,7 +189,7 @@ async def test_a_new_balance_without_a_date_is_recorded_today(household_factory)
             name="Cash", type="depository", currency="USD",
             current_balance=D("1000"), balance_date=date(2026, 1, 1)))
         await ledger.update_account(s, a.id, AccountUpdate(current_balance=D("3000")))
-        today = ledger._today()
+        today = ledger.today()
         assert await _snapshots(s, a.id) == [
             (date(2026, 1, 1), D("1000.0000")), (today, D("3000.0000"))
         ]
