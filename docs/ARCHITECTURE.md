@@ -89,8 +89,10 @@ from type) decides only which side an account is listed on. Each account balance
 **converted to base at that date's rate**. Snapshots are keyed on the provider's `balance_date` (not the
 worker's wall clock), every writer files a balance through `ledger.record_balance` (ADR-0044: the snapshot at
 the balance's own date; the current balance moves only forward), and the net-worth line **carries forward** the last known balance across days with no snapshot (sync
-outages, stale accounts). SimpleFIN gives current balance only, so history builds forward from first sync —
-there is no backfill (set that expectation in the UI). A manual investment account's balance is derived as
+outages, stale accounts). SimpleFIN gives current balance only; **before an account's first snapshot its
+balance is derived backwards** through its transactions, back to the day before the earliest one (ADR-0045 —
+not for investment accounts, whose balance also moves with the market). Each point of `/reports/net-worth`
+lists the accounts it cannot count and why (`not_started`, `no_balance`, `no_rate`, `no_price`). A manual investment account's balance is derived as
 Σ(`holdings.market_value`) once it has a position (until then it is read from its snapshots, ADR-0044) and snapshotted the same way (unless `balance_source='stated'` — see Investments).
 - **Reconciliation with FX:** over any period, Δnet-worth (base) = cash-flow (base) + **currency revaluation**
   (the base-value change of foreign balances from rate moves). Reports show revaluation as its own line;

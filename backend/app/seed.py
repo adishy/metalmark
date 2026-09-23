@@ -55,9 +55,9 @@ DEMO_OWNERS = ["Partner"]
 
 # Five months of activity, ending with the current (partial) month. The opening
 # balances are snapshotted at the start of the year so the net-worth series starts
-# at the household's real opening position: a snapshot is carried forward, but an
-# account with no snapshot at or before a date contributes *nothing* to it, so a
-# first snapshot in April would make the chart climb out of zero.
+# at the household's real opening position. (Since ADR-0045 a later first snapshot
+# would be derived backwards through the transactions, but the seed states the
+# opening balances rather than leaving the chart to infer them.)
 DEMO_MONTHS = 5
 DEMO_OPENING = {
     "checking": Decimal("4000"),

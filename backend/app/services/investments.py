@@ -824,7 +824,28 @@ async def securities_value_by_account(
     base_ccy: str,
     exclude_cash: bool = True,
 ) -> dict[uuid.UUID, Decimal]:
-    """``securities_value_base`` per account, **unquantized**.
+    """``securities_valuation_by_account`` without the completeness report."""
+    values, _incomplete = await securities_valuation_by_account(
+        session, quantities=quantities, on=on, base_ccy=base_ccy, exclude_cash=exclude_cash
+    )
+    return values
+
+
+async def securities_valuation_by_account(
+    session: AsyncSession,
+    *,
+    quantities: dict[tuple[uuid.UUID, uuid.UUID], Decimal],
+    on: date,
+    base_ccy: str,
+    exclude_cash: bool = True,
+) -> tuple[dict[uuid.UUID, Decimal], dict[uuid.UUID, str]]:
+    """``securities_value_base`` per account, **unquantized** — and which accounts
+    that sum is only part of.
+
+    The second map names each account holding a position that could not be
+    valued on ``on``, with why (``NO_PRICE`` before ``NO_RATE``, the one a person
+    fixes first). Its value in the first map is the sum of the rest: a partial
+    number, which a chart has to be able to say it is.
 
     Exposed because a decomposition needs one account's market value on its own:
     the net-worth residual is attributed account by account (ADR-0032 §5), and
@@ -836,7 +857,7 @@ async def securities_value_by_account(
     rounds once over the sum.
     """
     if not quantities:
-        return {}
+        return {}, {}
     account_ids = {key[0] for key in quantities}
     accounts = {
         a.id: a
@@ -877,6 +898,7 @@ async def securities_value_by_account(
         )
 
     values_by_account: dict[uuid.UUID, Decimal] = {}
+    incomplete: dict[uuid.UUID, str] = {}
     for account_id, positions in by_account.items():
         values = await _value_holdings(
             session,
@@ -889,7 +911,10 @@ async def securities_value_by_account(
         values_by_account[account_id] = sum(
             (v.value_base for v in values if v.value_base is not None), ZERO
         )
-    return values_by_account
+        reasons = {v.reason for v in values if v.value_base is None}
+        if reasons:
+            incomplete[account_id] = NO_PRICE if NO_PRICE in reasons else NO_RATE
+    return values_by_account, incomplete
 
 
 @dataclass

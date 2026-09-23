@@ -4854,6 +4854,39 @@ components:
       - email
       - role
       title: MemberOut
+    MissingAccount:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        name:
+          type: string
+          title: Name
+        reason:
+          type: string
+          enum:
+          - not_started
+          - no_balance
+          - no_rate
+          - no_price
+          title: Reason
+      type: object
+      required:
+      - account_id
+      - name
+      - reason
+      title: MissingAccount
+      description: 'An account a net-worth point does not fully count, and why (ADR-0045).
+
+
+        ``not_started`` — the ledger''s knowledge of the account begins after this day;
+
+        ``no_balance`` — it has never been given a balance; ``no_rate`` — its currency
+
+        has no rate for this day; ``no_price`` — a position in it has no price, so the
+
+        point holds only part of its value.'
     NetWorthOut:
       properties:
         base_currency:
@@ -4898,6 +4931,12 @@ components:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           title: Net Worth
+        missing:
+          items:
+            $ref: '#/components/schemas/MissingAccount'
+          type: array
+          title: Missing
+          default: []
       type: object
       required:
       - date

@@ -28,6 +28,7 @@ from app.models import (
     BalanceSnapshot,
     Holding,
     Security,
+    SecurityPrice,
     SyncRunEvent,
     Transaction,
 )
@@ -447,3 +448,149 @@ async def test_sync_warns_when_a_liability_reports_a_positive_balance(household_
         ).scalars().all()
     warned = [e for e in events if e.event == "balance.liability_positive"]
     assert len(warned) == 1 and warned[0].level == "warning"
+
+
+# ---- before the first balance: derived backwards (ADR-0045) -------------------
+#
+# A first sync brings weeks of transactions and one balance. The series used to
+# read the account as absent until that balance, drawing a cliff at the connection
+# date and calling the account's whole pulled history "unexplained".
+
+
+def _missing(point) -> dict[str, str]:
+    return {m["name"]: m["reason"] for m in point["missing"]}
+
+
+async def test_the_first_sync_has_no_cliff(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        _txn(s, hid, chk, date(2026, 2, 5), "-200", "-200")
+        _txn(s, hid, chk, date(2026, 3, 1), "3000", "3000")
+        _snap(s, hid, chk, date(2026, 3, 15), "25000")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 2, 1), date(2026, 3, 31),
+                                           granularity="month")
+        inside = await reports.net_worth_series(s, hid, date(2026, 2, 4), date(2026, 3, 31))
+    # Feb 1 is before the day before its first transaction: not known, and said so.
+    assert [p["net_worth"] for p in r["points"]] == [
+        D("0.0000"), D("22000.0000"), D("25000.0000")]
+    assert _missing(r["points"][0]) == {"Checking": "not_started"}
+    assert r["points"][1]["missing"] == r["points"][2]["missing"] == []
+    # From the first day it is known, the change is all cash flow.
+    assert inside["points"][0]["net_worth"] == D("22200.0000")
+    assert (inside["delta_net_worth"], inside["net_cash_flow"], inside["unexplained"]) == (
+        D("2800.0000"), D("2800.0000"), D("0.0000"))
+
+
+async def test_deriving_backwards_reproduces_an_earlier_balance(household_factory):
+    """With complete transactions, the derivation from a later balance lands on the
+    earlier one exactly — the arithmetic is checked against the bank's own number."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        _txn(s, hid, chk, date(2026, 1, 1), "1000", "1000")
+        _txn(s, hid, chk, date(2026, 1, 10), "-100", "-100")
+        _txn(s, hid, chk, date(2026, 1, 20), "50", "50")
+        _snap(s, hid, chk, date(2026, 1, 31), "950")
+        await s.flush()
+        derived = await reports.net_worth_points(
+            s, [date(2025, 12, 31), date(2026, 1, 1), date(2026, 1, 15)], "USD")
+    assert derived == [D("0.0000"), D("1000.0000"), D("900.0000")]
+
+
+async def test_a_window_across_the_first_balance_reconciles(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        _txn(s, hid, chk, date(2026, 1, 3), "500", "500")
+        _txn(s, hid, chk, date(2026, 1, 20), "-80", "-80")
+        _snap(s, hid, chk, date(2026, 1, 31), "1420")
+        _txn(s, hid, chk, date(2026, 2, 5), "-20", "-20")
+        _snap(s, hid, chk, date(2026, 2, 10), "1400")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 5), date(2026, 2, 10))
+    assert r["points"][0]["net_worth"] == D("1500.0000")
+    assert (r["delta_net_worth"], r["net_cash_flow"], r["unexplained"]) == (
+        D("-100.0000"), D("-100.0000"), D("0.0000"))
+
+
+async def test_a_hidden_transaction_still_moved_the_balance(household_factory):
+    """Hidden from spending, not from the bank: the derivation counts it, so the
+    balance before it is the real one, and the reconciliation names the account."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        _txn(s, hid, chk, date(2026, 1, 3), "500", "500")
+        _txn(s, hid, chk, date(2026, 1, 10), "-300", "-300")
+        await s.flush()
+        hidden = (await s.execute(
+            select(Transaction).where(Transaction.amount == D("-300")))).scalar_one()
+        hidden.is_hidden = True
+        _snap(s, hid, chk, date(2026, 1, 31), "200")
+        await s.flush()
+        (before,) = await reports.net_worth_points(s, [date(2026, 1, 5)], "USD")
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 5), date(2026, 1, 31))
+    assert before == D("500.0000")
+    assert r["unexplained"] == D("-300.0000")
+    assert [row["name"] for row in r["unexplained_by_account"]] == ["Checking"]
+
+
+async def test_an_investment_account_is_not_derived_backwards(household_factory):
+    """A brokerage moves with the market too; B_S − Σ would assert a flat market."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        broker = await _account(s, hid, "Brokerage", "investment")
+        broker.balance_source = "stated"
+        _txn(s, hid, broker, date(2026, 1, 5), "1000", "1000")
+        _snap(s, hid, broker, date(2026, 1, 31), "5000")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 10), date(2026, 1, 31))
+    assert r["points"][0]["net_worth"] == D("0.0000")
+    assert _missing(r["points"][0]) == {"Brokerage": "not_started"}
+
+
+async def test_an_account_with_no_balance_is_named(household_factory):
+    """Opened blank and filled by an import: transactions, and never a balance."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        card = await _account(s, hid, "Imported card", "credit")
+        _txn(s, hid, card, date(2026, 1, 5), "-40", "-40")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31))
+    assert all(_missing(p) == {"Imported card": "no_balance"} for p in r["points"])
+
+
+async def test_a_missing_rate_is_named_on_the_point(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        acct = await _account(s, hid, "HUF savings", "depository", currency="HUF")
+        _snap(s, hid, acct, date(2026, 1, 1), "100000", "HUF")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31))
+    assert all(_missing(p) == {"HUF savings": "no_rate"} for p in r["points"])
+
+
+async def test_a_position_first_priced_mid_window_is_not_appreciation(household_factory):
+    """Session 04's repro: 100 VTI, first price on Mar 1 — the report said the
+    market made $25,000 and nothing was unexplained. Unknown is not zero."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await _account(s, hid, "Brokerage", "investment")
+        sec = Security(household_id=hid, name="Vanguard Total", ticker="VTI",
+                       security_type="etf", currency="USD")
+        s.add(sec)
+        await s.flush()
+        s.add(Holding(household_id=hid, account_id=a.id, security_id=sec.id,
+                      quantity=D("100"), as_of=date(2026, 1, 1)))
+        s.add(SecurityPrice(household_id=hid, security_id=sec.id,
+                            price_date=date(2026, 3, 1), price=D("250"), currency="USD"))
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 3, 31),
+                                           granularity="month")
+    assert _missing(r["points"][0]) == {"Brokerage": "no_price"}
+    assert r["points"][-1]["missing"] == []
+    assert r["market_appreciation"] == D("0.0000")
+    assert r["unexplained"] == D("25000.0000")
+    assert [row["name"] for row in r["unexplained_by_account"]] == ["Brokerage"]
+    assert any("VTI has no price" in w for w in r["warnings"])
