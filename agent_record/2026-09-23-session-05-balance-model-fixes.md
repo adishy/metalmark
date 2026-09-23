@@ -95,3 +95,38 @@ no positions, #4 balance edits rewriting history. Advisor revisions adopted:
    the preview's last section.
 
 Backend after the review: 862 passed.
+
+## Phases B and C (same session, after the owner accepted 0043/0044)
+
+Asked: "both make sense - accept, implement, continue with phase b, c". Plan reviewed by the advisor first;
+its changes adopted: hidden rows **included** in the backward derivation (dismissed duplicates are deleted,
+not hidden — checked in `TxnDetailSheet`/`Review`), investment accounts **not** derived backwards, a separate
+`no_balance` reason, C1 treated as the one step that rewrites stored data, C4 must not split merged rows,
+7-day (not 3-day) staleness.
+
+| Commit | What |
+|---|---|
+| `abc8bcf` | ADR-0043/0044 accepted |
+| `6104332` | B: `_BalanceHistory` — balance before the first snapshot derived backwards; per-point `missing` (`not_started`/`no_balance`/`no_rate`/`no_price`); unpriced positions out of appreciation (ADR-0045, Proposed) |
+| `b3255e8` | series stops at today (the "this year" default drew a flat line to December); headline at today's rate; `cash_flow_series` loads once |
+| `c97324f` | chart: time axis, straight segments, partial points hollow/amber with tooltip + note naming account and reason |
+| `687e7a1` | stale synced accounts (`stale_since`, `account.not_reported`); same-named accounts in one payload kept apart, merged rows reported not split |
+| `538d208` | daily FX fetch (Frankfurter v2, prod-only by default) + "most recent rate wins either direction" (ADR-0046, Proposed) |
+
+Found along the way: ECharts' line default symbol is hollow (so partial points were indistinguishable until
+`symbol: "circle"`); the dev stack's default report window runs into the future; `upsert_fx_rate`
+recomputes every foreign transaction per call (why the fetch batches); `recompute_base_amounts` never
+touched `transaction_splits.base_amount` (pre-existing, recorded in ADR-0046).
+
+**Verified:** backend 887 passed; vitest 320+ passed with the same 14 pre-existing `notify.test.ts` failures;
+typecheck/design-lint/build clean; OpenAPI regenerated in-process; the chart rendered in Chromium against a
+dev stack of this branch and checked by eye (screenshots at rest, on a partial point); **Playwright 53/53**
+(sync specs need `METALMARK_SIMPLEFIN_PROVIDER=fake`, as CI sets).
+
+**Deferred, with reason:** `balance_snapshots.source` — a schema change, and 0005 requires freezing 0001's
+live-metadata DDL first; not needed by anything shipped.
+
+**Deploy notes added by B/C:** the first worker start in prod fetches rates and rewrites cached
+`base_amount`s (logged as `fx.refreshed … base_amounts_changed`); undo by deleting `fx_rates` rows with
+`source='auto'` and recomputing. The worker now makes an outbound call to `api.frankfurter.dev`
+(`METALMARK_FX_FETCH=false` to disable).
