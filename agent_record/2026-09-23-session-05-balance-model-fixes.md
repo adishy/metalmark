@@ -51,7 +51,7 @@ no positions, #4 balance edits rewriting history. Advisor revisions adopted:
   both conventions.
 - **SimpleFIN sign evidence:** the spec is silent on balance sign; Actual Budget's SimpleFIN integration
   stores it unchanged and shows cards negative. Recorded in ADR-0043 as corroboration, not proof.
-- **ADRs 0043/0044 are `Proposed`**, pending the owner's review.
+- **ADRs 0043/0044** were written `Proposed` and accepted by the owner at the end of the session.
 
 ## Verification
 

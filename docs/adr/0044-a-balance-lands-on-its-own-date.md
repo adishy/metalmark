@@ -1,8 +1,8 @@
 # ADR 0044: A balance lands on its own date, and an investment account with no positions is read from its balance
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
-- **Deciders:** Aditya Shylesh (pending review)
+- **Deciders:** Aditya Shylesh
 - **Related:** ADR-0021 (amended: which accounts are valued from holdings), ADR-0030 §6 (OFX balances),
   ADR-0032 §5, ARCHITECTURE.md §2, session 04's audit (findings #2 and #4)
 

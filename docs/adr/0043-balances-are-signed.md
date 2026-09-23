@@ -1,8 +1,8 @@
 # ADR 0043: Every stored balance is signed — a debt is a negative number
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
-- **Deciders:** Aditya Shylesh (pending review)
+- **Deciders:** Aditya Shylesh
 - **Related:** ARCHITECTURE.md §2 ("Net worth correctness", which this supersedes in part), ADR-0017,
   ADR-0032 (the revaluation term), ADR-0036 (the export format, bumped to version 2), session 04's audit
   (`agent_record/2026-09-23-session-04-reports-audit.md`, finding #1)
