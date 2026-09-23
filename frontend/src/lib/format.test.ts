@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatDuration } from "@/lib/format";
+import { formatMoney, formatDuration, negateAmount } from "@/lib/format";
 
 // Intl uses NBSP / narrow-NBSP between symbol and digits in some runtimes;
 // normalize to a plain space so assertions are locale-runtime-stable.
@@ -88,5 +88,19 @@ describe("formatDuration", () => {
     // A duration is a difference of two server timestamps. Clock skew between
     // the two should not produce "-3 ms" in a table.
     expect(formatDuration(-5)).toBe("0 ms");
+  });
+});
+
+describe("negateAmount", () => {
+  it("flips the sign of a decimal string without rounding it", () => {
+    expect(negateAmount("850.0000")).toBe("-850.0000");
+    expect(negateAmount("-850.0000")).toBe("850.0000");
+    expect(negateAmount("+12.5")).toBe("-12.5");
+    expect(negateAmount("0.1")).toBe("-0.1");
+  });
+
+  it("never signs a zero", () => {
+    expect(negateAmount("0.0000")).toBe("0.0000");
+    expect(negateAmount("-0")).toBe("0");
   });
 });

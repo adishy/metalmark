@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,9 +13,27 @@ from pydantic import BaseModel, ConfigDict
 from app.services.periods import Granularity
 
 
+class MissingAccount(BaseModel):
+    """An account a net-worth point does not fully count, and why (ADR-0045).
+
+    ``not_started`` — the ledger's knowledge of the account begins after this day;
+    ``no_balance`` — it has never been given a balance; ``no_rate`` — its currency
+    has no rate for this day; ``no_price`` — a position in it has no price, so the
+    point holds only part of its value.
+    """
+
+    account_id: uuid.UUID
+    name: str
+    reason: Literal["not_started", "no_balance", "no_rate", "no_price"]
+
+
 class NetWorthPoint(BaseModel):
     date: date
     net_worth: Decimal
+    # Empty when every account in scope is fully counted. A point with a missing
+    # account is still the sum of what *is* known — this says what that leaves out,
+    # so a chart can draw the difference between "fell" and "stopped counting".
+    missing: list[MissingAccount] = []
 
 
 class CashFlowPoint(BaseModel):

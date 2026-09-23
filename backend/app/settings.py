@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # watching. See services/notifications.py.
     notify_webhook_url: str | None = Field(default=None, alias="METALMARK_NOTIFY_WEBHOOK_URL")
 
+    # The daily FX fetch (ADR-0046). Unset means "on in prod, off elsewhere": a dev
+    # stack, the test suite and CI's e2e stack must not reach the internet, and a
+    # deployment should not have to know the variable exists to get rates.
+    fx_fetch: bool | None = Field(default=None, alias="METALMARK_FX_FETCH")
+    fx_url: str = Field(default="https://api.frankfurter.dev/v2/rates", alias="METALMARK_FX_URL")
+
     secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")
@@ -98,6 +104,15 @@ class Settings(BaseSettings):
     app_db_password_file: str | None = Field(default=None, alias="APP_DB_PASSWORD_FILE")
 
     _secret_key: str = ""
+
+    @field_validator("fx_fetch", mode="before")
+    @classmethod
+    def _fx_fetch_mode(cls, value: object) -> object:
+        """`auto`, blank and unset all mean "on in prod, off elsewhere" — the
+        deployment passes `${METALMARK_FX_FETCH:-auto}`, as it does the cookie flag."""
+        if isinstance(value, str) and value.strip().lower() in ("", "auto"):
+            return None
+        return value
 
     @field_validator("session_cookie_secure", mode="before")
     @classmethod
@@ -152,6 +167,10 @@ class Settings(BaseSettings):
         if self.session_cookie_secure == "auto":
             return self.env != "dev"
         return self.session_cookie_secure == "true"
+
+    @property
+    def fx_fetch_enabled(self) -> bool:
+        return self.fx_fetch if self.fx_fetch is not None else self.env == "prod"
 
     @property
     def secret_key(self) -> str:

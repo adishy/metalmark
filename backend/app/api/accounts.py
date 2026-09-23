@@ -16,6 +16,12 @@ from app.services import ledger
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 
+def _out(acct, stale: dict) -> AccountOut:
+    return AccountOut.model_validate(acct).model_copy(
+        update={"stale_since": stale.get(acct.id)}
+    )
+
+
 @router.post("", response_model=AccountOut, status_code=201)
 async def create_account(data: AccountCreate, ctx: RequestContext = Depends(get_context)):
     acct = await ledger.create_account(ctx.session, ctx.household_id, data)
@@ -27,10 +33,8 @@ async def list_accounts(
     ctx: RequestContext = Depends(get_context),
     owner_id: uuid.UUID | None = Query(default=None),
 ):
-    return [
-        AccountOut.model_validate(a)
-        for a in await ledger.list_accounts(ctx.session, owner_id)
-    ]
+    stale = await ledger.stale_since(ctx.session)
+    return [_out(a, stale) for a in await ledger.list_accounts(ctx.session, owner_id)]
 
 
 @router.get("/net-worth", response_model=NetWorthOut)
@@ -45,15 +49,16 @@ async def net_worth(
 
 @router.get("/{account_id}", response_model=AccountOut)
 async def get_account(account_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
-    return AccountOut.model_validate(await ledger.get_account(ctx.session, account_id))
+    return _out(
+        await ledger.get_account(ctx.session, account_id), await ledger.stale_since(ctx.session)
+    )
 
 
 @router.patch("/{account_id}", response_model=AccountOut)
 async def update_account(account_id: uuid.UUID, data: AccountUpdate,
                          ctx: RequestContext = Depends(get_context)):
-    return AccountOut.model_validate(
-        await ledger.update_account(ctx.session, account_id, data)
-    )
+    acct = await ledger.update_account(ctx.session, account_id, data)
+    return _out(acct, await ledger.stale_since(ctx.session))
 
 
 @router.delete("/{account_id}", status_code=204)

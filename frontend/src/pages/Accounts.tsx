@@ -10,16 +10,27 @@ import {
 } from "@/api/hooks";
 import { downloadAccountCsv } from "@/api/portability";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, negateAmount } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Dialog from "@/components/Dialog";
+import { Day } from "@/components/datetime";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import InvestmentsView from "@/components/InvestmentsView";
 import SegmentedControl, { segmentPanelId, segmentTabId, type Segment } from "@/components/SegmentedControl";
 
 const TYPES: AccountType[] = ["depository", "credit", "investment", "loan", "other"];
+
+/*
+ * A card or loan's balance is stored signed — debt is negative (ADR-0043) — and
+ * read and typed here as the amount owed. These two are the only places the page
+ * crosses between the two, so what a person enters for a card is never the
+ * opposite of what the ledger means by it.
+ */
+const isLiability = (t: AccountType) => t === "credit" || t === "loan";
+const shownBalance = (t: AccountType, signed: string) => (isLiability(t) ? negateAmount(signed) : signed);
+const storedBalance = shownBalance;
 // A balance date is a calendar day where the user is, so it comes from the local
 // clock — ``toISOString()`` would roll it back a day for anyone east of UTC.
 const today = () => todayIso();
@@ -167,11 +178,28 @@ export default function Accounts() {
                             liability
                           </span>
                         )}
+                        {a.stale_since && (
+                          // The bank stopped reporting it; its last balance is still
+                          // counted. Hiding or closing it is the reader's call.
+                          <span
+                            className="ml-1 rounded bg-warning/20 px-1.5 py-0.5 text-warning"
+                            data-testid={`account-stale-${a.id}`}
+                          >
+                            not reported since <Day value={a.stale_since} />
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={a.is_asset ? "text-fg" : "text-negative"}>
-                        {formatMoney(a.current_balance, a.currency)}
+                      <span
+                        className={a.is_asset ? "text-fg" : "text-negative"}
+                        data-testid={`account-balance-${a.id}`}
+                      >
+                        {isLiability(a.type) && Number(a.current_balance) > 0
+                          ? `${formatMoney(a.current_balance, a.currency)} credit`
+                          : isLiability(a.type)
+                            ? `${formatMoney(shownBalance(a.type, a.current_balance), a.currency)} owed`
+                            : formatMoney(a.current_balance, a.currency)}
                       </span>
                       <Button
                         variant="ghost"
@@ -212,7 +240,11 @@ function AddAccountForm({
   const [name, setName] = useState("");
   const [type, setType] = useState<AccountType>("depository");
   const [currency, setCurrency] = useState("USD");
-  const [balance, setBalance] = useState("0");
+  // Blank, not "0": an opening balance is an observation only when someone gives
+  // one, and a zero nobody typed would put a $0 point on the net-worth chart the
+  // day the account was created (an account opened for an imported statement
+  // takes its balance from the file).
+  const [balance, setBalance] = useState("");
   const [balanceDate, setBalanceDate] = useState(today);
   const [institution, setInstitution] = useState("");
   const [owner, setOwner] = useState<string | null>(null);
@@ -233,7 +265,7 @@ function AddAccountForm({
     const e = {
       name: requiredText(name),
       currency: validCurrency(currency),
-      balance: validAmount(balance),
+      balance: balance.trim() ? validAmount(balance) : null,
     };
     setErrs(e);
     return !e.name && !e.currency && !e.balance;
@@ -250,8 +282,9 @@ function AddAccountForm({
           name,
           type,
           currency: currency.toUpperCase(),
-          current_balance: balance,
-          balance_date: balanceDate,
+          ...(balance.trim()
+            ? { current_balance: storedBalance(type, balance), balance_date: balanceDate }
+            : {}),
           // Shared is the server's default too, so an unset picker (owners still
           // loading) can just be left off the body.
           owner_id: owner || sharedId || undefined,
@@ -272,7 +305,12 @@ function AddAccountForm({
       <Field label="Currency" htmlFor={ids.currency} required error={errs.currency}>
         <Input id={ids.currency} value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value)} data-testid="account-currency" />
       </Field>
-      <Field label="Starting balance" htmlFor={ids.balance} required error={errs.balance}>
+      <Field
+        label={isLiability(type) ? "Amount owed" : "Starting balance"}
+        htmlFor={ids.balance}
+        error={errs.balance}
+        hint="Leave blank to take it from an imported statement."
+      >
         <Input id={ids.balance} value={balance} inputMode="decimal" onChange={(e) => setBalance(e.target.value)} data-testid="account-balance" />
       </Field>
       <Field label="Balance date" htmlFor={ids.balanceDate}>
@@ -297,8 +335,13 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
   const exportCsv = useMutation({ mutationFn: downloadAccountCsv });
   const [name, setName] = useState(account.name);
   const [institution, setInstitution] = useState(account.institution ?? "");
-  const [balance, setBalance] = useState(account.current_balance);
-  const [balanceDate, setBalanceDate] = useState(account.balance_date ?? today());
+  const [type, setType] = useState<AccountType>(account.type);
+  const [balance, setBalance] = useState(shownBalance(account.type, account.current_balance));
+  // Today, not the account's last balance date: a balance typed here is what the
+  // account holds *now*, and sending the old date back overwrote that day's point
+  // in the net-worth history. Picking an earlier date is how a past balance is
+  // corrected — the server files it there without moving the current one.
+  const [balanceDate, setBalanceDate] = useState(today());
   const [owner, setOwner] = useState<string | null>(account.owner_id);
   const [hidden, setHidden] = useState(account.is_hidden);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -308,6 +351,7 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
     name: useFieldId("edit-account-name"),
     institution: useFieldId("edit-account-institution"),
     balance: useFieldId("edit-account-balance"),
+    type: useFieldId("edit-account-type"),
     balanceDate: useFieldId("edit-account-balance-date"),
   };
 
@@ -321,8 +365,11 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         body: {
           name,
           institution: institution || null,
-          current_balance: balance,
-          balance_date: balanceDate,
+          ...(type !== account.type ? { type } : {}),
+          // Only when the reader changed one of them: a rename is not a balance.
+          ...(storedBalance(type, balance) !== account.current_balance || balanceDate !== today()
+            ? { current_balance: storedBalance(type, balance), balance_date: balanceDate }
+            : {}),
           // Required server-side: keep the account's own owner if the picker is
           // somehow empty rather than sending null.
           owner_id: owner || account.owner_id,
@@ -361,10 +408,42 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         <Field label="Institution" htmlFor={ids.institution}>
           <Input id={ids.institution} value={institution} onChange={(e) => setInstitution(e.target.value)} data-testid="edit-account-institution" />
         </Field>
-        <Field label="Balance" htmlFor={ids.balance} required error={errs.balance} hint={`In ${account.currency}`}>
+        <Field label="Type" htmlFor={ids.type}>
+          <Select
+            id={ids.type}
+            value={type}
+            onChange={(e) => {
+              const next = e.target.value as AccountType;
+              // The field shows what the account means by its balance, so crossing
+              // between asset and liability re-reads the same stored number.
+              if (isLiability(next) !== isLiability(type)) setBalance((b) => negateAmount(b));
+              setType(next);
+            }}
+            data-testid="edit-account-type"
+          >
+            {TYPES.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label={isLiability(type) ? "Amount owed" : "Balance"}
+          htmlFor={ids.balance}
+          required
+          error={errs.balance}
+          hint={`In ${account.currency}`}
+        >
           <Input id={ids.balance} value={balance} inputMode="decimal" onChange={(e) => setBalance(e.target.value)} data-testid="edit-account-balance" />
         </Field>
-        <Field label="Balance date" htmlFor={ids.balanceDate}>
+        <Field
+          label="Balance date"
+          htmlFor={ids.balanceDate}
+          hint={
+            account.balance_date
+              ? `Current balance is as of ${account.balance_date}. An earlier date corrects that day's balance.`
+              : undefined
+          }
+        >
           <Input id={ids.balanceDate} type="date" value={balanceDate} onChange={(e) => setBalanceDate(e.target.value)} data-testid="edit-account-balance-date" />
         </Field>
         <OwnerSelect value={owner} onChange={setOwner} testid="edit-account-owner" />

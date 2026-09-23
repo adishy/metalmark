@@ -139,3 +139,8 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0040](0040-persistent-state-is-overridable.md) | Persistent state is a named volume by default, and a host path when you say so | Accepted |
 | [0041](0041-the-plain-http-door-answers-on-the-lan.md) | The plain-HTTP door answers on the LAN, not only on loopback | Accepted, one clause qualified by 0042 |
 | [0042](0042-the-session-cookie-flag-is-a-deployment-decision.md) | The session cookie's `Secure` flag is a deployment decision, defaulting to what it was | Accepted |
+| [0043](0043-balances-are-signed.md) | Every stored balance is signed — a debt is a negative number | Accepted |
+| [0044](0044-a-balance-lands-on-its-own-date.md) | A balance lands on its own date; an investment account with no positions is read from its balance | Accepted |
+| [0045](0045-history-before-the-first-balance-and-what-a-point-leaves-out.md) | History before an account's first balance is derived; every net-worth point says what it leaves out | Accepted |
+| [0046](0046-rates-are-fetched-daily.md) | Rates are fetched daily; the most recently stated rate wins in either direction | Accepted |
+| [0047](0047-an-upgrade-is-pull-and-restart.md) | An upgrade is a pull and a restart; the deployment backs up, migrates and verifies itself | Accepted |

@@ -16,3 +16,5 @@ capturing the *process*: what was asked, what was researched, what the reviews f
 | 2026-09-19 | 01 | Architecture + multi-agent plan; two design-review passes; ADR strategy |
 | 2026-09-19 | 02 | Implementation (M1a build): P0 foundations + test/CI workstream |
 | 2026-09-20 | 03 | Kestrel → MetalMark rename; ownership reshape (ADR-0026); open signup (ADR-0027) |
+| 2026-09-23 | 04 | Reports audit: why net worth swings (liability sign, derived investments, first-snapshot cliff) |
+| 2026-09-23 | 05 | Balance-model fixes (0043/0044), balance history + coverage (0045), chart, stale/alike accounts, daily FX fetch (0046) |

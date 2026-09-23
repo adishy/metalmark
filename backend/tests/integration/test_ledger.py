@@ -54,7 +54,7 @@ async def test_single_currency_net_worth(household_factory):
         )
         await ledger.create_account(
             s, hh, AccountCreate(name="Card", type="credit", currency="USD",
-                                 current_balance=D("300"), balance_date=date(2026, 1, 1))
+                                 current_balance=D("-300"), balance_date=date(2026, 1, 1))
         )
         nw = await ledger.net_worth(s, hh)
     assert nw["assets"] == D("1000.0000")
@@ -407,17 +407,19 @@ async def test_the_reconciliation_does_not_move_when_the_granularity_does(househ
     reconciliation. So every term but `points` must come back byte-identical.
     """
     hh = await household_factory(base="USD")
-    window = (date(2026, 1, 1), date(2026, 12, 31))
+    # A past year: the series stops at today, so a window running into the future
+    # would draw a different number of points depending on when the suite runs.
+    window = (date(2025, 1, 1), date(2025, 12, 31))
     async with scoped_session(household_id=hh) as s:
         exp = await _make_category(s, hh, "expense", "Misc")
         acct = await ledger.create_account(
             s, hh, AccountCreate(name="Checking", type="depository", currency="USD",
-                                 current_balance=D("1000"), balance_date=date(2026, 1, 1)))
+                                 current_balance=D("1000"), balance_date=date(2025, 1, 1)))
         await txns.create_transaction(s, hh, TransactionCreate(
-            account_id=acct.id, amount=D("-250"), transacted_at=_dt(2026, 6, 15),
+            account_id=acct.id, amount=D("-250"), transacted_at=_dt(2025, 6, 15),
             category_id=exp.id))
         await ledger.update_account(s, acct.id, AccountUpdate(
-            current_balance=D("750"), balance_date=date(2026, 12, 31)))
+            current_balance=D("750"), balance_date=date(2025, 12, 31)))
 
         runs = {
             g: await reports.net_worth_series(s, hh, *window, granularity=g)

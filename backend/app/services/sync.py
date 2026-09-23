@@ -38,7 +38,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import scoped_session
@@ -69,7 +69,7 @@ from app.services.aggregator import (
     infer_account_type,
 )
 from app.services.errors import LedgerError
-from app.services.ledger import base_currency, upsert_balance_snapshot
+from app.services.ledger import base_currency, record_balance
 from app.services.owners import ensure_shared_owner
 from app.settings import get_settings
 
@@ -364,6 +364,8 @@ async def upsert_account(
     household_id: uuid.UUID,
     connection: AccountConnection,
     pa: ProviderAccount,
+    *,
+    key: str | None = None,
 ) -> AccountUpsert:
     """Find this provider account's ledger row, or make one (ADR-0009).
 
@@ -387,8 +389,11 @@ async def upsert_account(
 
     ``owner_id`` is never touched on an existing row. Attribution is a human's
     decision (ADR-0026) and a reconnect is not a reason to revise it.
+
+    ``key`` overrides the computed key — ``_account_keys`` passes one when two
+    accounts in the same payload would otherwise share it.
     """
-    key = external_key_for(pa)
+    key = key or external_key_for(pa)
     # ``limit(1)``, not ``limit(2)``: the unique constraint makes more than one row
     # impossible, and a "which of these is it" branch that can never be taken is a
     # claim about the schema that stops being true the moment the schema changes.
@@ -451,10 +456,12 @@ async def _insert_account(
         available_balance=pa.available_balance,
         balance_date=pa.balance_date,
         is_asset=is_asset_for(account_type),
-        # Same rule as the manual path (``ledger.create_account``): an investment
-        # account's balance is *derived* from its holdings (ADR-0021), which is
-        # why sync skips its snapshot — see ``_apply_balance``.
-        balance_source="derived" if account_type == "investment" else None,
+        # *Stated*, unlike the manual path: ADR-0021's derived default assumes
+        # holdings to derive from, and sync writes none — so a derived synced
+        # account was valued at nothing on the chart while the Accounts page showed
+        # the provider's balance. The provider's number is the only statement of
+        # this account's value there is, so it is snapshotted like any other.
+        balance_source="stated" if account_type == "investment" else None,
         owner_id=owner.id,
         is_manual=False,
     )
@@ -538,28 +545,51 @@ async def _rekey_remapped_account(
 
 
 async def _apply_balance(
-    session: AsyncSession, account: Account, pa: ProviderAccount, *, log: RunLog
+    session: AsyncSession, account: Account, pa: ProviderAccount, *, log: RunLog,
+    now: datetime,
 ) -> None:
     """Write the provider's balance onto the account, and snapshot it.
 
     The ADR-0021 guard is here and is the whole of it: a *derived* account's
     balance series belongs to its holdings, so a synced stated balance must not
-    write a point into it. The balance column still moves — the provider's number
-    is the best one available until M3 computes holdings properly — but the
-    history does not, because a history with two disagreeing sources in it is
-    worse than no history.
+    write a point into it. Sync now creates investment accounts ``stated``, so
+    this fires only for one created ``derived`` before migration 0006 that has
+    holdings entered by hand (0006 left exactly those derived). The balance
+    column still moves, but the history does not, because a history with two
+    disagreeing sources in it is worse than no history.
 
-    A snapshot is never written for a date we did not ask about, which is what
-    makes a re-sync idempotent: same ``balance_date``, same row, updated in place
-    (``upsert_balance_snapshot``).
+    Where it lands is ``ledger.record_balance``'s rule, shared with every other
+    writer: at the provider's ``balance_date``, or the run's day when it sends
+    none — never the account's previous date, which is what used to overwrite the
+    last point with today's number. Same date, same row, updated in place, so a
+    re-sync is idempotent.
     """
-    account.current_balance = pa.balance
-    account.available_balance = pa.available_balance
-    if pa.balance_date is not None:
-        account.balance_date = pa.balance_date
-    await session.flush()
+    if not account.is_asset and pa.balance > 0:
+        # ADR-0043 stores debt as a negative balance, which is what SimpleFIN
+        # bridges send. A positive one is either a card in credit or a bridge using
+        # the other sign — and the second would count every card for the
+        # household. Not guessed at: said, where Admin shows it.
+        await log.emit(
+            "warning",
+            "balance.liability_positive",
+            account_id=str(account.id),
+            name=account.name,
+            reason="a liability reported a positive balance; debt is stored as "
+            "negative, so check this account's sign (ADR-0043)",
+        )
+    derived = account.balance_source == "derived"
+    current = await record_balance(
+        session,
+        account,
+        balance=pa.balance,
+        on=pa.balance_date or now.date(),
+        snapshot=not derived,
+    )
+    if current:
+        account.available_balance = pa.available_balance
+        await session.flush()
 
-    if account.balance_source == "derived":
+    if derived:
         await log.emit(
             "info",
             "balance.derived_skipped",
@@ -567,7 +597,6 @@ async def _apply_balance(
             reason="this account's balance history comes from its holdings (ADR-0021)",
         )
         return
-    await upsert_balance_snapshot(session, account)
     await log.emit("debug", "balance.snapshotted", account_id=str(account.id))
 
 
@@ -1028,6 +1057,115 @@ def classify_errlist(errlist: Sequence[str]) -> tuple[str, str | None]:
     return run_status, connection_status
 
 
+async def _account_keys(
+    session: AsyncSession, accounts: Sequence[ProviderAccount], *, log: RunLog
+) -> dict[str, str]:
+    """The ``external_key`` each provider account in one payload lands under.
+
+    ADR-0009's key is institution + name, so two cards a bank names alike ("Blue
+    Cash") compute the same key, and sync used to land both on **one** ledger row:
+    their transactions merged and the row's balance alternated between the two
+    cards depending on payload order. Within one payload the provider's ids tell
+    them apart, so a colliding account gets ``key:<provider id>`` — its own row,
+    at the cost of reconnect-by-name for that account (a re-claim re-mints ids).
+
+    **An existing row is not split.** The account the row already belongs to —
+    its provider id, or any of its transactions already on the row (the merged
+    case) — keeps the plain key; splitting a merged row would start the second
+    card's history partway through while the row kept both. That is reported
+    (``account.key_collision``) for a person to separate, not guessed apart.
+
+    **Nor is a row nobody in the payload owns.** That is a reconnect whose ids
+    were re-minted: the row is the household's history of one of these cards, and
+    giving both new keys would insert two accounts beside it while it carried its
+    last balance forward — a double count. They keep the plain key, as before this
+    existed, and it is reported the same way.
+    """
+    keys = {pa.external_id: external_key_for(pa) for pa in accounts}
+    groups: dict[str, list[ProviderAccount]] = {}
+    for pa in accounts:
+        groups.setdefault(keys[pa.external_id], []).append(pa)
+    for key, group in groups.items():
+        if len(group) < 2:
+            continue
+        row = (
+            await session.execute(select(Account).where(Account.external_key == key).limit(1))
+        ).scalar_one_or_none()
+        on_row: set[str] = set()
+        if row is not None:
+            on_row = set(
+                (
+                    await session.execute(
+                        select(Transaction.external_id).where(
+                            Transaction.account_id == row.id,
+                            Transaction.external_id.is_not(None),
+                        )
+                    )
+                ).scalars()
+            )
+        keeps = [
+            pa
+            for pa in group
+            if row is not None
+            and (
+                row.external_id == pa.external_id
+                or any(t.external_id in on_row for t in pa.transactions)
+            )
+        ]
+        if row is not None and not keeps:
+            keeps = list(group)
+        for pa in group:
+            if pa not in keeps:
+                keys[pa.external_id] = f"{key}:{pa.external_id}"
+        await log.emit(
+            "warning",
+            "account.key_collision",
+            key=key,
+            names=[pa.name for pa in group],
+            merged=len(keeps) > 1,
+            reason=(
+                "these accounts share one ledger row from before; separate them by hand"
+                if len(keeps) > 1
+                else "same institution and name; each is kept as its own account"
+            ),
+        )
+    return keys
+
+
+async def _report_unreported_accounts(
+    session: AsyncSession,
+    connection: AccountConnection,
+    reported: list[uuid.UUID],
+    *,
+    log: RunLog,
+) -> None:
+    """Say which of this connection's accounts the fetch did not include.
+
+    A bank stops reporting a closed account, or the bridge drops one. Its last
+    balance is then carried forward on the chart indefinitely, which is right
+    while it is the last thing known and wrong once the account is gone — and only
+    a person can say which. So it is said, every run: the Accounts page marks the
+    account stale (``ledger.stale_since``), and hiding or closing it stays theirs.
+    """
+    rows = (
+        await session.execute(
+            select(Account.id, Account.name).where(
+                Account.connection_id == connection.id,
+                Account.id.not_in(reported) if reported else true(),
+            )
+        )
+    ).all()
+    for account_id, name in rows:
+        await log.emit(
+            "warning",
+            "account.not_reported",
+            account_id=str(account_id),
+            name=name,
+            reason="this fetch did not include the account; its last balance is "
+            "carried forward until it is reported again, hidden or closed",
+        )
+
+
 async def ingest_account_set(
     session: AsyncSession,
     household_id: uuid.UUID,
@@ -1049,10 +1187,13 @@ async def ingest_account_set(
     touched: list[uuid.UUID] = []
     seen: set[tuple[uuid.UUID, str]] = set()
     account_ids: list[uuid.UUID] = []
+    keys = await _account_keys(session, account_set.accounts, log=log)
 
     for pa in account_set.accounts:
         counts.accounts_seen += 1
-        upsert = await upsert_account(session, household_id, connection, pa)
+        upsert = await upsert_account(
+            session, household_id, connection, pa, key=keys[pa.external_id]
+        )
         account = upsert.account
         account_ids.append(account.id)
         if upsert.created:
@@ -1114,7 +1255,9 @@ async def ingest_account_set(
                     account_id=str(account.id),
                 )
 
-        await _apply_balance(session, account, pa, log=log)
+        await _apply_balance(session, account, pa, log=log, now=now)
+
+    await _report_unreported_accounts(session, connection, account_ids, log=log)
 
     counts.pendings_expired = await expire_pendings(
         session, account_ids, seen=seen, now=now, log=log

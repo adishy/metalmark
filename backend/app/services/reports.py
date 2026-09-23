@@ -44,6 +44,7 @@ from __future__ import annotations
 import uuid
 from bisect import bisect_right
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import NamedTuple
@@ -58,6 +59,7 @@ from app.models import (
     BalanceSnapshot,
     Category,
     CategoryGroup,
+    Holding,
     InvestmentTransaction,
     Security,
     Transaction,
@@ -67,6 +69,7 @@ from app.models.investments import CASH_SECURITY_TYPE
 from app.services import fx, periods
 from app.services import investments as inv
 from app.services.ledger import base_currency
+from app.services.ledger import today as ledger_today
 from app.services.ownership import account_owner_map, effective_owner_id
 
 #: ADR-0033 §2. The investment events that are cash flow, and the ones that are
@@ -147,7 +150,7 @@ def _entries(
 
 async def _reporting_transactions(
     session: AsyncSession, start: date, end: date, account_ids: set[uuid.UUID] | None
-) -> list[Transaction]:
+) -> list[tuple[Transaction, date]]:
     # Half-open on the upper bound: ``transacted_at`` is a timestamptz and ``end``
     # is a date, which Postgres coerces to midnight — so ``<= end`` silently drops
     # everything posted *after* 00:00 on the range's last day, which is most of a
@@ -160,8 +163,11 @@ async def _reporting_transactions(
     # flow with no account behind them, and the difference would land in
     # `unexplained` wearing a "something is wrong" label when nothing was. One rule,
     # applied here, is what makes the identity exact rather than nearly exact.
+    # The day is cast in SQL, beside the row: the same reading of "which day" as
+    # the bounds below, so bucketing these in Python cannot put a row on a
+    # different day than a per-bucket query would have.
     stmt = (
-        select(Transaction)
+        select(Transaction, Transaction.transacted_at.cast(Date).label("day"))
         .where(
             Transaction.transacted_at >= start,
             Transaction.transacted_at < end + timedelta(days=1),
@@ -174,7 +180,7 @@ async def _reporting_transactions(
     )
     if account_ids is not None:
         stmt = stmt.where(Transaction.account_id.in_(account_ids))
-    return list((await session.execute(stmt)).scalars().all())
+    return [(t, on) for t, on in (await session.execute(stmt)).all()]
 
 
 async def earliest_activity(session: AsyncSession) -> date | None:
@@ -242,10 +248,194 @@ async def accounts_owned_by(session: AsyncSession, owner_id: uuid.UUID) -> set[u
     return {r.id for r in rows}
 
 
-def _is_derived_investment(a: Account) -> bool:
-    """An account whose balance the ledger derives from prices, not one a provider
-    states (ADR-0021)."""
-    return a.type == "investment" and a.balance_source == "derived"
+async def _valued_from_holdings(
+    session: AsyncSession, accounts: Iterable[Account]
+) -> set[uuid.UUID]:
+    """The accounts whose value the ledger derives from positions and prices.
+
+    ``derived`` (ADR-0021) **and** something to derive from: at least one holding
+    or one investment transaction. A derived account with neither — a manual
+    investment account whose owner typed a balance and entered nothing else — has
+    no positions to value, and valuing it from them anyway put it at zero on the
+    chart while the Accounts page showed the balance it was given. Until it has a
+    position, its snapshots are the only statement of its value, and it is read
+    like any stated account: carried forward, revalued, left out of appreciation.
+
+    One query for the whole set, and asked once per report, so every term of the
+    reconciliation reads the same answer.
+    """
+    derived = {
+        a.id for a in accounts if a.type == "investment" and a.balance_source == "derived"
+    }
+    if not derived:
+        return set()
+    rows = await session.execute(
+        select(Holding.account_id)
+        .where(Holding.account_id.in_(derived))
+        .union(
+            select(InvestmentTransaction.account_id).where(
+                InvestmentTransaction.account_id.in_(derived)
+            )
+        )
+    )
+    return {account_id for (account_id,) in rows}
+
+
+#: Why an account is not in a net-worth point (``missing`` on each point of
+#: ``/reports/net-worth``). Four different facts, each one a reader can act on:
+#: ``not_started`` — the ledger's knowledge of this account begins later;
+#: ``no_balance`` — the account has never been given a balance to start from;
+#: ``no_rate`` / ``no_price`` — its value on this day needs a rate or a price the
+#: ledger does not have (for a price, the value shown is a partial sum).
+NOT_STARTED = "not_started"
+NO_BALANCE = "no_balance"
+NO_RATE = inv.NO_RATE
+NO_PRICE = inv.NO_PRICE
+
+
+@dataclass(frozen=True, slots=True)
+class _BalanceHistory:
+    """One stated account's balance on any day — the one answer to that question.
+
+    **On or after the first snapshot**: the latest snapshot on or before the day,
+    carried forward — the provider's (or a person's) own statement.
+
+    **Before it** (ADR-0045): derived backwards from the first snapshot through the
+    account's transactions, ``B_S − Σ amounts dated (day, S]``, back to the day
+    before its earliest transaction. A first sync pulls weeks of transactions and
+    one balance; reading the account as *absent* before that balance drew a cliff
+    from nothing to the full balance at the connection date, and reported the
+    account's whole past as ``unexplained``. Every transaction counts, hidden and
+    pending included: they moved the bank's balance, and the balances after ``S``
+    are the bank's own numbers, so leaving them out here would make a window
+    straddling ``S`` disagree with itself. (A dismissed duplicate is deleted, not
+    hidden, so it is not among them.) A provider may or may not include pending
+    rows in its balance; that is a small, known error in this region.
+
+    **Investment accounts are not derived backwards.** A stated brokerage's balance
+    moves with the market as well as its transactions, so ``B_S − Σ`` would assert
+    a flat market for every day before ``S`` and make the reconciliation exact by
+    construction. It starts at its first snapshot.
+    """
+
+    snapshots: tuple[tuple[date, Decimal, str], ...]
+    snapshot_days: tuple[date, ...]
+    #: Days with transactions, ascending, and the running Σ amount through each.
+    txn_days: tuple[date, ...]
+    txn_cumulative: tuple[Decimal, ...]
+    currency: str
+    derive_backwards: bool
+
+    def _through(self, day: date) -> Decimal:
+        i = bisect_right(self.txn_days, day) - 1
+        return self.txn_cumulative[i] if i >= 0 else Decimal("0")
+
+    def at(self, on: date) -> tuple[Decimal | None, str, str | None]:
+        """``(balance, currency, reason it is missing)`` for ``on``."""
+        if not self.snapshots:
+            return None, self.currency, NO_BALANCE
+        j = bisect_right(self.snapshot_days, on) - 1
+        if j >= 0:
+            _, balance, currency = self.snapshots[j]
+            return balance, currency, None
+        first_day, first_balance, currency = self.snapshots[0]
+        if (
+            not self.derive_backwards
+            or not self.txn_days
+            or on < self.txn_days[0] - timedelta(days=1)
+        ):
+            return None, currency, NOT_STARTED
+        return first_balance - (self._through(first_day) - self._through(on)), currency, None
+
+
+async def _balance_histories(
+    session: AsyncSession, accounts: list[Account], *, until: date
+) -> dict[uuid.UUID, _BalanceHistory]:
+    """``_BalanceHistory`` for each of ``accounts``, from two queries (ADR-0035).
+
+    Snapshots up to ``until``, plus each account's *first* snapshot when that is
+    later — the anchor a backward derivation needs even for a window that ends
+    before it. Transactions are read aggregated to one row per account and day.
+    The day is ``transacted_at`` cast in SQL, the same reading of "which day" as
+    every report bound and ``earliest_activity``.
+    """
+    ids = [a.id for a in accounts]
+    if not ids:
+        return {}
+    snap_cols = (
+        BalanceSnapshot.account_id,
+        BalanceSnapshot.balance_date,
+        BalanceSnapshot.balance,
+        BalanceSnapshot.currency,
+    )
+    first_day = (
+        select(BalanceSnapshot.account_id, func.min(BalanceSnapshot.balance_date).label("d"))
+        .where(BalanceSnapshot.account_id.in_(ids))
+        .group_by(BalanceSnapshot.account_id)
+        .subquery()
+    )
+    rows = (
+        await session.execute(
+            select(*snap_cols)
+            .join(
+                first_day,
+                (first_day.c.account_id == BalanceSnapshot.account_id),
+            )
+            .where(
+                or_(
+                    BalanceSnapshot.balance_date <= until,
+                    BalanceSnapshot.balance_date == first_day.c.d,
+                )
+            )
+            .order_by(BalanceSnapshot.account_id, BalanceSnapshot.balance_date)
+        )
+    ).all()
+    snapshots: dict[uuid.UUID, list[tuple[date, Decimal, str]]] = {}
+    for account_id, balance_date, balance, currency in rows:
+        snapshots.setdefault(account_id, []).append((balance_date, balance, currency))
+
+    day = Transaction.transacted_at.cast(Date)
+    flows = (
+        await session.execute(
+            select(Transaction.account_id, day, func.sum(Transaction.amount))
+            .where(Transaction.account_id.in_(ids))
+            .group_by(Transaction.account_id, day)
+            .order_by(Transaction.account_id, day)
+        )
+    ).all()
+    by_day: dict[uuid.UUID, list[tuple[date, Decimal]]] = {}
+    for account_id, on, amount in flows:
+        by_day.setdefault(account_id, []).append((on, amount))
+
+    out: dict[uuid.UUID, _BalanceHistory] = {}
+    for a in accounts:
+        running = Decimal("0")
+        cumulative = []
+        for _on, amount in by_day.get(a.id, []):
+            running += amount
+            cumulative.append(running)
+        own = tuple(snapshots.get(a.id, []))
+        out[a.id] = _BalanceHistory(
+            snapshots=own,
+            snapshot_days=tuple(d for d, _, _ in own),
+            txn_days=tuple(on for on, _ in by_day.get(a.id, [])),
+            txn_cumulative=tuple(cumulative),
+            currency=a.currency,
+            derive_backwards=a.type != "investment",
+        )
+    return out
+
+
+class NetWorthParts(NamedTuple):
+    """Per-account values at each date, and what each date is missing.
+
+    ``missing[i]`` maps an account to the reason it contributes nothing at
+    ``dates[i]`` (``NOT_STARTED`` and friends) — or, for ``NO_PRICE``, only part of
+    its value. An account absent from ``missing[i]`` is fully counted there.
+    """
+
+    values: dict[uuid.UUID, list[Decimal]]
+    missing: list[dict[uuid.UUID, str]]
 
 
 async def _net_worth_parts(
@@ -254,7 +444,7 @@ async def _net_worth_parts(
     base: str,
     *,
     account_ids: set[uuid.UUID] | None = None,
-) -> dict[uuid.UUID, list[Decimal]]:
+) -> NetWorthParts:
     """Per-account net worth at each of ``dates``, in base, **unquantized**.
 
     One pass for all accounts and all dates. The alternative — ``net_worth_at``
@@ -265,13 +455,16 @@ async def _net_worth_parts(
     attributing one number cost O(accounts²) round trips.
 
     Every included account gets an entry, **including one that contributes
-    nothing** — no snapshot on or before a date, or a balance with no rate. "This
-    account is zero here" and "this account is not in the answer here" are
-    different, and a caller decomposing a total has to tell them apart.
+    nothing** — "this account is zero here" and "this account is not in the
+    answer here" are different, and a caller decomposing a total has to tell them
+    apart. ``missing`` says which, and why.
 
     Unquantized so each caller rounds where it rounds today: ``net_worth_points``
     over the total, ``net_worth_points_by_account`` over each account's own
     figure. See those two for why it matters.
+
+    A stated account's balance on a day is ``_BalanceHistory.at`` — carried
+    forward from its snapshots, derived backwards before the first one.
 
     **Derived investment accounts are exempt from the carry-forward.** Their
     history is not a series of balances at all — it is quantities and a price
@@ -279,6 +472,8 @@ async def _net_worth_parts(
     point's date``, recomputed. Reading their stored snapshots instead would give
     a value pinned whenever someone last happened to recompute, which is the "flat
     line that means no new data" ADR-0032 §5 refuses to render as a flat market.
+    A derived account with no positions is not exempt — see
+    ``_valued_from_holdings``.
     """
     accounts = list((await session.execute(select(Account))).scalars().all())
     included = [
@@ -289,13 +484,12 @@ async def _net_worth_parts(
     parts: dict[uuid.UUID, list[Decimal]] = {
         a.id: [Decimal("0")] * len(dates) for a in included
     }
+    missing: list[dict[uuid.UUID, str]] = [{} for _ in dates]
     if not dates:
-        return parts
+        return NetWorthParts(parts, missing)
 
-    # Balances: one query for every account's snapshots up to the last date asked
-    # about, then a cursor per account. `balance_date` is unique per account, so
-    # "latest ≤ date" is well defined without a tie-break.
-    stated = [a for a in included if not _is_derived_investment(a)]
+    from_holdings = await _valued_from_holdings(session, included)
+    stated = [a for a in included if a.id not in from_holdings]
     if stated:
         converter = await fx.converter(
             session,
@@ -303,54 +497,33 @@ async def _net_worth_parts(
             currencies={a.currency for a in stated},
             until=max(dates),
         )
-        rows = (
-            await session.execute(
-                select(
-                    BalanceSnapshot.account_id,
-                    BalanceSnapshot.balance_date,
-                    BalanceSnapshot.balance,
-                    BalanceSnapshot.currency,
-                )
-                .where(
-                    BalanceSnapshot.account_id.in_([a.id for a in stated]),
-                    BalanceSnapshot.balance_date <= max(dates),
-                )
-                .order_by(BalanceSnapshot.account_id, BalanceSnapshot.balance_date)
-            )
-        ).all()
-        history: dict[uuid.UUID, list[tuple[date, Decimal, str]]] = {}
-        for account_id, balance_date, balance, currency in rows:
-            history.setdefault(account_id, []).append((balance_date, balance, currency))
-
+        histories = await _balance_histories(session, stated, until=max(dates))
         for a in stated:
-            series = history.get(a.id)
-            if not series:
-                continue
-            # Per date, not per snapshot: a date between two snapshots is the
-            # earlier one carried forward, which is the whole meaning of "latest
-            # snapshot ≤ date" and the reason this is a bisect over the dates
-            # asked about rather than a walk over the snapshots.
-            days = [d for d, _, _ in series]
+            history = histories[a.id]
             for i, on in enumerate(dates):
-                j = bisect_right(days, on) - 1
-                if j < 0:
+                balance, currency, reason = history.at(on)
+                if balance is None:
+                    missing[i][a.id] = reason or NOT_STARTED
                     continue
-                _, balance, currency = series[j]
                 conv, _rate_date = await converter.to_base(
                     amount=balance, currency=currency, on=on, base_ccy=base
                 )
                 if conv is None:
-                    continue  # no rate: the account is not countable at this date
-                parts[a.id][i] += conv if a.is_asset else -conv
+                    missing[i][a.id] = NO_RATE
+                    continue
+                # Signed already (ADR-0043): a card's debt is a negative balance,
+                # so it is added like every other account's — flipping it by
+                # `is_asset` as well counted the debt in the household's favour.
+                parts[a.id][i] += conv
 
-    derived = [a for a in included if _is_derived_investment(a)]
+    derived = [a for a in included if a.id in from_holdings]
     if derived:
         ids = {a.id for a in derived}
         for i, on in enumerate(dates):
             # Two queries per *date*, not per date and account: the valuation
             # already splits by account before it sums.
             quantities = await inv.quantities_at(session, account_ids=ids, on=on)
-            values = await inv.securities_value_by_account(
+            values, incomplete = await inv.securities_valuation_by_account(
                 session,
                 quantities=quantities,
                 on=on,
@@ -362,8 +535,10 @@ async def _net_worth_parts(
             for a in derived:
                 value = values.get(a.id)
                 if value is not None:
-                    parts[a.id][i] += value if a.is_asset else -value
-    return parts
+                    parts[a.id][i] += value
+                if a.id in incomplete:
+                    missing[i][a.id] = incomplete[a.id]
+    return NetWorthParts(parts, missing)
 
 
 async def net_worth_points(
@@ -374,14 +549,14 @@ async def net_worth_points(
     account_ids: set[uuid.UUID] | None = None,
 ) -> list[Decimal]:
     """Net worth at each date: latest snapshot ≤ date per account, converted at
-    that date's rate, signed by ``is_asset``.
+    that date's rate, and summed — balances are signed (ADR-0043).
 
     Rounded **once over the total**, which is what makes a series and the delta
     taken from its ends agree: quantizing each account first and adding those
     would let twenty-four roundings accumulate into a cent that shows up as
     unexplained change at a point where nothing happened.
     """
-    parts = await _net_worth_parts(session, dates, base, account_ids=account_ids)
+    parts = (await _net_worth_parts(session, dates, base, account_ids=account_ids)).values
     return [
         quantize_storage(sum((p[i] for p in parts.values()), Decimal("0")))
         for i in range(len(dates))
@@ -402,7 +577,7 @@ async def net_worth_points_by_account(
     ``net_worth_at`` twice per account, which valued the whole household to answer
     a question about one of them.
     """
-    parts = await _net_worth_parts(session, dates, base, account_ids=account_ids)
+    parts = (await _net_worth_parts(session, dates, base, account_ids=account_ids)).values
     return {
         account_id: [quantize_storage(value) for value in values]
         for account_id, values in parts.items()
@@ -468,6 +643,8 @@ class Flow(NamedTuple):
     owner_id: uuid.UUID
     amount: Decimal
     source: str
+    #: The entry's day — what lets one load of a window be bucketed in memory.
+    on: date
 
 
 async def _investment_flows(
@@ -526,6 +703,7 @@ async def _investment_flows(
                 owner_id=owners[t.account_id],
                 amount=base_amount,
                 source=f"investment:{t.type}",
+                on=t.trade_date,
             )
         )
     return flows, warnings
@@ -571,7 +749,7 @@ async def _load_entries(
     owners = await account_owner_map(session)
 
     flows: list[Flow] = []
-    for t in await _reporting_transactions(session, start, end, account_ids):
+    for t, on in await _reporting_transactions(session, start, end, account_ids):
         if account_ids is None and t.transfer_group_id is not None:
             continue
         for cat_id, bamt, entry_owner in _entries(t, owners):
@@ -586,6 +764,7 @@ async def _load_entries(
                     owner_id=entry_owner,
                     amount=bamt,
                     source="transaction",
+                    on=on,
                 )
             )
 
@@ -674,8 +853,9 @@ async def _appreciation(
     accounts this exists for. Unwinding the trades to get the *start* value is what
     makes the subtraction mean something.
 
-    **Only ``derived`` accounts.** A ``stated`` account has no holdings to compute
-    from, and inventing a plug that appreciates would be inventing a market return
+    **Only accounts valued from holdings** (``_valued_from_holdings``). A
+    ``stated`` account — or a derived one with no positions yet — has no holdings
+    to compute from, and inventing a plug that appreciates would be inventing a market return
     (ADR-0032 §6). Its balance change stays a stated balance change, and if it does
     not reconcile it belongs in ``unexplained`` where it can be seen.
 
@@ -693,19 +873,50 @@ async def _appreciation(
     cash in the market values, or out of ``net_buys``, are both wrong; only "out of
     both" is the internal transfer it actually is.
     """
-    stmt = select(Account).where(
-        Account.type == "investment",
-        Account.balance_source == "derived",
-        Account.is_hidden.is_(False),
-    )
+    stmt = select(Account).where(Account.is_hidden.is_(False))
     if account_ids is not None:
         stmt = stmt.where(Account.id.in_(account_ids))
-    ids = {a.id for a in (await session.execute(stmt)).scalars().all()}
+    ids = await _valued_from_holdings(session, (await session.execute(stmt)).scalars().all())
     if not ids:
         return Decimal("0"), {}, []
 
     start_quantities = await inv.quantities_at(session, account_ids=ids, on=start)
     end_quantities = await inv.quantities_at(session, account_ids=ids, on=end)
+
+    # Unknown is not zero (ADR-0045). A position held at an end of the window with
+    # no price on that day is valued at nothing there, so its whole value would
+    # read as a market move — a holding first priced mid-window "appreciated" by
+    # everything it was worth. Such a position is left out of *both* ends and of
+    # `net_buys`, and named: its change then lands in `unexplained`, attributed to
+    # its account, where it can be seen for what it is.
+    securities = {key[1] for key in (*start_quantities, *end_quantities)}
+    priced_then = await inv.latest_prices(session, securities, start)
+    priced_now = await inv.latest_prices(session, securities, end)
+    unpriced = {
+        key
+        for key in {*start_quantities, *end_quantities}
+        if (start_quantities.get(key) and key[1] not in priced_then)
+        or (end_quantities.get(key) and key[1] not in priced_now)
+    }
+    warnings: list[str] = []
+    if unpriced:
+        names = dict(
+            (
+                await session.execute(
+                    select(Security.id, func.coalesce(Security.ticker, Security.name)).where(
+                        Security.id.in_({sid for _a, sid in unpriced})
+                    )
+                )
+            ).all()
+        )
+        for _account_id, security_id in sorted(unpriced, key=lambda k: names[k[1]]):
+            warnings.append(
+                f"{names[security_id]} has no price at the start or end of this period: "
+                f"its change is not attributed to the market"
+            )
+        start_quantities = {k: q for k, q in start_quantities.items() if k not in unpriced}
+        end_quantities = {k: q for k, q in end_quantities.items() if k not in unpriced}
+
     value_start = await inv.securities_value_base(
         session, quantities=start_quantities, on=start, base_ccy=base_ccy
     )
@@ -736,8 +947,9 @@ async def _appreciation(
     ).scalars().all()
     net_buys = Decimal("0")
     net_buys_by_account: dict[uuid.UUID, Decimal] = {}
-    warnings: list[str] = []
     for t in trades:
+        if (t.account_id, t.security_id) in unpriced:
+            continue
         amount = await _investment_base_amount(session, t, base_ccy=base_ccy)
         if amount is None:
             warnings.append(
@@ -857,12 +1069,13 @@ async def _revaluation(
     Two parts, per account, both from data — the opening balance and the rate move,
     then each flow at the difference between the closing rate and its own:
 
-        sign × (B_start × (R_end − R_start) + R_end × Σ(amounts)) − Σ(base amounts)
+        B_start × (R_end − R_start) + R_end × Σ(amounts) − Σ(base amounts)
 
-    where ``sign`` is ``+1`` for an asset and ``−1`` for a liability, because net
-    worth counts a card's balance against you — an FX move *increases* what a euro
-    balance of debt costs, and that only comes out right if the sign follows the
-    account into the rate term.
+    with no sign term: balances are signed (ADR-0043), so a euro card's debt is a
+    negative ``B_start`` and a rising euro makes it cost more by itself. The ``sign``
+    this formula used to carry double-counted that, and — because it also flipped
+    ``R_end × Σ(amounts)`` — reported twice every foreign card's spending as
+    revaluation.
 
     That expression is algebraically the account's change in base value minus the
     cash flow it reports. Computing it *that* way would be circular; computing it
@@ -882,15 +1095,17 @@ async def _revaluation(
     if account_ids is not None:
         stmt = stmt.where(Account.id.in_(account_ids))
     accounts = list((await session.execute(stmt)).scalars().all())
+    from_holdings = await _valued_from_holdings(session, accounts)
+    foreign = [a for a in accounts if a.currency != base_ccy and a.id not in from_holdings]
+    histories = await _balance_histories(session, foreign, until=end)
 
     total = Decimal("0")
     by_account: dict[uuid.UUID, Decimal] = {}
     warnings: list[str] = []
     for a in accounts:
-        # A derived investment account's balance is Σ(holdings), so its "opening
-        # balance in its own currency" is not one number and its rate move is
-        # already inside `appreciation`.
-        if a.currency == base_ccy or _is_derived_investment(a):
+        # An account valued from holdings has no one "opening balance in its own
+        # currency", and its rate move is already inside `appreciation`.
+        if a.currency == base_ccy or a.id in from_holdings:
             continue
         rates = await fx.get_multiplier(
             session, from_ccy=a.currency, to_ccy=base_ccy, on=start, base_ccy=base_ccy
@@ -905,21 +1120,11 @@ async def _revaluation(
             )
             continue
 
-        opening = (
-            await session.execute(
-                select(BalanceSnapshot.balance)
-                .where(
-                    BalanceSnapshot.account_id == a.id,
-                    BalanceSnapshot.balance_date <= start,
-                )
-                .order_by(BalanceSnapshot.balance_date.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        # No snapshot at or before `start` means `net_worth_at` counted nothing for
-        # this account then, so the opening balance it decomposed is genuinely zero
-        # — not unknown. The two have to agree or the identity is off by exactly the
-        # account.
+        # The same reader the net-worth points use, so the balance decomposed here
+        # is the balance that was counted there. Nothing counted at `start` — not
+        # started, no balance — is a zero opening, not an unknown one: the two
+        # have to agree or the identity is off by exactly the account.
+        opening, _ccy, _reason = histories[a.id].at(start)
         opening = Decimal("0") if opening is None else opening
 
         rows = (
@@ -943,8 +1148,7 @@ async def _revaluation(
             moved += t.amount
             moved_base += t.base_amount
 
-        sign = 1 if a.is_asset else -1
-        part = sign * (opening * (rate_end - rates) + rate_end * moved) - moved_base
+        part = opening * (rate_end - rates) + rate_end * moved - moved_base
         total += part
         by_account[a.id] = part
 
@@ -983,10 +1187,11 @@ async def _unexplained_by_account(
     observed only periodically — a seeded balance, a bank feed that reports a
     balance and an overlapping window of transactions — moves between two
     observations by whatever happened in between, and the flows we hold explain only
-    the part inside the window. The first sync of a real bank is the same shape: the
-    balance is the bank's number from today and the history starts where the pull
-    window starts, so the difference is the account's own past. Naming the accounts
-    turns "unexplained $38,850.60" into something a person can check.
+    the part inside the window. (The first sync of a bank used to be the largest
+    case — one balance and weeks of transactions — until ADR-0045 derived the
+    balance backwards from it; what is left here is movement the transactions we
+    hold do not account for.) Naming the accounts turns "unexplained $38,850.60"
+    into something a person can check.
 
     ``covered`` is the sum over *every* account, not just the material ones
     returned, so the caller can state exactly what is left over instead of implying
@@ -1052,6 +1257,10 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     quarters, which is the opposite of a reconciliation.
     """
     base = await base_currency(session, household_id)
+    # A level on a day that has not happened is not data: a "this year" window
+    # used to draw the last balance carried flat to December, which reads as a
+    # forecast. The series — and so the reconciled change — stops at today.
+    end = max(start, min(end, ledger_today()))
     resolved = periods.resolve(granularity, start, end)
     account_ids = None if owner_id is None else await accounts_owned_by(session, owner_id)
 
@@ -1072,16 +1281,25 @@ async def net_worth_series(session: AsyncSession, household_id: uuid.UUID,
     # One pass for every point, rather than a `net_worth_at` per point: the dates
     # are known before the first value is computed, so nothing has to be asked
     # twice and the whole series is one account query.
+    parts = await _net_worth_parts(session, dates, base, account_ids=account_ids)
+    names = dict((await session.execute(select(Account.id, Account.name))).all())
     points = [
-        {"date": on, "net_worth": value}
-        # `strict`: a value for every date is the function's contract, and a
-        # reconciliation that silently paired a date with the wrong level would be
-        # a chart that lies rather than one that fails.
-        for on, value in zip(
-            dates,
-            await net_worth_points(session, dates, base, account_ids=account_ids),
-            strict=True,
-        )
+        {
+            "date": on,
+            # Rounded once over the total, as `net_worth_points` does.
+            "net_worth": quantize_storage(
+                sum((p[i] for p in parts.values.values()), Decimal("0"))
+            ),
+            # What this point leaves out, and why — the difference between a line
+            # that fell and a line that stopped counting something (ADR-0045).
+            "missing": [
+                {"account_id": account_id, "name": names[account_id], "reason": reason}
+                for account_id, reason in sorted(
+                    parts.missing[i].items(), key=lambda kv: names[kv[0]]
+                )
+            ],
+        }
+        for i, on in enumerate(dates)
     ]
 
     # The last point *is* the window end: the buckets partition the window, so the
@@ -1190,17 +1408,28 @@ async def cash_flow_series(session: AsyncSession, household_id: uuid.UUID,
     """
     base = await base_currency(session, household_id)
     resolved = periods.resolve(granularity, start, end)
+    # One load for the window, bucketed in memory. Loading per bucket re-read the
+    # categories, the owners and the window's rows once for every bar — a daily
+    # chart over a year was 365 of each (ADR-0035). Same entries, same fold, same
+    # rounding as `_cash_flow`, so a bar is what `/reports/cash-flow` would say
+    # about that bucket on its own.
+    flows, _warnings = await _load_entries(session, start, end, base, owner_id=owner_id)
+    buckets = list(periods.buckets(start, end, resolved))
+    starts = [b.start for b in buckets]
+    grouped: list[list[Flow]] = [[] for _ in buckets]
+    for f in flows:
+        # The buckets partition the window, so the last one starting on or before
+        # the entry's day is the one it is in.
+        grouped[bisect_right(starts, f.on) - 1].append(f)
     out = []
-    for bucket in periods.buckets(start, end, resolved):
-        income, expense, net, _by_account, _ = await _cash_flow(
-            session, bucket.start, bucket.end, base, owner_id=owner_id
-        )
+    for bucket, in_bucket in zip(buckets, grouped, strict=True):
+        income, expense, _by_account = _fold(in_bucket)
         out.append(
             {
                 "date": bucket.start,
-                "income": income,
-                "expense": expense,
-                "net": net,
+                "income": quantize_storage(income),
+                "expense": quantize_storage(expense),
+                "net": quantize_storage(income + expense),
             }
         )
     return base, resolved, out

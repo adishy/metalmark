@@ -55,14 +55,15 @@ DEMO_OWNERS = ["Partner"]
 
 # Five months of activity, ending with the current (partial) month. The opening
 # balances are snapshotted at the start of the year so the net-worth series starts
-# at the household's real opening position: a snapshot is carried forward, but an
-# account with no snapshot at or before a date contributes *nothing* to it, so a
-# first snapshot in April would make the chart climb out of zero.
+# at the household's real opening position. (Since ADR-0045 a later first snapshot
+# would be derived backwards through the transactions, but the seed states the
+# opening balances rather than leaving the chart to infer them.)
 DEMO_MONTHS = 5
 DEMO_OPENING = {
     "checking": Decimal("4000"),
     "savings": Decimal("12000"),
-    "card_owed": Decimal("850"),
+    # Signed, like every balance (ADR-0043): the card owes $850.
+    "card": Decimal("-850"),
     "euro": Decimal("2000"),
 }
 DEMO_FX_RATE = {"opening": Decimal("0.90"), "latest": Decimal("0.85")}
@@ -148,7 +149,7 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
     # attributable to FX alone rather than to any spending.
     card = await ledger_svc.create_account(session, household_id, AccountCreate(
         name="Rewards Card", type="credit", currency=base,
-        institution="Demo Bank", current_balance=DEMO_OPENING["card_owed"],
+        institution="Demo Bank", current_balance=DEMO_OPENING["card"],
         balance_date=opening_date, owner_id=shared))
     euro = await ledger_svc.create_account(session, household_id, AccountCreate(
         name="Euro Savings", type="depository", currency="EUR",

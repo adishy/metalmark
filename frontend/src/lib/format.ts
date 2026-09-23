@@ -40,6 +40,21 @@ export function formatMoney(amount: string | number, currency = "USD"): string {
 }
 
 /**
+ * A decimal string with its sign flipped — still a string, never via a float
+ * (ADR-0005). Zero keeps no sign, so "0.00" never becomes "-0.00".
+ *
+ * The one place a card's balance crosses between the two ways of saying it: the
+ * ledger stores it signed (ADR-0043, debt is negative) and a person reads and
+ * types it as the amount owed.
+ */
+export function negateAmount(value: string): string {
+  const t = value.trim();
+  const body = t.replace(/^[+-]/, "");
+  if (!/[1-9]/.test(body)) return body;
+  return t.startsWith("-") ? body : `-${body}`;
+}
+
+/**
  * A duration in milliseconds, for a table cell: "820 ms", "1.4 s", "2 min 05 s".
  *
  * Two units at most, and never more than one decimal: a sync's duration is read

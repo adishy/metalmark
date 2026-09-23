@@ -45,7 +45,7 @@ from app.schemas.imports import MAPPABLE_FIELDS
 from app.schemas.transactions import TransactionCreate
 from app.services import ofx, rules
 from app.services.errors import LedgerError
-from app.services.ledger import get_account, upsert_balance_snapshot
+from app.services.ledger import get_account, record_balance
 from app.services.transactions import create_transaction
 
 log = get_logger(__name__)
@@ -733,10 +733,12 @@ async def _statement_balance(
 ) -> None:
     """Write ``<LEDGERBAL>`` the way sync writes a balance (ADR-0030 §6).
 
-    The account's own columns move and the snapshot for the balance's own date is
-    upserted — sync's order, sync's upsert (``ledger.upsert_balance_snapshot``),
-    because an imported statement and a synced statement must not disagree about
-    what a balance snapshot means or which date it belongs to.
+    Through ``ledger.record_balance``, sync's rule: the snapshot lands on the
+    balance's own date, and the account's columns move only when the statement is
+    not older than the balance they hold — importing last quarter's statement after
+    this month's corrects last quarter, it does not rewind the headline. An
+    imported statement and a synced one must not disagree about what a balance
+    snapshot means or which date it belongs to.
 
     A *derived* investment account (ADR-0021) gets the columns and not the
     snapshot: its balance history comes from its holdings, which is the same
@@ -745,19 +747,25 @@ async def _statement_balance(
     """
     if statement.ledger_balance is None:
         return
-    account.current_balance = statement.ledger_balance
-    if statement.ledger_balance_at is not None:
-        account.balance_date = statement.ledger_balance_at.date()
-    await session.flush()
-
-    if account.balance_source == "derived":
+    derived = account.balance_source == "derived"
+    await record_balance(
+        session,
+        account,
+        balance=statement.ledger_balance,
+        on=(
+            statement.ledger_balance_at.date()
+            if statement.ledger_balance_at is not None
+            # An undated balance is today's, never the account's last date.
+            else datetime.now(UTC).date()
+        ),
+        snapshot=not derived,
+    )
+    if derived:
         log.debug(
             "balance.derived_skipped",
             account_id=str(account.id),
             reason="this account's balance history comes from its holdings (ADR-0021)",
         )
-        return
-    await upsert_balance_snapshot(session, account)
 
 
 def _notes_for(txn: ofx.OfxTransaction) -> str | None:

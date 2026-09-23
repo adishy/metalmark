@@ -15,6 +15,7 @@ from app.api import (
     accounts,
     auth,
     categories,
+    checks,
     connections,
     fx,
     health,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=422, content={"detail": errors})
 
     app.include_router(health.router)
+    app.include_router(checks.router)
     app.include_router(auth.router)
     app.include_router(accounts.router)
     app.include_router(categories.router)

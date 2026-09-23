@@ -31,6 +31,7 @@ from app.db import scoped_session
 from app.models import (
     Account,
     AccountConnection,
+    BalanceSnapshot,
     Category,
     CategoryGroup,
     FxRate,
@@ -541,7 +542,7 @@ async def test_the_document_refuses_the_shapes_it_cannot_read(household_factory)
                       "Not a MetalMark export")
         # A future version is refused rather than partially applied.
         await refuses(json.dumps({"format": portability.FORMAT, "version": 99}).encode(),
-                      "reads version 1")
+                      "reads version 2")
 
 
 async def test_money_must_be_a_string_not_a_number(household_factory):
@@ -924,3 +925,85 @@ async def test_an_investment_accounts_history_travels_as_events(household_factor
         # was filed against too.
         security = (await s.execute(select(Security).where(Security.ticker == "VTI"))).scalar_one()
         assert event.security_id == security.id
+
+
+# ---- version 1: liabilities stored as an amount owed (ADR-0043) ---------------
+
+
+def _v1_card(name, *, external_key=None, current, snapshots):
+    account_id = str(uuid.uuid4())
+    return (
+        {
+            "id": account_id, "name": name, "type": "credit", "currency": "USD",
+            "is_asset": False, "current_balance": current, "balance_date": "2026-02-01",
+            "external_key": external_key,
+        },
+        [
+            {"account_id": account_id, "balance_date": day, "balance": balance,
+             "currency": "USD"}
+            for day, balance in snapshots
+        ],
+    )
+
+
+async def test_a_version_1_backup_restores_to_the_same_net_worth(household_factory):
+    """A backup taken before ADR-0043 holds a hand-entered card's debt as a
+    positive amount owed. Read under today's signed convention unchanged, it
+    would count *for* the household — so version 1 is upgraded as it is read,
+    by the rule migration 0007 applied to the database."""
+    hh = await household_factory()
+    manual, manual_snaps = _v1_card(
+        "Hand card", current="850.0000",
+        snapshots=[("2026-01-01", "900.0000"), ("2026-02-01", "850.0000")])
+    # Synced, provider sign evident (negative), one hand edit in the old convention.
+    mixed, mixed_snaps = _v1_card(
+        "Synced card", external_key="bank:visa", current="-120.0000",
+        snapshots=[("2026-01-01", "-100.0000"), ("2026-01-15", "40.0000"),
+                   ("2026-02-01", "-120.0000")])
+    # Synced and never negative: no evidence which convention — left as it is.
+    unknown, unknown_snaps = _v1_card(
+        "Mystery card", external_key="bank:amex", current="75.0000",
+        snapshots=[("2026-02-01", "75.0000")])
+    document = {
+        "format": portability.FORMAT,
+        "version": 1,
+        "accounts": [manual, mixed, unknown],
+        "balance_snapshots": manual_snaps + mixed_snaps + unknown_snaps,
+    }
+    async with scoped_session(household_id=hh) as s:
+        await portability.import_document(s, hh, json.dumps(document).encode())
+        accounts = {a.name: a for a in (await s.execute(select(Account))).scalars()}
+        snaps = {
+            (accounts_by_id, str(d)): b
+            for accounts_by_id, d, b in (
+                await s.execute(select(BalanceSnapshot.account_id,
+                                       BalanceSnapshot.balance_date,
+                                       BalanceSnapshot.balance))
+            ).all()
+        }
+
+    def history(name):
+        a = accounts[name]
+        return sorted((d, str(b)) for (acc, d), b in snaps.items() if acc == a.id)
+
+    assert accounts["Hand card"].current_balance == D("-850.0000")
+    assert history("Hand card") == [("2026-01-01", "-900.0000"), ("2026-02-01", "-850.0000")]
+    assert accounts["Synced card"].current_balance == D("-120.0000")
+    assert history("Synced card") == [("2026-01-01", "-100.0000"),
+                                      ("2026-01-15", "-40.0000"),
+                                      ("2026-02-01", "-120.0000")]
+    assert accounts["Mystery card"].current_balance == D("75.0000")
+    assert history("Mystery card") == [("2026-02-01", "75.0000")]
+
+
+async def test_version_2_is_read_as_written(household_factory):
+    hh = await household_factory()
+    card, snaps = _v1_card("Card", current="-850.0000", snapshots=[("2026-02-01", "-850.0000")])
+    document = {"format": portability.FORMAT, "version": 2, "accounts": [card],
+                "balance_snapshots": snaps}
+    async with scoped_session(household_id=hh) as s:
+        await portability.import_document(s, hh, json.dumps(document).encode())
+        account = (await s.execute(select(Account).where(Account.name == "Card"))).scalar_one()
+        exported = await portability.export_document(s, hh)
+    assert account.current_balance == D("-850.0000")
+    assert exported["version"] == 2

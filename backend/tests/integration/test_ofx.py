@@ -214,9 +214,9 @@ async def test_the_ledger_balance_lands_as_a_snapshot_on_its_own_date(household_
 
     assert acct.current_balance == D("4210.5500")
     assert acct.balance_date == date(2026, 1, 31)
-    # The statement's own date, not the day the file happened to be imported:
-    # the account's opening snapshot (today, 0) is still there beside it.
-    assert snapshots[date(2026, 1, 31)] == D("4210.5500")
+    # The statement's own date, not the day the file happened to be imported. The
+    # account was opened with no balance, so that is the only point in its history.
+    assert snapshots == {date(2026, 1, 31): D("4210.5500")}
 
     # Re-importing updates that snapshot rather than adding a second one — the
     # property that makes an accidental double-import a no-op in the history too.
@@ -236,7 +236,7 @@ async def test_a_derived_account_gets_the_balance_but_not_the_history(household_
         acct = await ledger.create_account(
             s, hh,
             AccountCreate(name="Brokerage", type="investment", currency="USD",
-                          current_balance=D("100.00")),
+                          current_balance=D("100.00"), balance_date=date(2026, 1, 1)),
         )
         assert acct.balance_source == "derived"
         opened = {

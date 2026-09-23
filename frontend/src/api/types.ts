@@ -36,6 +36,9 @@ export interface Account {
   current_balance: Money;
   balance_date: string | null;
   is_asset: boolean;
+  /** The date of the last balance of a synced account the bank has stopped
+   *  reporting — still carried forward on the net-worth line. */
+  stale_since?: string | null;
   /** Always set — an account is the bottom of the ownership chain. */
   owner_id: UUID;
   is_manual: boolean;
@@ -117,6 +120,14 @@ export interface TransactionPage {
   next_cursor: string | null;
 }
 
+export type MissingReason = "not_started" | "no_balance" | "no_rate" | "no_price";
+
+export interface MissingAccount {
+  account_id: UUID;
+  name: string;
+  reason: MissingReason;
+}
+
 export interface NetWorthSeries extends ReportWindow {
   base_currency: string;
   /**
@@ -125,7 +136,8 @@ export interface NetWorthSeries extends ReportWindow {
    * redraws it without moving a single number in the reconciliation.
    */
   granularity: Granularity;
-  points: { date: string; net_worth: Money }[];
+  /** `missing`: the accounts a point does not fully count, and why (ADR-0045). */
+  points: { date: string; net_worth: Money; missing: MissingAccount[] }[];
   delta_net_worth: Money;
   net_cash_flow: Money;
   currency_revaluation: Money;
@@ -476,6 +488,7 @@ export interface AccountCreate {
   currency: string;
   subtype?: string | null;
   institution?: string | null;
+  /** Signed: a card or loan's debt is negative (ADR-0043). Omit for no opening balance. */
   current_balance?: Money;
   balance_date?: string | null;
   /** Omit to let the server assign the Shared owner. */
@@ -484,6 +497,8 @@ export interface AccountCreate {
 
 export interface AccountUpdate {
   name?: string;
+  /** Correctable: balances are signed, so a retype does not rewrite history (ADR-0043). */
+  type?: AccountType;
   subtype?: string | null;
   institution?: string | null;
   current_balance?: Money | null;
@@ -696,4 +711,31 @@ export interface Holding {
   manual_quantity: Money | null;
   manual_cost_basis: Money | null;
   as_of: string | null;
+}
+
+/**
+ * One data check (ADR-0047) — a fact the reports rely on, verified by the
+ * worker on every start and live here on every read. `items` names the
+ * accounts behind a finding; the worker's log only ever has `status` and
+ * `count`.
+ */
+export type CheckStatus = "ok" | "warn" | "fail" | "info";
+
+export interface CheckItem {
+  account_id: UUID;
+  name: string;
+}
+
+export interface Check {
+  id: string;
+  status: CheckStatus;
+  count: number;
+  summary: string;
+  items: CheckItem[];
+}
+
+export interface Checks {
+  /** The database's migration revision; null when it could not be read. */
+  schema_version: string | null;
+  checks: Check[];
 }

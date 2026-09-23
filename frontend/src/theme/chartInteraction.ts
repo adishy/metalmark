@@ -127,6 +127,7 @@ export function chartTooltip(
   {
     trigger = "axis",
     formatter,
+    pointerLabel,
   }: {
     trigger?: "axis" | "item";
     /**
@@ -136,6 +137,12 @@ export function chartTooltip(
      * not the word anyone should read).
      */
     formatter?: string | ((params: TooltipPoint) => string);
+    /**
+     * The text of the chip on the axis pointer. `"{value}"` is right for a
+     * category axis and wrong for a time axis, where the value is a timestamp —
+     * a time-axis chart passes a function that formats it as the day it is.
+     */
+    pointerLabel?: (value: unknown) => string;
   } = {},
 ): NonNullable<EChartsOption["tooltip"]> {
   return {
@@ -167,7 +174,9 @@ export function chartTooltip(
             // line has no label and you have to read the axis to know where it is.
             label: {
               show: true,
-              formatter: "{value}",
+              formatter: pointerLabel
+                ? (p: { value: unknown }) => pointerLabel(p.value)
+                : "{value}",
               backgroundColor: t.surface,
               borderColor: t.border,
               borderWidth: 1,
