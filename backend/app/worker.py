@@ -46,7 +46,7 @@ from sqlalchemy import text
 from app.db import scoped_session, unscoped_session
 from app.logging import configure_logging, get_logger
 from app.security.redact import sanitize
-from app.services import jobs, sync
+from app.services import fx_fetch, jobs, sync
 from app.settings import get_settings
 
 log = get_logger("worker")
@@ -67,6 +67,8 @@ SYNC_TICK_MINUTES = 15
 #: only matters when something has already gone wrong, and a job is not eligible
 #: until it has been silent for ``jobs.REAP_AFTER_SECONDS``.
 REAP_TICK_MINUTES = 5
+#: ECB publishes once a working day; asking more often only re-reads the same day.
+FX_REFRESH_HOURS = 24
 
 HEARTBEAT_MINUTES = 5
 
@@ -321,6 +323,15 @@ async def heartbeat() -> None:
     log.info("worker.heartbeat")
 
 
+async def refresh_fx() -> None:
+    """The daily FX fetch (ADR-0046). Never raises into the scheduler: a source
+    that is down today is asked again tomorrow."""
+    try:
+        await fx_fetch.refresh_all(url=get_settings().fx_url)
+    except Exception:  # noqa: BLE001 — one bad day must not take the job with it
+        log.exception("worker.fx_refresh.failed")
+
+
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, settings.env)
@@ -358,6 +369,12 @@ async def main() -> None:
     scheduler.add_job(
         reap, "interval", minutes=REAP_TICK_MINUTES, id="reap", next_run_time=now,
     )
+    if settings.fx_fetch_enabled:
+        scheduler.add_job(
+            refresh_fx, "interval", hours=FX_REFRESH_HOURS, id="fx_refresh",
+            next_run_time=now,
+        )
+    log.info("worker.fx_refresh", enabled=settings.fx_fetch_enabled)
     scheduler.start()
 
     consumer = asyncio.create_task(consume(stop), name="sync-consumer")

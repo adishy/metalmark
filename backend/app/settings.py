@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     # watching. See services/notifications.py.
     notify_webhook_url: str | None = Field(default=None, alias="METALMARK_NOTIFY_WEBHOOK_URL")
 
+    # The daily FX fetch (ADR-0046). Unset means "on in prod, off elsewhere": a dev
+    # stack, the test suite and CI's e2e stack must not reach the internet, and a
+    # deployment should not have to know the variable exists to get rates.
+    fx_fetch: bool | None = Field(default=None, alias="METALMARK_FX_FETCH")
+    fx_url: str = Field(default="https://api.frankfurter.dev/v2/rates", alias="METALMARK_FX_URL")
+
     secret_key_file: str | None = Field(default=None, alias="METALMARK_SECRET_KEY_FILE")
     # Fallback for non-docker local/test runs only.
     secret_key_inline: str | None = Field(default=None, alias="METALMARK_SECRET_KEY")
@@ -152,6 +158,10 @@ class Settings(BaseSettings):
         if self.session_cookie_secure == "auto":
             return self.env != "dev"
         return self.session_cookie_secure == "true"
+
+    @property
+    def fx_fetch_enabled(self) -> bool:
+        return self.fx_fetch if self.fx_fetch is not None else self.env == "prod"
 
     @property
     def secret_key(self) -> str:

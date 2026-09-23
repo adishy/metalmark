@@ -15,7 +15,7 @@ rate-write path).
 Two forms, one rule: ``to_base`` converts one amount and queries per lookup, and
 ``converter()`` builds a ``Converter`` that holds the rates already — use the
 latter for anything that converts in a loop. Both go through ``_multiplier``, so
-the resolution order (identity → direct → inverse → triangulate) has one
+the resolution order (identity → the more recent of direct and inverse → triangulate) has one
 definition.
 """
 
@@ -33,17 +33,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money import convert
 from app.models import FxRate
 
-# One directed pair's rate for a date, or ``None`` for "no rate on or before it".
-# A *source* rather than a function so that the resolution order below can be
-# written once and asked of either the database or a `Converter`'s loaded table.
-RateLookup = Callable[[str, str, date], Awaitable[Decimal | None]]
+# One directed pair's latest ``(rate_date, rate)`` on or before a date, or ``None``
+# for "no rate on or before it". A *source* rather than a function so that the
+# resolution order below can be written once and asked of either the database or
+# a `Converter`'s loaded table. The date comes back with the rate because the
+# order compares the two directions by it (ADR-0046).
+RateLookup = Callable[[str, str, date], Awaitable[tuple[date, Decimal] | None]]
 
 
 async def _latest_rate(session: AsyncSession, base: str, quote: str,
-                       on: date) -> Decimal | None:
+                       on: date) -> tuple[date, Decimal] | None:
     row = (
         await session.execute(
-            select(FxRate.rate)
+            select(FxRate.rate_date, FxRate.rate)
             .where(
                 FxRate.base_currency == base,
                 FxRate.quote_currency == quote,
@@ -52,8 +54,8 @@ async def _latest_rate(session: AsyncSession, base: str, quote: str,
             .order_by(FxRate.rate_date.desc())
             .limit(1)
         )
-    ).scalar_one_or_none()
-    return row
+    ).first()
+    return None if row is None else (row[0], row[1])
 
 
 async def _multiplier(
@@ -61,8 +63,9 @@ async def _multiplier(
 ) -> Decimal | None:
     """Return M such that ``amount_to = amount_from * M`` for ``on`` (latest ≤).
 
-    Resolution order: identity → direct → inverse → triangulate through
-    ``base_ccy``. Returns ``None`` if no rate chain is available ("no rate").
+    Resolution order: identity → the more recently stated of direct and inverse
+    → triangulate through ``base_ccy``. Returns ``None`` if no rate chain is
+    available ("no rate").
 
     ``async`` although half its callers have the rates in memory already: the
     order *is* the rule, it has exactly one definition, and one of its two
@@ -73,15 +76,21 @@ async def _multiplier(
     if from_ccy == to_ccy:
         return Decimal(1)
 
-    # direct: 1 from = M to
+    # direct: 1 from = M to; inverse: 1 to = r from  ->  1 from = 1/r to.
+    #
+    # **Whichever was stated more recently** (ADR-0046), not "direct if any". A
+    # pair can be written either way round — a person types EUR→USD, the daily
+    # fetch writes USD→EUR — and preferring direct whenever it existed at all let a
+    # year-old typed rate shadow every fresher rate the other way round. On the
+    # same date direct wins, which is the order this always used.
     direct = await rates(from_ccy, to_ccy, on)
-    if direct is not None:
-        return direct
-
-    # inverse: 1 to = r from  ->  1 from = 1/r to
     inverse = await rates(to_ccy, from_ccy, on)
-    if inverse is not None and inverse != 0:
-        return Decimal(1) / inverse
+    if inverse is not None and inverse[1] == 0:
+        inverse = None
+    if direct is not None and (inverse is None or direct[0] >= inverse[0]):
+        return direct[1]
+    if inverse is not None:
+        return Decimal(1) / inverse[1]
 
     # triangulate through base: from->base * base->to
     if base_ccy not in (from_ccy, to_ccy):
@@ -121,12 +130,12 @@ class Converter:
     def __init__(self, rates: dict[tuple[str, str], list[tuple[date, Decimal]]]) -> None:
         self._rates = rates
 
-    async def latest(self, base: str, quote: str, on: date) -> Decimal | None:
+    async def latest(self, base: str, quote: str, on: date) -> tuple[date, Decimal] | None:
         rows = self._rates.get((base.upper(), quote.upper()))
         if not rows:
             return None
         i = bisect_right(rows, on, key=lambda r: r[0]) - 1
-        return rows[i][1] if i >= 0 else None
+        return rows[i] if i >= 0 else None
 
     async def to_base(
         self, *, amount: Decimal, currency: str, on: date, base_ccy: str
