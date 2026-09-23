@@ -3366,6 +3366,12 @@ components:
             minLength: 1
           - type: 'null'
           title: Name
+        type:
+          anyOf:
+          - type: string
+            pattern: ^(depository|credit|investment|loan|other)$
+          - type: 'null'
+          title: Type
         subtype:
           anyOf:
           - type: string

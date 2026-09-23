@@ -372,7 +372,10 @@ async def _net_worth_parts(
                 )
                 if conv is None:
                     continue  # no rate: the account is not countable at this date
-                parts[a.id][i] += conv if a.is_asset else -conv
+                # Signed already (ADR-0043): a card's debt is a negative balance,
+                # so it is added like every other account's — flipping it by
+                # `is_asset` as well counted the debt in the household's favour.
+                parts[a.id][i] += conv
 
     derived = [a for a in included if a.id in from_holdings]
     if derived:
@@ -393,7 +396,7 @@ async def _net_worth_parts(
             for a in derived:
                 value = values.get(a.id)
                 if value is not None:
-                    parts[a.id][i] += value if a.is_asset else -value
+                    parts[a.id][i] += value
     return parts
 
 
@@ -405,7 +408,7 @@ async def net_worth_points(
     account_ids: set[uuid.UUID] | None = None,
 ) -> list[Decimal]:
     """Net worth at each date: latest snapshot ≤ date per account, converted at
-    that date's rate, signed by ``is_asset``.
+    that date's rate, and summed — balances are signed (ADR-0043).
 
     Rounded **once over the total**, which is what makes a series and the delta
     taken from its ends agree: quantizing each account first and adding those
@@ -885,12 +888,13 @@ async def _revaluation(
     Two parts, per account, both from data — the opening balance and the rate move,
     then each flow at the difference between the closing rate and its own:
 
-        sign × (B_start × (R_end − R_start) + R_end × Σ(amounts)) − Σ(base amounts)
+        B_start × (R_end − R_start) + R_end × Σ(amounts) − Σ(base amounts)
 
-    where ``sign`` is ``+1`` for an asset and ``−1`` for a liability, because net
-    worth counts a card's balance against you — an FX move *increases* what a euro
-    balance of debt costs, and that only comes out right if the sign follows the
-    account into the rate term.
+    with no sign term: balances are signed (ADR-0043), so a euro card's debt is a
+    negative ``B_start`` and a rising euro makes it cost more by itself. The ``sign``
+    this formula used to carry double-counted that, and — because it also flipped
+    ``R_end × Σ(amounts)`` — reported twice every foreign card's spending as
+    revaluation.
 
     That expression is algebraically the account's change in base value minus the
     cash flow it reports. Computing it *that* way would be circular; computing it
@@ -971,8 +975,7 @@ async def _revaluation(
             moved += t.amount
             moved_base += t.base_amount
 
-        sign = 1 if a.is_asset else -1
-        part = sign * (opening * (rate_end - rates) + rate_end * moved) - moved_base
+        part = opening * (rate_end - rates) + rate_end * moved - moved_base
         total += part
         by_account[a.id] = part
 

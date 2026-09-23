@@ -487,9 +487,10 @@ async def test_net_worth_report_is_account_scoped_and_still_reconciles(household
             owner_id=beth.id, category_id=dining.id))
         assert hers.owner_id is None  # inherits Beth's account
         assert on_card.owner_id == beth.id
-        # End-of-month stated balances reflect the flows.
+        # End-of-month stated balances reflect the flows — signed, so the card's
+        # $20 of debt is -20 (ADR-0043).
         await ledger.update_account(s, card.id, AccountUpdate(
-            current_balance=D("20"), balance_date=date(2026, 1, 31)))
+            current_balance=D("-20"), balance_date=date(2026, 1, 31)))
         await ledger.update_account(s, beth_acct.id, AccountUpdate(
             current_balance=D("60"), balance_date=date(2026, 1, 31)))
 

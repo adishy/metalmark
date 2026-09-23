@@ -476,6 +476,7 @@ export interface AccountCreate {
   currency: string;
   subtype?: string | null;
   institution?: string | null;
+  /** Signed: a card or loan's debt is negative (ADR-0043). Omit for no opening balance. */
   current_balance?: Money;
   balance_date?: string | null;
   /** Omit to let the server assign the Shared owner. */
@@ -484,6 +485,8 @@ export interface AccountCreate {
 
 export interface AccountUpdate {
   name?: string;
+  /** Correctable: balances are signed, so a retype does not rewrite history (ADR-0043). */
+  type?: AccountType;
   subtype?: string | null;
   institution?: string | null;
   current_balance?: Money | null;

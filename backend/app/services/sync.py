@@ -559,6 +559,19 @@ async def _apply_balance(
     last point with today's number. Same date, same row, updated in place, so a
     re-sync is idempotent.
     """
+    if not account.is_asset and pa.balance > 0:
+        # ADR-0043 stores debt as a negative balance, which is what SimpleFIN
+        # bridges send. A positive one is either a card in credit or a bridge using
+        # the other sign — and the second would count every card for the
+        # household. Not guessed at: said, where Admin shows it.
+        await log.emit(
+            "warning",
+            "balance.liability_positive",
+            account_id=str(account.id),
+            name=account.name,
+            reason="a liability reported a positive balance; debt is stored as "
+            "negative, so check this account's sign (ADR-0043)",
+        )
     derived = account.balance_source == "derived"
     current = await record_balance(
         session,

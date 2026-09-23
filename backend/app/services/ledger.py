@@ -20,7 +20,9 @@ from app.models import (
     Category,
     CategoryGroup,
     FxRate,
+    Holding,
     Household,
+    InvestmentTransaction,
     Tag,
     Transaction,
 )
@@ -187,6 +189,8 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
     for field in ("name", "subtype", "institution", "is_hidden"):
         if is_set(data, field):
             setattr(acct, field, getattr(data, field))
+    if is_set(data, "type") and data.type != acct.type:
+        await _retype(session, acct, data.type)
     if is_set(data, "owner_id"):
         # Resolved under RLS so a foreign id is a 404, not a foreign-key 500.
         acct.owner_id = (await get_owner(session, data.owner_id)).id
@@ -206,6 +210,43 @@ async def update_account(session: AsyncSession, account_id: uuid.UUID,
             on=data.balance_date or _today(),
         )
     return acct
+
+
+async def _retype(session: AsyncSession, acct: Account, new_type: str) -> None:
+    """Change an account's type — a correction sync's name-based guess needs.
+
+    Balances are untouched: they are signed (ADR-0043), so a card mistyped as
+    ``other`` already holds its debt as a negative number and only its label,
+    ``is_asset``, changes. That is the reason the type could be made editable at
+    all without rewriting history.
+
+    An account leaving ``investment`` is refused while it has a holding or a
+    trade: its value is those positions, and a depository account has nowhere to
+    put them. One *becoming* an investment account keeps its balance history as a
+    ``stated`` account — it has snapshots and no positions, and ``derived`` would
+    value it from nothing.
+    """
+    if acct.type == "investment":
+        held = (
+            await session.execute(
+                select(Holding.id).where(Holding.account_id == acct.id).limit(1)
+            )
+        ).first() or (
+            await session.execute(
+                select(InvestmentTransaction.id)
+                .where(InvestmentTransaction.account_id == acct.id)
+                .limit(1)
+            )
+        ).first()
+        if held:
+            raise LedgerError(
+                "This account has holdings or investment transactions; remove them "
+                "before changing it to a non-investment type.",
+                409,
+            )
+    acct.type = new_type
+    acct.is_asset = is_asset_for(new_type)
+    acct.balance_source = "stated" if new_type == "investment" else None
 
 
 async def delete_account(session: AsyncSession, account_id: uuid.UUID) -> None:
@@ -231,10 +272,13 @@ async def net_worth(session: AsyncSession, household_id: uuid.UUID,
         if conv is None:
             unconverted.add(a.currency)
             continue
+        # Balances are signed (ADR-0043): debt is negative. `liabilities` is
+        # reported as the amount owed, so it is the negation of what the
+        # liability accounts sum to — and `assets - liabilities` is their sum.
         if a.is_asset:
             assets += conv
         else:
-            liabilities += conv
+            liabilities -= conv
     return {
         "base_currency": base,
         "assets": quantize_storage(assets),

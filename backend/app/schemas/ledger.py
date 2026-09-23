@@ -22,7 +22,8 @@ class AccountCreate(BaseModel):
     currency: str = Field(min_length=3, max_length=3)
     subtype: str | None = None
     institution: str | None = None
-    # Signed magnitude; liabilities entered as a positive amount owed.
+    # The account's signed balance (ADR-0043): a card or loan's debt is negative.
+    # Omitted means "not given" — the account opens with no balance history.
     current_balance: Decimal = Decimal("0")
     balance_date: date | None = None
     # Omitted or null both land on the household's Shared owner (ADR-0026).
@@ -31,6 +32,9 @@ class AccountCreate(BaseModel):
 
 class AccountUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    # Correctable because sync can only guess it from the account's name; balances
+    # are signed, so a retype changes the label and not the history (ADR-0043).
+    type: str | None = Field(default=None, pattern="^(depository|credit|investment|loan|other)$")
     subtype: str | None = None
     institution: str | None = None
     current_balance: Decimal | None = None
@@ -44,7 +48,7 @@ class AccountUpdate(BaseModel):
         # real owner the client can name. Rejecting null here is better than letting
         # the NOT NULL constraint answer with a 500, and the same goes for the other
         # required fields: an explicit null is a client bug, not a request to clear.
-        for field in ("name", "is_hidden", "owner_id", "current_balance"):
+        for field in ("name", "type", "is_hidden", "owner_id", "current_balance"):
             if is_set(self, field) and getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
         return self

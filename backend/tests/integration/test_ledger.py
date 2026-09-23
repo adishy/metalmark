@@ -54,7 +54,7 @@ async def test_single_currency_net_worth(household_factory):
         )
         await ledger.create_account(
             s, hh, AccountCreate(name="Card", type="credit", currency="USD",
-                                 current_balance=D("300"), balance_date=date(2026, 1, 1))
+                                 current_balance=D("-300"), balance_date=date(2026, 1, 1))
         )
         nw = await ledger.net_worth(s, hh)
     assert nw["assets"] == D("1000.0000")

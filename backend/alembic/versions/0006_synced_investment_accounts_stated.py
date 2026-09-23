@@ -11,7 +11,7 @@ chart, the provider's balance on the Accounts page (session 04 audit, #2). Sync 
 creates them ``stated``; this migration moves the existing ones across.
 
 **Written for a database holding a household's real history**, so it is narrow
-and exactly reversible:
+and reversible without losing anything written after it:
 
 * It touches only accounts that were ever synced (``external_key`` is set, and a
   disconnect keeps it), are ``derived``, and have **no** holding and **no**
@@ -24,7 +24,9 @@ and exactly reversible:
 * What it changed is recorded in ``migration_backup`` — a schema the app role has
   no grant on (``ALTER DEFAULT PRIVILEGES`` in 0001 covers ``public`` only), which
   ``alembic check`` does not compare. ``downgrade`` restores ``balance_source``
-  from it and deletes exactly the snapshots it inserted, then drops its tables.
+  from it and deletes the snapshots it inserted — **only those still holding the
+  balance it wrote**: a later sync on the same day updates that row in place, and
+  the balance it wrote there is the household's, not this migration's.
 
 Data-only: no table in ``public`` is created or altered, so 0005's standing note
 about 0001 building DDL from live metadata gains no new case here.
@@ -61,7 +63,8 @@ def upgrade() -> None:
         text(
             f"""
             CREATE TABLE {BACKUP_SCHEMA}.r0006_seeded_snapshot (
-                snapshot_id uuid PRIMARY KEY
+                snapshot_id uuid PRIMARY KEY,
+                balance numeric(19, 4) NOT NULL
             )
             """
         )
@@ -105,10 +108,10 @@ def upgrade() -> None:
                   AND NOT EXISTS (
                       SELECT 1 FROM balance_snapshots s WHERE s.account_id = a.id
                   )
-                RETURNING id
+                RETURNING id, balance
             )
-            INSERT INTO {BACKUP_SCHEMA}.r0006_seeded_snapshot (snapshot_id)
-            SELECT id FROM seeded
+            INSERT INTO {BACKUP_SCHEMA}.r0006_seeded_snapshot (snapshot_id, balance)
+            SELECT id, balance FROM seeded
             """
         )
     )
@@ -119,8 +122,9 @@ def downgrade() -> None:
     conn.execute(
         text(
             f"""
-            DELETE FROM balance_snapshots
-            WHERE id IN (SELECT snapshot_id FROM {BACKUP_SCHEMA}.r0006_seeded_snapshot)
+            DELETE FROM balance_snapshots s
+            USING {BACKUP_SCHEMA}.r0006_seeded_snapshot b
+            WHERE s.id = b.snapshot_id AND s.balance = b.balance
             """
         )
     )

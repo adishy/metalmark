@@ -62,7 +62,8 @@ DEMO_MONTHS = 5
 DEMO_OPENING = {
     "checking": Decimal("4000"),
     "savings": Decimal("12000"),
-    "card_owed": Decimal("850"),
+    # Signed, like every balance (ADR-0043): the card owes $850.
+    "card": Decimal("-850"),
     "euro": Decimal("2000"),
 }
 DEMO_FX_RATE = {"opening": Decimal("0.90"), "latest": Decimal("0.85")}
@@ -148,7 +149,7 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
     # attributable to FX alone rather than to any spending.
     card = await ledger_svc.create_account(session, household_id, AccountCreate(
         name="Rewards Card", type="credit", currency=base,
-        institution="Demo Bank", current_balance=DEMO_OPENING["card_owed"],
+        institution="Demo Bank", current_balance=DEMO_OPENING["card"],
         balance_date=opening_date, owner_id=shared))
     euro = await ledger_svc.create_account(session, household_id, AccountCreate(
         name="Euro Savings", type="depository", currency="EUR",

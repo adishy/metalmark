@@ -23,9 +23,17 @@ import pytest
 from sqlalchemy import select
 
 from app.db import scoped_session
-from app.models import Account, BalanceSnapshot
+from app.models import (
+    Account,
+    BalanceSnapshot,
+    Holding,
+    Security,
+    SyncRunEvent,
+    Transaction,
+)
 from app.schemas.ledger import AccountCreate, AccountUpdate
 from app.services import imports, ledger, reports, sync
+from app.services.errors import LedgerError
 from app.services.fake_simplefin import FakeProvider
 from tests.fakes import simplefin as scenarios
 from tests.integration.test_sync import NOW, _make_connection
@@ -240,3 +248,188 @@ async def test_an_older_statement_does_not_move_the_balance_backwards(household_
             (date(2026, 1, 31), D("400.0000")), (date(2026, 3, 1), D("1000.0000"))
         ]
         assert (a.current_balance, a.balance_date) == (D("1000"), date(2026, 3, 1))
+
+
+# ---- liabilities: one sign convention (ADR-0043) ------------------------------
+#
+# The foreign-currency cases use currencies no other test does: `fx_rates` is
+# global (ARCHITECTURE §2), so a rate written here is visible to every later test.
+#
+# Every stored balance is the account's signed balance — debt is negative, and a
+# balance moves by exactly its transactions' amounts. That is what SimpleFIN and
+# OFX send; the report used to *also* flip liabilities, so a synced card's debt
+# counted in the household's favour and every payoff dropped net worth by twice
+# the balance.
+
+
+async def _account(session, household_id, name, type_, *, currency="USD"):
+    return await ledger.create_account(session, household_id, AccountCreate(
+        name=name, type=type_, currency=currency))
+
+
+def _snap(session, household_id, account, day, balance, currency="USD"):
+    session.add(BalanceSnapshot(household_id=household_id, account_id=account.id,
+                                balance_date=day, balance=D(balance), currency=currency))
+
+
+def _txn(session, household_id, account, day, amount, base_amount, currency="USD"):
+    at = datetime(day.year, day.month, day.day, 12, tzinfo=UTC)
+    session.add(Transaction(household_id=household_id, account_id=account.id,
+                            transacted_at=at, posted_at=at, amount=D(amount),
+                            currency=currency, base_amount=D(base_amount), fx_rate_date=day,
+                            description="x", source="manual",
+                            import_hash=f"{account.id}{day}{amount}"))
+
+
+async def test_a_synced_card_counts_against_the_household(household_factory):
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    card = dataclasses.replace(checking, external_id="ACT-card", name="Visa Credit Card",
+                               balance=D("-1000.00"), transactions=())
+    demo = dataclasses.replace(demo, accounts=demo.accounts + (card,))
+    await sync.run_connection_sync(hid, conn, provider=FakeProvider(script=[demo]), now=NOW)
+    async with scoped_session(hid) as s:
+        visa = (
+            await s.execute(select(Account).where(Account.name == "Visa Credit Card"))
+        ).scalar_one()
+        parts = await reports.net_worth_points_by_account(s, [visa.balance_date], "USD")
+        assert parts[visa.id] == [D("-1000.0000")]
+        headline = await ledger.net_worth(s, hid)
+        assert headline["liabilities"] == D("1000.0000")
+        point, net = await _series_matches_headline(s, hid)
+    assert point == net == headline["assets"] - D("1000")
+
+
+async def test_paying_off_a_card_does_not_move_net_worth(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        chk = await _account(s, hid, "Checking", "depository")
+        card = await _account(s, hid, "Card", "credit")
+        _snap(s, hid, chk, date(2026, 1, 1), "5000")
+        _snap(s, hid, card, date(2026, 1, 1), "-1000")
+        _snap(s, hid, chk, date(2026, 1, 20), "4000")
+        _snap(s, hid, card, date(2026, 1, 20), "0")
+        _txn(s, hid, chk, date(2026, 1, 20), "-1000", "-1000")
+        _txn(s, hid, card, date(2026, 1, 20), "1000", "1000")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31),
+                                           granularity="week")
+    assert {p["net_worth"] for p in r["points"]} == {D("4000.0000")}
+    assert r["delta_net_worth"] == D("0.0000")
+    assert r["unexplained"] == D("0.0000")
+
+
+async def test_spending_on_a_card_reconciles(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        card = await _account(s, hid, "Card", "credit")
+        _snap(s, hid, card, date(2026, 1, 1), "-100")
+        _txn(s, hid, card, date(2026, 1, 10), "-50", "-50")
+        _snap(s, hid, card, date(2026, 1, 31), "-150")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31))
+    assert (r["delta_net_worth"], r["net_cash_flow"], r["unexplained"]) == (
+        D("-50.0000"), D("-50.0000"), D("0.0000"))
+
+
+async def test_a_foreign_card_reconciles_with_a_flat_rate(household_factory):
+    """The revaluation formula no longer flips a liability's sign on top of its
+    balance's: at a flat rate, a krone card's spending is all cash flow."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        await ledger.upsert_fx_rate(s, hid, base_ccy="DKK", quote_ccy="USD",
+                                    rate_date=date(2025, 12, 1), rate=D("1.10"))
+        card = await _account(s, hid, "DKK card", "credit", currency="DKK")
+        _snap(s, hid, card, date(2026, 1, 1), "-100", "DKK")
+        _txn(s, hid, card, date(2026, 1, 10), "-50", "-55", "DKK")
+        _snap(s, hid, card, date(2026, 1, 31), "-150", "DKK")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31))
+    assert r["delta_net_worth"] == D("-55.0000")
+    assert r["currency_revaluation"] == D("0.0000")
+    assert r["unexplained"] == D("0.0000")
+
+
+async def test_a_rate_move_makes_foreign_debt_cost_more(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        await ledger.upsert_fx_rate(s, hid, base_ccy="PLN", quote_ccy="USD",
+                                    rate_date=date(2025, 12, 1), rate=D("1.10"))
+        await ledger.upsert_fx_rate(s, hid, base_ccy="PLN", quote_ccy="USD",
+                                    rate_date=date(2026, 1, 31), rate=D("1.20"))
+        card = await _account(s, hid, "PLN card", "credit", currency="PLN")
+        _snap(s, hid, card, date(2026, 1, 1), "-100", "PLN")
+        await s.flush()
+        r = await reports.net_worth_series(s, hid, date(2026, 1, 1), date(2026, 1, 31))
+    assert r["delta_net_worth"] == D("-10.0000")
+    assert r["currency_revaluation"] == D("-10.0000")
+    assert r["unexplained"] == D("0.0000")
+
+
+async def test_retyping_an_account_keeps_its_balances(household_factory):
+    """Sync guesses a type from the account's name; correcting it must not rewrite
+    history — which, with signed balances, it no longer has to."""
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Sapphire", type="other", currency="USD",
+            current_balance=D("-700"), balance_date=date(2026, 1, 1)))
+        before = await reports.net_worth_points(s, [date(2026, 1, 1)], "USD")
+        await ledger.update_account(s, a.id, AccountUpdate(type="credit"))
+        assert (a.type, a.is_asset, a.current_balance) == ("credit", False, D("-700"))
+        assert await reports.net_worth_points(s, [date(2026, 1, 1)], "USD") == before
+        assert (await ledger.net_worth(s, hid))["liabilities"] == D("700.0000")
+
+
+async def test_an_account_with_positions_cannot_stop_being_an_investment(household_factory):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await _account(s, hid, "Brokerage", "investment")
+        sec = Security(household_id=hid, name="VTI", ticker="VTI", security_type="etf",
+                       currency="USD")
+        s.add(sec)
+        await s.flush()
+        s.add(Holding(household_id=hid, account_id=a.id, security_id=sec.id,
+                      quantity=D("1")))
+        await s.flush()
+        with pytest.raises(LedgerError) as err:
+            await ledger.update_account(s, a.id, AccountUpdate(type="depository"))
+    assert err.value.status == 409
+
+
+async def test_retyping_into_an_investment_account_keeps_its_stated_history(
+    household_factory,
+):
+    hid = await household_factory()
+    async with scoped_session(hid) as s:
+        a = await ledger.create_account(s, hid, AccountCreate(
+            name="Savings", type="depository", currency="USD",
+            current_balance=D("900"), balance_date=date(2026, 1, 1)))
+        await ledger.update_account(s, a.id, AccountUpdate(type="investment"))
+        assert (a.balance_source, a.is_asset) == ("stated", True)
+        await ledger.update_account(s, a.id, AccountUpdate(type="depository"))
+        assert a.balance_source is None
+
+
+async def test_sync_warns_when_a_liability_reports_a_positive_balance(household_factory):
+    """A bridge that sends debt as a positive number would count every card for
+    the household. The run says so instead of guessing which sign it meant."""
+    hid = await household_factory()
+    conn = await _make_connection(hid)
+    demo = scenarios.demo()
+    checking = scenarios.account_named(demo, scenarios.DEMO_CHECKING)
+    card = dataclasses.replace(checking, external_id="ACT-card", name="Visa Credit Card",
+                               balance=D("1000.00"), transactions=())
+    demo = dataclasses.replace(demo, accounts=demo.accounts + (card,))
+    outcome = await sync.run_connection_sync(
+        hid, conn, provider=FakeProvider(script=[demo]), now=NOW)
+    async with scoped_session(hid) as s:
+        events = (
+            await s.execute(
+                select(SyncRunEvent).where(SyncRunEvent.sync_run_id == outcome.run_id)
+            )
+        ).scalars().all()
+    warned = [e for e in events if e.event == "balance.liability_positive"]
+    assert len(warned) == 1 and warned[0].level == "warning"

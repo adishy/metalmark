@@ -88,10 +88,16 @@ from app.models import (
     TransferGroup,
 )
 from app.services import fx
+from app.services.balance_sign import LIABILITY_TYPES, positives_are_amounts_owed
 from app.services.errors import LedgerError
 
 FORMAT = "metalmark.export"
-VERSION = 1
+#: 2 since ADR-0043: a liability's balances are signed (debt negative). Version 1
+#: documents are still read — ``_upgrade_v1`` brings their liability balances into
+#: the signed convention first, so a backup taken before the change restores to
+#: the same net worth it was taken at.
+VERSION = 2
+READABLE_VERSIONS = (1, VERSION)
 
 #: A ceiling on an imported document, checked before it is parsed. The document is
 #: the whole household, so the bound is generous — it is here to stop a wrong file
@@ -683,15 +689,17 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
             f"got {doc.get('format')!r}",
             400,
         )
-    if doc.get("version") != VERSION:
-        # Refused, never partially applied. A v2 document read by v1 code would
-        # import every field the two versions share and silently drop the rest,
-        # which is the failure a format version exists to make impossible.
+    if doc.get("version") not in READABLE_VERSIONS:
+        # Refused, never partially applied. A newer document read by older code
+        # would import every field the two versions share and silently drop the
+        # rest, which is the failure a format version exists to make impossible.
         raise LedgerError(
             f"This export is version {doc.get('version')}; this instance reads version "
             f"{VERSION}. Upgrade the instance rather than importing it partially.",
             400,
         )
+    if doc.get("version") == 1:
+        doc = _upgrade_v1(doc)
 
     result = ImportResult()
     remap = _Remap(result)
@@ -930,6 +938,62 @@ async def _import_connections(session: AsyncSession, household_id: uuid.UUID,
         by_name.setdefault(key, []).append(connection)
         remap.put(old_id, connection.id)
         result.made("connections")
+
+
+def _upgrade_v1(doc: dict[str, Any]) -> dict[str, Any]:
+    """A version-1 document with its liability balances in ADR-0043's convention.
+
+    Version 1 was written while a hand-entered card stored the amount owed as a
+    positive number. ``balance_sign`` decides, per account, which positive balances
+    were that — the same rule migration 0007 applied to the database — and those
+    are negated here, before anything is imported, so the importer itself reads one
+    convention. A cell that is not a readable number is left for the importer to
+    refuse by name.
+    """
+    accounts = doc.get("accounts")
+    snapshots = doc.get("balance_snapshots")
+    if not isinstance(accounts, list):
+        return doc
+    snapshots = snapshots if isinstance(snapshots, list) else []
+
+    def number(cell: Any) -> Decimal | None:
+        try:
+            return Decimal(cell) if isinstance(cell, str) else None
+        except ArithmeticError:
+            return None
+
+    by_account: dict[Any, list[dict[str, Any]]] = {}
+    for snap in snapshots:
+        if isinstance(snap, dict):
+            by_account.setdefault(snap.get("account_id"), []).append(snap)
+
+    upgraded_accounts = []
+    upgraded_snapshots = {id(s): s for s in snapshots}
+    for account in accounts:
+        if not isinstance(account, dict) or account.get("type") not in LIABILITY_TYPES:
+            upgraded_accounts.append(account)
+            continue
+        rows = by_account.get(account.get("id"), [])
+        cells = [account.get("current_balance"), *(r.get("balance") for r in rows)]
+        values = [v for v in map(number, cells) if v is not None]
+        if not positives_are_amounts_owed(values, ever_synced=bool(account.get("external_key"))):
+            upgraded_accounts.append(account)
+            continue
+
+        def negated(cell: Any) -> Any:
+            value = number(cell)
+            return str(-value) if value is not None and value > 0 else cell
+
+        upgraded_accounts.append(
+            {**account, "current_balance": negated(account.get("current_balance"))}
+        )
+        for row in rows:
+            upgraded_snapshots[id(row)] = {**row, "balance": negated(row.get("balance"))}
+    return {
+        **doc,
+        "accounts": upgraded_accounts,
+        "balance_snapshots": [upgraded_snapshots[id(s)] for s in snapshots],
+    }
 
 
 async def _import_accounts(session: AsyncSession, household_id: uuid.UUID,

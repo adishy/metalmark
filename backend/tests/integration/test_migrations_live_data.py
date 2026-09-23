@@ -18,11 +18,13 @@ import os
 import subprocess
 import sys
 import uuid
+from decimal import Decimal
 from pathlib import Path
 
 import psycopg
 import pytest
 
+from app.services.balance_sign import positives_are_amounts_owed
 from tests.conftest import OWNER_PW, OWNER_USER, TEST_DB
 
 pytestmark = pytest.mark.integration
@@ -180,3 +182,102 @@ def test_0006_backup_is_out_of_the_app_roles_reach(scratch_db):
             "SELECT has_schema_privilege(%s, 'migration_backup', 'USAGE')", (app_user,)
         ).fetchone()[0]
     assert can_use is False
+
+
+def test_0006_downgrade_keeps_a_balance_written_after_it(scratch_db):
+    """A sync on the seeded snapshot's day updates that row in place; its balance
+    is the household's now, and the downgrade must not delete it."""
+    _alembic(scratch_db, "upgrade", "0005")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        hid, owner = _household(conn)
+        bare = _account(conn, hid, owner, "Savings", balance="100")
+    _alembic(scratch_db, "upgrade", "0006")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        conn.execute("UPDATE balance_snapshots SET balance = 130 WHERE account_id = %s", (bare,))
+    _alembic(scratch_db, "downgrade", "0005")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _snapshots(conn, bare) == [("2026-09-20", "130.0000")]
+
+
+# ---- 0007: liability balances become signed -----------------------------------
+
+#: (name, ever synced, current_balance, [(day, snapshot balance)]) → expected
+#: current_balance and snapshot balances after the upgrade.
+LIABILITIES = [
+    # Hand-entered card: every positive was an amount owed.
+    ("Hand card", False, "850", [("2026-01-01", "900"), ("2026-02-01", "850")],
+     "-850.0000", ["-900.0000", "-850.0000"]),
+    # Hand-made card with an OFX statement imported into it: mixed, positives flip.
+    ("Hand+OFX", False, "300", [("2026-01-01", "-250"), ("2026-02-01", "300")],
+     "-300.0000", ["-250.0000", "-300.0000"]),
+    # Synced card with a hand edit in the old convention: provider sign evident.
+    ("Synced+edit", True, "-120", [("2026-01-01", "-100"), ("2026-01-15", "40")],
+     "-120.0000", ["-100.0000", "-40.0000"]),
+    # Synced card, always negative: already signed.
+    ("Synced", True, "-60", [("2026-01-01", "-60")], "-60.0000", ["-60.0000"]),
+    # Synced card, never negative: no evidence — untouched.
+    ("Synced positive", True, "75", [("2026-01-01", "75")], "75.0000", ["75.0000"]),
+    # Paid-off hand card: nothing positive to flip.
+    ("Paid off", False, "0", [("2026-01-01", "0")], "0.0000", ["0.0000"]),
+]
+
+
+def test_0007_signs_liabilities_per_account_and_reverses_exactly(scratch_db):
+    _alembic(scratch_db, "upgrade", "0006")
+    ids = {}
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        hid, owner = _household(conn)
+        for name, synced, current, snaps, *_ in LIABILITIES:
+            ids[name] = _account(conn, hid, owner, name, type_="credit", source=None,
+                                 synced=synced, balance=current, is_asset=False)
+            for day, balance in snaps:
+                _snapshot(conn, hid, ids[name], day, balance)
+        # An asset with a positive balance is not a liability and is never touched.
+        checking = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                            balance="2500")
+        _snapshot(conn, hid, checking, "2026-01-01", "2500")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0007")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        for name, _synced, _current, _snaps, want_current, want_snaps in LIABILITIES:
+            got_current = conn.execute(
+                "SELECT current_balance::text FROM accounts WHERE id = %s", (ids[name],)
+            ).fetchone()[0]
+            assert (name, got_current) == (name, want_current)
+            assert [b for _d, b in _snapshots(conn, ids[name])] == want_snaps, name
+        assert _snapshots(conn, checking) == [("2026-01-01", "2500.0000")]
+
+    _alembic(scratch_db, "downgrade", "0006")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _fingerprint(conn) == before
+
+
+def test_0007_and_the_import_rule_agree():
+    """The migration carries a frozen SQL copy of ``balance_sign``'s rule; this
+    holds the Python one to the same answers on the same cases: it says "flip"
+    exactly for the accounts whose rows the migration changed."""
+    for name, synced, current, snaps, want_current, want_snaps in LIABILITIES:
+        values = [Decimal(current), *(Decimal(b) for _d, b in snaps)]
+        wanted = [Decimal(want_current), *(Decimal(b) for b in want_snaps)]
+        assert positives_are_amounts_owed(values, ever_synced=synced) == (values != wanted), name
+
+
+def test_0007_downgrade_keeps_a_balance_written_after_it(scratch_db):
+    """A card edited after the upgrade was edited in the signed convention on
+    purpose; reverting it would lose the edit."""
+    _alembic(scratch_db, "upgrade", "0006")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        hid, owner = _household(conn)
+        card = _account(conn, hid, owner, "Card", type_="credit", source=None, synced=False,
+                        balance="850", is_asset=False)
+        _snapshot(conn, hid, card, "2026-01-01", "850")
+    _alembic(scratch_db, "upgrade", "0007")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        conn.execute("UPDATE accounts SET current_balance = -900 WHERE id = %s", (card,))
+    _alembic(scratch_db, "downgrade", "0006")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT current_balance::text FROM accounts WHERE id = %s", (card,)
+        ).fetchone()[0] == "-900.0000"
+        assert _snapshots(conn, card) == [("2026-01-01", "850.0000")]
