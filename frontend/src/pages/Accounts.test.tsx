@@ -233,6 +233,16 @@ describe("<Accounts /> views", () => {
     );
   });
 
+  it("names the owner with an avatar, not a line of text", () => {
+    render(<Accounts />);
+    const avatar = screen.getByTestId("account-owner-acct-1");
+    expect(avatar).toHaveAccessibleName("Owner: Alice");
+    expect(avatar).toHaveTextContent("AL");
+    // The row's only words are the account's name and its balance.
+    const row = screen.getByTestId("account-edit-acct-1");
+    expect(row).not.toHaveTextContent("USD");
+  });
+
   it("puts the net worth, its change and its line first", () => {
     render(<Accounts />);
     expect(screen.getByTestId("net-worth")).toHaveTextContent(formatMoney("100.00", "USD"));
@@ -408,7 +418,7 @@ describe("stale accounts", () => {
         <Accounts />
       </QueryClientProvider>,
     );
-    expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("not reported since");
+    expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("Not reported since");
     expect(screen.queryByTestId("account-stale-acct-1")).toBeNull();
   });
 });

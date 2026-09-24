@@ -24,7 +24,7 @@ test("edit a transaction and set an owner", async ({ page }) => {
   const merchant = `Coffee ${run}`;
   // Categorised on purpose: an uncategorised txn lands in the needs_review
   // queue, and this suite must not leave a backlog behind for review.spec.ts.
-  await addTransaction(page, { accountName, amount: "-9.99", merchant, category: "Dining" });
+  await addTransaction(page, { accountName, amount: "-9.99", merchant, category: "Restaurants" });
   await expect(page.getByTestId("txn-list")).toContainText(merchant);
 
   // Scoped to this run's row: the ledger is shared, so a bare "first owner

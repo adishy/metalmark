@@ -24,6 +24,7 @@ import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
 import { Day } from "@/components/datetime";
 import AccountMark from "@/components/AccountMark";
+import OwnerAvatar from "@/components/OwnerAvatar";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import InvestmentsView from "@/components/InvestmentsView";
@@ -109,6 +110,12 @@ export default function Accounts() {
   const ownerName = useMemo(() => {
     const m = new Map<string, string>();
     owners.data?.forEach((o) => m.set(o.id, o.name));
+    return m;
+  }, [owners.data]);
+
+  const ownerById = useMemo(() => {
+    const m = new Map<string, Owner>();
+    owners.data?.forEach((o) => m.set(o.id, o));
     return m;
   }, [owners.data]);
 
@@ -200,7 +207,7 @@ export default function Accounts() {
             (a) => current.types === null || current.types.includes(a.type),
           )}
           loaded={accounts.data !== undefined}
-          ownerName={ownerName}
+          owners={ownerById}
           onOpen={setEditing}
           emptyLabel={current.types === null ? null : current.label.toLowerCase()}
         />
@@ -337,13 +344,13 @@ function NetWorthHero({
 function AccountGroups({
   accounts,
   loaded,
-  ownerName,
+  owners,
   onOpen,
   emptyLabel,
 }: {
   accounts: Account[];
   loaded: boolean;
-  ownerName: Map<string, string>;
+  owners: Map<string, Owner>;
   onOpen: (a: Account) => void;
   emptyLabel: string | null;
 }) {
@@ -400,30 +407,28 @@ function AccountGroups({
                     data-testid={`account-edit-${a.id}`}
                     aria-label={`${a.name}, open details`}
                   >
+                    {/* The institution is the mark (its logo, or initials with
+                        the institution in the tooltip) and the owner is the
+                        avatar: the row carries one line of words, the name.
+                        Institution, currency and type are in the details. */}
                     <AccountMark name={a.name} institution={a.institution} size="lg" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">
                         {a.name}
                         {a.is_hidden && <span className="ml-2 text-xs text-fg-muted">(hidden)</span>}
                       </span>
-                      <span className="block text-xs text-fg-muted">
-                        {a.institution ? `${a.institution} · ` : ""}
-                        <span data-testid={`account-owner-${a.id}`}>
-                          {ownerName.get(a.owner_id) ?? "owner"}
+                      {a.stale_since && (
+                        // The bank stopped reporting it; its last balance is still
+                        // counted. The one fact worth a second line.
+                        <span
+                          className="mt-0.5 inline-block rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning-ink"
+                          data-testid={`account-stale-${a.id}`}
+                        >
+                          Not reported since <Day value={a.stale_since} />
                         </span>
-                        {a.currency !== ccy || ccys.size > 1 ? ` · ${a.currency}` : ""}
-                        {a.stale_since && (
-                          // The bank stopped reporting it; its last balance is still
-                          // counted. Hiding or closing it is the reader's call.
-                          <span
-                            className="ml-1 rounded bg-warning/20 px-1.5 py-0.5 text-warning-ink"
-                            data-testid={`account-stale-${a.id}`}
-                          >
-                            not reported since <Day value={a.stale_since} />
-                          </span>
-                        )}
-                      </span>
+                      )}
                     </span>
+                    <OwnerAvatar owner={owners.get(a.owner_id)} testid={`account-owner-${a.id}`} />
                     <span
                       className={`text-base font-semibold ${a.is_asset ? "text-fg" : "text-negative"}`}
                       data-testid={`account-balance-${a.id}`}

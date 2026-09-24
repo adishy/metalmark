@@ -34,7 +34,7 @@ import { useInstitutionLogo } from "@/components/InstitutionLogos";
  * generated and the mark would silently render transparent. Writing the ten out
  * is what makes them real.
  */
-const FILLS = [
+export const FILLS = [
   "bg-chart-1",
   "bg-chart-2",
   "bg-chart-3",

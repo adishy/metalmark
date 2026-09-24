@@ -89,7 +89,15 @@ export async function addTransaction(
   await form.getByTestId("txn-merchant").fill(opts.merchant);
   await form.getByTestId("txn-amount").fill(opts.amount);
   if (opts.category) {
-    await form.getByTestId("txn-category").selectOption({ label: opts.category });
+    // Options read "🛒 Groceries": match the name at the end, not the whole label.
+    const select = form.getByTestId("txn-category");
+    const escaped = opts.category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const value = await select
+      .locator("option")
+      .filter({ hasText: new RegExp(`(^|\\s)${escaped}$`) })
+      .first()
+      .getAttribute("value");
+    await select.selectOption(value ?? "");
   }
   await form.getByTestId("txn-save").click();
   await expect(form).toBeHidden();

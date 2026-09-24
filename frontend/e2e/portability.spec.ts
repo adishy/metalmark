@@ -58,7 +58,7 @@ test("an account exports a CSV the importer can read back", async ({ page }) => 
   await page.getByTestId("nav-transactions").click();
   // Categorised on purpose, so this leaves nothing in the review queue behind
   // it — review.spec.ts drains that queue and would find this row first.
-  await addTransaction(page, { accountName, amount: "-12.34", merchant, category: "Dining" });
+  await addTransaction(page, { accountName, amount: "-12.34", merchant, category: "Restaurants" });
 
   // The per-account export lives on the account itself, which is where someone
   // asks for it — not in a list of everybody's settings.
@@ -87,5 +87,5 @@ test("an account exports a CSV the importer can read back", async ({ page }) => 
   // Plain signed decimal, and the category by name — the two things the importer
   // resolves rather than reads.
   expect(rows[0]).toContain("-12.34");
-  expect(rows[0]).toContain("Dining");
+  expect(rows[0]).toContain("Restaurants");
 });
