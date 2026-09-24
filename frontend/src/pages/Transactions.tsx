@@ -26,7 +26,8 @@ import {
 } from "@/components/form";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
-import { FilterIcon } from "@/components/icons";
+import { FilterIcon, PlusIcon, SearchIcon, UploadIcon } from "@/components/icons";
+import TxnPhoneList from "@/components/TxnPhoneList";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import ImportDialog from "@/components/ImportDialog";
 
@@ -95,6 +96,12 @@ export default function Transactions() {
   const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Transaction | null>(null);
 
+  const catById = useMemo(() => {
+    const m = new Map<string, Category>();
+    categories.data?.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [categories.data]);
+
   const catName = useMemo(() => {
     const m = new Map<string, string>();
     categories.data?.forEach((c) => m.set(c.id, categoryLabel(c)));
@@ -149,39 +156,69 @@ export default function Transactions() {
       <div className="space-y-4">
         {/* flex-wrap: the title plus two actions do not fit at 360px, and an
             unwrapped header is what pushes the page into horizontal scroll (§5). */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2">
           <h1 className="text-xl font-semibold">Transactions</h1>
           <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              className="sm:hidden"
-              aria-expanded={filtersOpen}
-              aria-controls="txn-filters"
-              onClick={() => setFiltersOpen((v) => !v)}
-              data-testid="txn-filters-toggle"
-            >
-              <FilterIcon />
-              <span className="sr-only">Filters</span>
-              {activeFilters > 0 && <span aria-hidden="true">{activeFilters}</span>}
-              <span className="sr-only">{activeFilters > 0 ? `, ${activeFilters} active` : ""}</span>
-            </Button>
             {/* A whole statement at once — CSV, OFX or QFX, the dialog asks which
-                by looking at the file — next to adding one row by hand. */}
+                by looking at the file — next to adding one row by hand. On a
+                phone both are icon buttons, so the title keeps its line. */}
             <Button
               variant="secondary"
               onClick={() => setImporting(true)}
+              aria-label="Import a statement"
+              className="px-3 sm:px-4"
               data-testid="import-csv"
             >
-              {/* Short on a phone: three buttons in one row at 360 px wrapped
-                  both labels onto two lines. The dialog says the rest. */}
-              <span className="sm:hidden">Import</span>
+              <UploadIcon className="size-5 sm:hidden" />
               <span className="hidden sm:inline">Import a statement</span>
             </Button>
-            <Button onClick={() => setOpen((v) => !v)} data-testid="add-transaction">
-              <span className="sm:hidden">Add</span>
+            <Button
+              onClick={() => setOpen((v) => !v)}
+              aria-label="Add transaction"
+              className="px-3 sm:px-4"
+              data-testid="add-transaction"
+            >
+              <PlusIcon className="size-5 sm:hidden" />
               <span className="hidden sm:inline">Add transaction</span>
             </Button>
           </div>
+        </div>
+
+        {/* Phone: search first, as the mainstream apps do, with every other
+            filter one tap away behind the button beside it. */}
+        <div className="flex items-center gap-2 sm:hidden">
+          <label className="relative block min-w-0 flex-1">
+            <span className="sr-only">Search transactions</span>
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-fg-muted" />
+            <Input
+              type="search"
+              placeholder="Search"
+              value={filter.search ?? ""}
+              onChange={(e) => setFilter({ ...filter, search: e.target.value || undefined })}
+              className="pl-10"
+              data-testid="txn-search-phone"
+            />
+          </label>
+          <Button
+            variant="secondary"
+            className="relative px-3"
+            aria-expanded={filtersOpen}
+            aria-controls="txn-filters"
+            onClick={() => setFiltersOpen((v) => !v)}
+            data-testid="txn-filters-toggle"
+          >
+            <FilterIcon />
+            <span className="sr-only">Filters</span>
+            {activeFilters > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-1.5 -right-1.5 flex size-5 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-fg"
+              >
+                {activeFilters}
+              </span>
+            )}
+            <span className="sr-only">{activeFilters > 0 ? `, ${activeFilters} active` : ""}</span>
+          </Button>
         </div>
 
         {open && (
@@ -215,7 +252,25 @@ export default function Transactions() {
             thing §7 item 3 cannot have. Nothing here needs clipping anyway: the
             rows paint no background of their own (§9.5's hover is on the row, and
             that is inside the `<ul>`'s own rounded box). */}
-        <div>
+        {/* Phone: days and roomy rows (TxnPhoneList). */}
+        <div className="sm:hidden">
+          {items.length > 0 ? (
+            <TxnPhoneList
+              items={items}
+              categories={catById}
+              accounts={acctFor}
+              onOpen={setSelected}
+            />
+          ) : (
+            !txns.isLoading && (
+              <p role="status" className="rounded-card bg-surface-raised px-4 py-8 text-center text-sm text-fg-muted">
+                {filtered ? "No transactions match these filters." : "No transactions yet."}
+              </p>
+            )
+          )}
+        </div>
+
+        <div className="hidden sm:block">
           {/* A real header row, and `lg:` only: below that the row is a phone row
               with no columns to name. `aria-hidden` because it is a *second*
               naming of values every row already carries as text — the visual
@@ -530,7 +585,7 @@ function FilterBar({
 
       <div>
         <p className="mb-1 text-xs font-medium text-fg-muted">Accounts</p>
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0" data-testid="filter-accounts">
+        <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
           {accounts.map((a) => {
             const on = selectedAccounts.has(a.id);
             // Same geometry as OwnerFilterChips: `px-3 py-1 text-xs` computes to
@@ -541,7 +596,7 @@ function FilterBar({
                 type="button"
                 onClick={() => toggleAccount(a.id)}
                 aria-pressed={on}
-                className={`inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap ${
+                className={`inline-flex min-h-11 max-w-full items-center rounded-full border px-4 text-sm ${
                   on
                     ? "border-accent bg-accent/20 font-medium text-accent-ink"
                     : "border-border-strong text-fg-muted hover:text-fg"

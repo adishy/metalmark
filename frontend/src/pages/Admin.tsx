@@ -18,6 +18,7 @@ import { useState } from "react";
 
 import { useAgentTokens, useCreateAgentToken, useRevokeAgentToken } from "@/api/agent";
 import { useAutoCategorizeAll } from "@/api/hooks";
+import { isStalled } from "@/lib/bankFreshness";
 import {
   useCancelJob,
   useChecks,
@@ -249,6 +250,17 @@ export default function Admin() {
                     {c.last_error}
                   </p>
                 )}
+                {isStalled(c) && c.last_new_data_at && (
+                  <p
+                    className="rounded-control bg-warning/15 px-2 py-1 text-xs text-warning-ink"
+                    role="status"
+                    data-testid={`conn-stalled-${c.id}`}
+                  >
+                    No new transactions since <Instant value={c.last_new_data_at} style="long" /> —
+                    the last {c.quiet_syncs} syncs succeeded but the bank sent nothing new. The
+                    bank&rsquo;s link at SimpleFIN Bridge may need a refresh or a new sign-in.
+                  </p>
+                )}
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -299,6 +311,7 @@ export default function Admin() {
                       }
                       disabled={update.isPending || !defaults.data}
                       aria-label={`Sync interval for ${c.org_name ?? "this connection"}`}
+                      inline
                       className="w-auto"
                       data-testid={`interval-${c.id}`}
                     >

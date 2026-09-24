@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   putBalance: vi.fn(),
+  connections: [] as unknown[],
   deleteBalance: vi.fn(),
 }));
 
@@ -28,6 +29,11 @@ vi.mock("@/api/investments", async () => {
     usePortfolio: () => h.portfolio(),
     useHoldings: () => h.holdings(),
   };
+});
+
+vi.mock("@/api/sync", async () => {
+  const actual = await vi.importActual<typeof import("@/api/sync")>("@/api/sync");
+  return { ...actual, useConnections: () => ({ data: h.connections }) };
 });
 
 vi.mock("@/api/hooks", async () => {
@@ -476,5 +482,31 @@ describe("balance history", () => {
     await user.click(screen.getByTestId("history-add"));
     expect(screen.getByTestId("history-error")).toHaveTextContent("Pick the day");
     expect(h.putBalance).not.toHaveBeenCalled();
+  });
+});
+
+describe("a bank that stopped sending", () => {
+  it("says so above the net worth when syncs succeed but bring nothing new", () => {
+    h.connections = [
+      {
+        id: "c1", org_name: "Chase", is_enabled: true, quiet_syncs: 6,
+        last_new_data_at: new Date(Date.now() - 3 * 864e5).toISOString(),
+      },
+    ];
+    render(<Accounts />);
+    expect(screen.getByTestId("bank-stalled")).toHaveTextContent("Chase hasn’t sent new transactions");
+    h.connections = [];
+  });
+
+  it("stays quiet for a quiet weekend", () => {
+    h.connections = [
+      {
+        id: "c1", org_name: "Chase", is_enabled: true, quiet_syncs: 2,
+        last_new_data_at: new Date(Date.now() - 20 * 36e5).toISOString(),
+      },
+    ];
+    render(<Accounts />);
+    expect(screen.queryByTestId("bank-stalled")).not.toBeInTheDocument();
+    h.connections = [];
   });
 });

@@ -359,6 +359,10 @@ export interface Connection {
   is_enabled: boolean;
   sync_interval_minutes: number;
   next_sync_at: string | null;
+  /** When a sync last brought anything new, and how many "ok" syncs since
+   *  brought nothing — a bridge serving a stale cache looks healthy otherwise. */
+  last_new_data_at?: string | null;
+  quiet_syncs?: number;
   created_at: string;
 }
 

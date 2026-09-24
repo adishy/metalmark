@@ -149,3 +149,15 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* iOS Safari gives a date input an intrinsic width wider than a phone's
+   column and ignores `w-full` without this: two of them side by side (the
+   transaction filters' From/To) pushed the page sideways. */
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+}

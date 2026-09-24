@@ -8,13 +8,19 @@ import { MetalMark } from "@/components/MetalMark";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Read from the form, not from React state. A password manager fills the
+    // fields by script (Bitwarden, iOS AutoFill), and a controlled input can
+    // miss that fill — React tracks the value it last set, so a script's write
+    // may never reach onChange and the state would still be "". The DOM always
+    // has what is on screen.
+    const data = new FormData(e.currentTarget);
+    const email = String(data.get("username") ?? "").trim();
+    const password = String(data.get("password") ?? "");
     setError(null);
     setBusy(true);
     try {
@@ -59,9 +65,9 @@ export default function Login() {
             inherited `text-sm` from its wrapper (iOS Safari zooms the viewport
             on a control under 16 px and never zooms back), and used
             `focus:border-accent` where the spec says `focus-visible`. */}
-        <Field label="Email" htmlFor="login-email">
+        <Field label="Email" htmlFor="username">
           <Input
-            id="login-email"
+            id="username"
             name="username"
             type="email"
             inputMode="email"
@@ -69,20 +75,16 @@ export default function Login() {
             autoCorrect="off"
             spellCheck={false}
             required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
             data-testid="email"
           />
         </Field>
-        <Field label="Password" htmlFor="login-password">
+        <Field label="Password" htmlFor="password">
           <Input
-            id="login-password"
+            id="password"
             name="password"
             type="password"
             required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             data-testid="password"
           />

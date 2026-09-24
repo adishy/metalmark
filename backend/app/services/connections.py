@@ -353,3 +353,42 @@ async def list_run_events(session: AsyncSession, run_id: uuid.UUID) -> list[Sync
             )
         ).scalars().all()
     )
+
+
+async def data_freshness(session: AsyncSession) -> dict[uuid.UUID, dict]:
+    """Per connection: when a sync last brought new data, and how many quiet
+    successful syncs have run since.
+
+    "New" is anything a run wrote to the ledger — inserted, updated or settled
+    (reconciled) rows. Failed runs are not counted as quiet: they are already
+    reported as failures, and this is about the ones that say "ok".
+    """
+    runs = (
+        await session.execute(
+            select(
+                SyncRun.connection_id,
+                SyncRun.started_at,
+                SyncRun.status,
+                SyncRun.txns_inserted,
+                SyncRun.txns_updated,
+                SyncRun.txns_reconciled,
+            )
+            .where(SyncRun.connection_id.is_not(None))
+            .order_by(SyncRun.connection_id, SyncRun.started_at.desc())
+        )
+    ).all()
+    out: dict[uuid.UUID, dict] = {}
+    for conn_id, started_at, status, ins, upd, rec in runs:
+        entry = out.setdefault(
+            conn_id, {"last_new_data_at": None, "quiet_syncs": 0, "_done": False}
+        )
+        if entry["_done"]:
+            continue
+        if (ins or 0) + (upd or 0) + (rec or 0) > 0:
+            entry["last_new_data_at"] = started_at
+            entry["_done"] = True
+        elif status == "ok":
+            entry["quiet_syncs"] += 1
+    for entry in out.values():
+        entry.pop("_done")
+    return out

@@ -192,15 +192,28 @@ export default function AppShell({ children }: { children: ReactNode }) {
             to={n.to}
             // NavLink supplies `aria-current="page"`; the icon is decorative and
             // carries its own aria-hidden, so the label is the accessible name.
+            // 64 px tall and a fifth of the width each: the whole cell is the
+            // target, not the icon. The active tab's icon sits in a pill — a
+            // shape change, so the current tab is never colour alone (§7).
             className={({ isActive }) =>
-              `flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-xs ${
-                isActive ? "font-semibold text-accent" : "text-fg-muted"
+              `group flex min-h-16 flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 text-xs ${
+                isActive ? "font-semibold text-accent-ink" : "text-fg-muted"
               }`
             }
             data-testid={`tab-${n.label.toLowerCase()}`}
           >
-            <n.Icon />
-            {n.label}
+            {({ isActive }) => (
+              <>
+                <span
+                  className={`inline-flex h-8 w-14 items-center justify-center rounded-full ${
+                    isActive ? "bg-accent/15" : ""
+                  }`}
+                >
+                  <n.Icon className="size-6 shrink-0" />
+                </span>
+                {n.label}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>

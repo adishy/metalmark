@@ -21,14 +21,14 @@ export default function OwnerFilterChips({
   // computed to 24px, and chips are thumb targets (§4.5). Selection is carried
   // by `aria-pressed` as well as the fill, so it is never colour alone.
   const chip = (on: boolean) =>
-    `inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap ${
+    `inline-flex min-h-11 max-w-full items-center rounded-full border px-4 text-sm ${
       on ? "border-accent bg-accent/20 font-medium text-accent-ink" : "border-border-strong text-fg-muted hover:text-fg"
     }`;
 
   return (
     <div>
       <p className="mb-2 text-xs font-medium text-fg-muted">{label}</p>
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0" data-testid={testid}>
+      <div className="flex flex-wrap gap-2" data-testid={testid}>
         <button
           type="button"
           onClick={() => onChange(null)}

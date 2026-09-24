@@ -36,7 +36,7 @@ import {
   useTransactions,
   useUpdateTransaction,
 } from "@/api/hooks";
-import type { Account, Transaction } from "@/api/types";
+import type { Account, Category, Transaction } from "@/api/types";
 import { formatMoney } from "@/lib/format";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
@@ -52,6 +52,8 @@ const FLY_X = 420;
 
 /** How far sideways a drag has to go to mean a decision. */
 const SWIPE_X = 120;
+/** A flick this fast (px/s) decides the card even short of SWIPE_X. */
+const FLICK_V = 650;
 
 /** How far up the card can be pulled, and how far it has to be pulled to open
  *  the transaction. Constrained rather than thrown: the card is not going
@@ -92,6 +94,12 @@ export default function Review() {
     () => (queue.data?.items ?? []).filter((t) => !decided.has(t.id)),
     [queue.data, decided],
   );
+
+  const catById = useMemo(() => {
+    const m = new Map<string, Category>();
+    categories.data?.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [categories.data]);
 
   const catName = useMemo(() => {
     const m = new Map<string, string>();
@@ -285,7 +293,7 @@ export default function Review() {
               with slack and none of it is clipped. Nothing here wraps at `lg:`,
               so the same height is what the card keeps — a deck that grew with
               the window would just be the same card with a longer shadow. */}
-          <div className="relative h-72" data-testid="review-deck">
+          <div className="relative h-[clamp(18rem,50vh,28rem)]" data-testid="review-deck">
             {/* The stack (§4.17): two cards behind the live one, inset and
                 pushed down so their bottom edges show. Empty on purpose — see
                 the note at the top of the file.
@@ -310,7 +318,8 @@ export default function Review() {
               key={current.id}
               txn={current}
               account={accountFor.get(current.account_id)}
-              categoryName={currentCategory ? catName.get(currentCategory) : undefined}
+              categoryName={currentCategory ? catById.get(currentCategory)?.name : undefined}
+              categoryIcon={currentCategory ? (catById.get(currentCategory)?.icon ?? undefined) : undefined}
               onDecide={(keep) => decide(current, keep)}
               onEdit={openEditor}
               // Which way it is on its way out, if it is. Only ever set on the
@@ -425,6 +434,7 @@ function SwipeCard({
   txn,
   account,
   categoryName,
+  categoryIcon,
   onDecide,
   onEdit,
   fly,
@@ -432,6 +442,7 @@ function SwipeCard({
   txn: Transaction;
   account?: Account;
   categoryName?: string;
+  categoryIcon?: string;
   onDecide: (keep: boolean) => void;
   /** Pull the card up (or press `e`) to open it rather than decide it. */
   onEdit: () => void;
@@ -451,8 +462,25 @@ function SwipeCard({
   // reason the throw rides on `x` (below).
   const y = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-12, 12]);
-  const approveOpacity = useTransform(x, [40, 160], [0, 1]);
-  const ignoreOpacity = useTransform(x, [-160, -40], [1, 0]);
+  const approveOpacity = useTransform(x, [30, SWIPE_X], [0, 1]);
+  const ignoreOpacity = useTransform(x, [-SWIPE_X, -30], [1, 0]);
+  // The wash: the card takes on the colour of the answer as it travels, so the
+  // decision is felt across the whole card and not read off a corner label.
+  const approveWash = useTransform(x, [0, SWIPE_X * 1.4], [0, 0.22]);
+  const ignoreWash = useTransform(x, [-SWIPE_X * 1.4, 0], [0.18, 0]);
+  const badgeScale = useTransform(x, [-SWIPE_X, -30, 0, 30, SWIPE_X], [1.1, 0.85, 0.85, 0.85, 1.1]);
+  // A tick under the finger at the point of no return — where letting go
+  // decides the card. Once per crossing, and only where the platform has it.
+  const past = useRef<"left" | "right" | null>(null);
+  useEffect(
+    () =>
+      x.on("change", (v) => {
+        const side = v > SWIPE_X ? "right" : v < -SWIPE_X ? "left" : null;
+        if (side && side !== past.current) navigator.vibrate?.(12);
+        past.current = side;
+      }),
+    [x],
+  );
   // The third gesture's badge, faded by how far up the card has come.
   const liftOpacity = useTransform(y, [-LIFT_TRIGGER, -20], [1, 0]);
   // Opaque for all but the last of the throw, so the card is *moving* right up
@@ -467,12 +495,17 @@ function SwipeCard({
   // animation simply takes the first one's place.
   useEffect(() => {
     if (!fly || reduce) return;
-    animate(x, fly === "right" ? FLY_X : -FLY_X, { duration: FLY_MS / 1000, ease: "easeIn" });
+    // Out fast and slowing, as a thrown thing does — an ease-in made the card
+    // hesitate at the moment the finger let go.
+    animate(x, fly === "right" ? FLY_X : -FLY_X, {
+      duration: FLY_MS / 1000,
+      ease: [0.2, 0.7, 0.4, 1],
+    });
   }, [fly, x, reduce]);
 
   return (
     <motion.div
-      className="absolute inset-0 flex cursor-grab flex-col rounded-card bg-surface-raised p-6 shadow-lg active:cursor-grabbing"
+      className="absolute inset-0 flex cursor-grab flex-col overflow-hidden rounded-overlay border border-border bg-surface-raised p-6 shadow-lg active:cursor-grabbing"
       style={{ x, y, rotate: reduce ? 0 : rotate, opacity: fade }}
       // Not draggable once it is on its way out: catching the card mid-throw
       // would only be a fight with the animation that is throwing it.
@@ -481,15 +514,22 @@ function SwipeCard({
       // cannot be pushed right-to-left out of the deck's own box, and it cannot
       // be pushed *down* at all. `top` is how far the lift gesture can travel.
       dragConstraints={{ left: 0, right: 0, top: -LIFT_PX, bottom: 0 }}
-      dragElastic={0.6}
+      dragElastic={0.7}
+      // Picked up: the card lifts a little under the finger, which is most of
+      // what makes a drag feel like holding something.
+      whileDrag={reduce ? undefined : { scale: 1.03 }}
+      dragTransition={{ bounceStiffness: 380, bounceDamping: 22 }}
       onDragEnd={(_e, info) => {
         const { x: dx, y: dy } = info.offset;
         // Up is tested first and has to *dominate*, not merely be present: a
         // diagonal drag is ambiguous, and the gesture that cannot be taken back
         // is the one to be conservative about.
         if (dy < -LIFT_TRIGGER && Math.abs(dy) > Math.abs(dx)) onEdit();
-        else if (dx > SWIPE_X) onDecide(true);
-        else if (dx < -SWIPE_X) onDecide(false);
+        // A flick counts as well as a drag: a quick throw that ends short of
+        // the line was still a decision, and refusing it is what made the deck
+        // feel like it was pushing back.
+        else if (dx > SWIPE_X || (dx > 40 && info.velocity.x > FLICK_V)) onDecide(true);
+        else if (dx < -SWIPE_X || (dx < -40 && info.velocity.x < -FLICK_V)) onDecide(false);
       }}
       data-testid="swipe-card"
     >
@@ -498,17 +538,27 @@ function SwipeCard({
           and at all times, for two labels that are invisible until the card is
           dragged — and it did it by pushing the identity block down, so the one
           thing the card is for sat off-centre behind a gap. */}
+      <motion.div
+        aria-hidden="true"
+        style={{ opacity: reduce ? 0 : approveWash }}
+        className="pointer-events-none absolute inset-0 bg-accent"
+      />
+      <motion.div
+        aria-hidden="true"
+        style={{ opacity: reduce ? 0 : ignoreWash }}
+        className="pointer-events-none absolute inset-0 bg-negative"
+      />
       <motion.span
-        style={{ opacity: reduce ? 0 : ignoreOpacity }}
-        className="absolute left-6 top-6 rounded-control border border-negative px-2 py-1 text-xs text-negative"
+        style={{ opacity: reduce ? 0 : ignoreOpacity, scale: badgeScale }}
+        className="absolute top-6 left-6 rounded-full border-2 border-negative bg-surface-raised px-3 py-1 text-sm font-semibold text-negative-ink"
       >
-        IGNORE
+        ✕ Ignore
       </motion.span>
       <motion.span
-        style={{ opacity: reduce ? 0 : approveOpacity }}
-        className="absolute right-6 top-6 rounded-control border border-accent px-2 py-1 text-xs text-accent"
+        style={{ opacity: reduce ? 0 : approveOpacity, scale: badgeScale }}
+        className="absolute top-6 right-6 rounded-full border-2 border-accent bg-surface-raised px-3 py-1 text-sm font-semibold text-accent-ink"
       >
-        REVIEWED
+        ✓ Reviewed
       </motion.span>
       {/* The third gesture, centred between the two verdicts and only ever
           visible when neither of them is: a card being pulled up is at x≈0, so
@@ -524,27 +574,38 @@ function SwipeCard({
           leaves and centres itself in it, so a one-line merchant sits on the
           card's optical centre instead of clinging to the top of a 288 px box
           with 200 px of nothing under it. */}
-      <div className="flex min-h-0 flex-1 flex-col justify-center">
-        <p className="text-xl font-semibold">{txn.merchant || txn.description || "(no description)"}</p>
-        {/* Which account it came out of, above the date: on a decision card that
-            is often the thing that decides it, and it is the one question the
-            name alone cannot answer ("Chase Checking" or "Chase Savings"?). */}
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
+        <span
+          aria-hidden="true"
+          className="flex size-16 items-center justify-center rounded-full bg-surface-inset text-3xl leading-none"
+        >
+          {categoryIcon ?? UNCATEGORIZED_ICON}
+        </span>
+        <p className="line-clamp-2 text-2xl font-semibold">
+          {txn.merchant || txn.description || "(no description)"}
+        </p>
+        {/* Which account it came out of: on a decision card that is often the
+            thing that decides it ("Chase Checking" or "Chase Savings"?). */}
         {account && (
-          <p className="mt-1 flex min-w-0 items-center gap-2">
+          <p className="flex min-w-0 items-center gap-2">
             <AccountMark name={account.name} institution={account.institution} size="md" />
             <span className="truncate text-sm text-fg-muted">{account.name}</span>
           </p>
         )}
         <p className="text-sm text-fg-muted">
-          {/* `medium` rather than the row's `compact`: the card is not competing
-              for width, and on a card that is about to be filed under a month,
-              "Sep 20" says more than "Yesterday". */}
+          {/* `medium` rather than the row's `compact`: on a card about to be
+              filed under a month, "Sep 20" says more than "Yesterday". */}
           <Day value={txn.transacted_at} />
           {categoryName && ` · ${categoryName}`}
         </p>
       </div>
 
-      <p className={`text-2xl font-semibold ${Number(txn.amount) < 0 ? "text-fg" : "text-positive"}`}>
+      <p
+        className={`relative text-center text-4xl font-bold tabular-nums ${
+          Number(txn.amount) < 0 ? "text-fg" : "text-positive"
+        }`}
+      >
+        {Number(txn.amount) > 0 ? "+" : ""}
         {formatMoney(txn.amount, txn.currency)}
       </p>
     </motion.div>
