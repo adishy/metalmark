@@ -15,10 +15,14 @@ test("edit a transaction and set an owner", async ({ page }) => {
   await page.getByTestId("nav-accounts").click();
   await addAccount(page, { name: accountName, balance: "500", currency: "USD" });
 
-  // Accounts are owned by default, and the row names the owner they got.
+  // Accounts are owned by default, and the row names the owner they got — as an
+  // avatar whose accessible name is the owner, not as a line of text.
   await expect(
-    page.getByTestId("account-list").locator("li", { hasText: accountName }),
-  ).toContainText(/Shared/);
+    page
+      .getByTestId("account-list")
+      .locator("li", { hasText: accountName })
+      .locator('[data-testid^="account-owner-"]'),
+  ).toHaveAccessibleName("Owner: Shared");
 
   await page.getByTestId("nav-transactions").click();
   const merchant = `Coffee ${run}`;
