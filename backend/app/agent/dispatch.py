@@ -70,6 +70,7 @@ EXCLUDED: dict[str, str] = {
     "/auth/me": "The browser session's own identity, and its CSRF token.",
     "/export": "The whole household as a raw document — not a schema the registry can walk.",
     "/export/transactions.csv": "Raw CSV, not a schema the registry can walk.",
+    "/institutions/{key}/logo": "An image, not data; and a bank's logo names the bank.",
 }
 
 #: String query parameters an agent may send, with the pattern a value must match.

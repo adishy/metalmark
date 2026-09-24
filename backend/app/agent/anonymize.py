@@ -45,6 +45,7 @@ from pydantic import BaseModel
 from pydantic_core import to_jsonable_python
 
 from app.security.redact import sanitize
+from app.services.default_categories import DEFAULT_CATEGORIES
 
 # ---------------------------------------------------------------------------
 # Pseudonyms and known names
@@ -57,6 +58,10 @@ from app.security.redact import sanitize
 GENERIC_LABELS: frozenset[str] = frozenset(
     s.casefold()
     for s in (
+        # The starter set every household is given — generic by construction,
+        # since it ships in a public repository.
+        *(g for g, _t, _c in DEFAULT_CATEGORIES),
+        *(name for _g, _t, cats in DEFAULT_CATEGORIES for name, _icon in cats),
         # Category and group names in general use (the seed's, and the obvious rest).
         "Salary",
         "Interest",
@@ -521,6 +526,15 @@ class Pattern(Policy):
 
     def __repr__(self) -> str:
         return f"Pattern({self.regex.pattern!r})"
+
+
+# An icon is an app identifier ("cart") or a run of symbols with no letter or
+# digit in it — an emoji, ZWJ sequences included. Neither can spell a name.
+_ICON = re.compile(r"[a-z0-9][a-z0-9_.\-]{0,39}|[^\w\s]{1,16}")
+
+
+def Icon() -> Pattern:  # noqa: N802 - reads as a policy name at the call site
+    return Pattern(_ICON, "Icon")
 
 
 def Currency() -> Pattern:  # noqa: N802 - reads as a policy name at the call site

@@ -4,6 +4,7 @@
 // The transfer panel at the bottom is where a leg is matched to its counterpart,
 // unlinked, or shown the FX cost it came with (ADR-0008/0018).
 import { useMemo, useState } from "react";
+import { categoryLabel } from "@/components/CategoryPicker";
 import {
   useDeleteTransaction,
   useHousehold,
@@ -181,7 +182,7 @@ function TxnDetailForm({
             <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="detail-category">
               <option value="">Uncategorized</option>
               {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
               ))}
             </Select>
           </Field>
@@ -223,7 +224,7 @@ function TxnDetailForm({
                   // seeded, none of these buttons ever rendered for the
                   // target-size sweep to measure.
                   className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
-                    on ? "border-accent bg-accent/20 font-medium text-accent" : "border-border-strong text-fg-muted hover:text-fg"
+                    on ? "border-accent bg-accent/20 font-medium text-accent-ink" : "border-border-strong text-fg-muted hover:text-fg"
                   }`}
                   data-testid={`detail-tag-${t.id}`}
                 >
@@ -638,7 +639,7 @@ function SplitEditor({
                 >
                   <option value="">Uncategorized</option>
                   {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
                   ))}
                 </select>
               </div>

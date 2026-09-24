@@ -56,7 +56,7 @@ from app.models.sync import EVENT_LEVELS
 from app.schemas.ledger import is_asset_for
 from app.security.crypto import SecretBox
 from app.security.redact import sanitize
-from app.services import notifications, rules
+from app.services import categorizer, notifications, rules
 from app.services import transactions as txn_service
 from app.services.aggregator import (
     AccountSet,
@@ -1007,6 +1007,7 @@ class RunCounts:
     txns_reconciled: int = 0
     pendings_expired: int = 0
     transfers_matched: int = 0
+    auto_categorized: int = 0
     rules_applied: int = 0
 
 
@@ -1267,6 +1268,11 @@ async def ingest_account_set(
     )
     if counts.transfers_matched:
         await log.emit("info", "transfers.matched", count=counts.transfers_matched)
+    # Last, so a linked pair is filed as a transfer and a rule's category stands:
+    # this fills only what is still blank.
+    counts.auto_categorized = await categorizer.categorize_blank(session, touched)
+    if counts.auto_categorized:
+        await log.emit("info", "transactions.auto_categorized", count=counts.auto_categorized)
     return counts
 
 

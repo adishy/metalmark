@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   holdings: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  putBalance: vi.fn(),
+  deleteBalance: vi.fn(),
 }));
 
 vi.mock("@/api/investments", async () => {
@@ -47,8 +49,35 @@ vi.mock("@/api/hooks", async () => {
     useCreateAccount: () => ({ ...settled(undefined), mutate: h.create }),
     useUpdateAccount: () => ({ ...settled(undefined), mutate: h.update }),
     useDeleteAccount: () => settled(undefined),
+    useNetWorthSeries: () => settled(SERIES),
+    useBalances: () => settled(BALANCES),
+    usePutBalance: () => ({ ...settled(undefined), mutate: h.putBalance }),
+    useDeleteBalance: () => ({ ...settled(undefined), mutate: h.deleteBalance }),
   };
 });
+
+// A canvas has nothing to show jsdom; the accessible name is what is asserted.
+vi.mock("@/components/Chart", () => ({
+  default: ({ label, testid }: { label: string; testid?: string }) => (
+    <div role="img" aria-label={label} data-testid={testid} />
+  ),
+}));
+
+const SERIES = {
+  base_currency: "USD",
+  granularity: "week",
+  start: "2026-06-01",
+  end: "2026-09-01",
+  points: [
+    { date: "2026-06-01", net_worth: "40.00", missing: [] },
+    { date: "2026-09-01", net_worth: "100.00", missing: [] },
+  ],
+};
+
+const BALANCES = [
+  { balance_date: "2026-01-01", balance: "100.00", currency: "USD" },
+  { balance_date: "2025-12-31", balance: "80.00", currency: "USD" },
+];
 
 const OWNERS = [{ id: "owner-1", name: "Alice", kind: "person", sort: 0 }] as unknown as Owner[];
 
@@ -131,6 +160,8 @@ const PORTFOLIO = {
 beforeEach(() => {
   h.create.mockReset();
   h.update.mockReset();
+  h.putBalance.mockReset();
+  h.deleteBalance.mockReset();
   h.allocation.mockReset();
   h.portfolio.mockReset();
   h.holdings.mockReset();
@@ -183,10 +214,42 @@ describe("<Accounts /> views", () => {
     // The allocation and the valued holdings list are what the second view is.
     expect(screen.getByTestId("allocation-total")).toHaveTextContent(formatMoney("3000.00", "USD"));
     expect(screen.getByTestId("portfolio-total")).toHaveTextContent(formatMoney("3000.00", "USD"));
-    // The balances panel is gone, not merely hidden: the two views do not share
-    // a DOM.
-    expect(screen.queryByTestId("account-list")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("net-worth")).not.toBeInTheDocument();
+    // The tab narrows the list to investment accounts (there are none here, so
+    // it says so) and keeps the net worth above it: the page's whole is always
+    // on screen, the tab only chooses which part is listed.
+    expect(screen.getByTestId("account-list")).toHaveTextContent("No investments accounts yet");
+    expect(screen.queryByText("Checking")).not.toBeInTheDocument();
+    expect(screen.getByTestId("net-worth")).toBeInTheDocument();
+  });
+
+  it("offers a tab only for the kinds of account the household has", () => {
+    render(<Accounts />);
+    expect(screen.getByTestId("accounts-view-cash")).toBeInTheDocument();
+    expect(screen.getByTestId("accounts-view-credit")).toBeInTheDocument();
+    expect(screen.queryByTestId("accounts-view-loans")).not.toBeInTheDocument();
+    // Grouped under their kind, with a total for the group.
+    expect(screen.getByTestId("account-group-total-credit").textContent).toBe(
+      `${formatMoney("850.00", "USD")} owed`,
+    );
+  });
+
+  it("names the owner with an avatar, not a line of text", () => {
+    render(<Accounts />);
+    const avatar = screen.getByTestId("account-owner-acct-1");
+    expect(avatar).toHaveAccessibleName("Owner: Alice");
+    expect(avatar).toHaveTextContent("AL");
+    // The row's only words are the account's name and its balance.
+    const row = screen.getByTestId("account-edit-acct-1");
+    expect(row).not.toHaveTextContent("USD");
+  });
+
+  it("puts the net worth, its change and its line first", () => {
+    render(<Accounts />);
+    expect(screen.getByTestId("net-worth")).toHaveTextContent(formatMoney("100.00", "USD"));
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
+      `Up ${formatMoney("60.00", "USD")} over 3 months`,
+    );
+    expect(screen.getByTestId("accounts-net-worth-chart")).toHaveAccessibleName(/went up/);
   });
 
   it("keeps the panel addressable from the tab that selected it", async () => {
@@ -225,11 +288,12 @@ describe("<Accounts /> views", () => {
     const user = userEvent.setup();
     render(<Accounts />);
 
-    await user.tab();
     // One tab stop for the group, then the arrow keys move inside it.
     const balances = screen.getByTestId("accounts-view-balances");
-    expect(balances).toHaveFocus();
+    balances.focus();
     await user.keyboard("{ArrowRight}");
+    expect(screen.getByTestId("accounts-view-cash")).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
     expect(screen.getByTestId("accounts-view-investments")).toHaveFocus();
     expect(screen.getByTestId("accounts-view-investments")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("investments-view")).toBeInTheDocument();
@@ -354,7 +418,63 @@ describe("stale accounts", () => {
         <Accounts />
       </QueryClientProvider>,
     );
-    expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("not reported since");
+    expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("Not reported since");
     expect(screen.queryByTestId("account-stale-acct-1")).toBeNull();
+  });
+});
+
+describe("balance history", () => {
+  const wrap = (ui: React.ReactNode) =>
+    render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+
+  it("lists the recorded balances and saves a past one on its own day", async () => {
+    const user = userEvent.setup();
+    wrap(<Accounts />);
+    await user.click(screen.getByTestId("account-edit-acct-1"));
+    const history = screen.getByTestId("balance-history");
+    expect(within(history).getByTestId("history-row-2025-12-31")).toHaveTextContent(
+      formatMoney("80.00", "USD"),
+    );
+    await user.type(within(history).getByTestId("history-date"), "2025-06-30");
+    await user.type(within(history).getByTestId("history-amount"), "42.50");
+    await user.click(within(history).getByTestId("history-add"));
+    expect(h.putBalance).toHaveBeenCalledWith(
+      { accountId: "acct-1", date: "2025-06-30", balance: "42.50" },
+      expect.anything(),
+    );
+  });
+
+  it("takes a card's past balance as the amount owed", async () => {
+    const user = userEvent.setup();
+    wrap(<Accounts />);
+    await user.click(screen.getByTestId("account-edit-acct-card"));
+    const history = screen.getByTestId("balance-history");
+    await user.type(within(history).getByTestId("history-date"), "2025-06-30");
+    await user.type(within(history).getByTestId("history-amount"), "300");
+    await user.click(within(history).getByTestId("history-add"));
+    expect(h.putBalance.mock.calls[0][0].balance).toBe("-300");
+  });
+
+  it("removes a balance only after a second, explicit tap", async () => {
+    const user = userEvent.setup();
+    wrap(<Accounts />);
+    await user.click(screen.getByTestId("account-edit-acct-1"));
+    await user.click(screen.getByTestId("history-remove-2025-12-31"));
+    expect(h.deleteBalance).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("history-remove-confirm-2025-12-31"));
+    expect(h.deleteBalance).toHaveBeenCalledWith(
+      { accountId: "acct-1", date: "2025-12-31" },
+      expect.anything(),
+    );
+  });
+
+  it("asks for a day before saving", async () => {
+    const user = userEvent.setup();
+    wrap(<Accounts />);
+    await user.click(screen.getByTestId("account-edit-acct-1"));
+    await user.type(screen.getByTestId("history-amount"), "10");
+    await user.click(screen.getByTestId("history-add"));
+    expect(screen.getByTestId("history-error")).toHaveTextContent("Pick the day");
+    expect(h.putBalance).not.toHaveBeenCalled();
   });
 });

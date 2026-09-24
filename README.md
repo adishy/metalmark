@@ -1,11 +1,32 @@
-# MetalMark — Self-Hosted Personal Finance
+# MetalMark Money — Self-Hosted Personal Finance
 
-> Named for the butterfly family — **MetalMark**, self-hosted.
+> Named for the butterfly family — **MetalMark Money**, self-hosted. (Inside the code, the database and the
+> environment variables it is `metalmark`; the name people see is MetalMark Money.)
 
 A self-hostable personal-finance app for a small household (a few users, some with joined
 finances). Feature target: **what the mainstream personal-finance apps do** — auto-syncing
 accounts, a bulletproof transaction pipeline with categories/owners/splits, shared accounts,
 swipe-to-review, and reporting (Sankey cash flow, category breakdowns, net worth over time).
+
+## Screenshots
+
+From the demo household (`python -m app.seed --demo`); every name and number is made up.
+
+| Accounts | Transactions |
+|---|---|
+| ![Accounts: net worth and its line first, then accounts grouped by kind](docs/screenshots/accounts.png) | ![Transactions: filters, and each row's category with its emoji](docs/screenshots/transactions.png) |
+
+| Income vs expense | Auto-categorize (Admin) |
+|---|---|
+| ![Cash flow: monthly income and expense bars with a net line](docs/screenshots/cash-flow.png) | ![Auto-categorize: a local once-over that warns before it overwrites](docs/screenshots/auto-categorize.png) |
+
+| Accounts on a phone | Review | Pick a category | Balance history |
+|---|---|---|---|
+| ![Accounts on a phone](docs/screenshots/accounts-phone.png) | ![The review deck](docs/screenshots/review-phone.png) | ![Choosing a category from the review deck](docs/screenshots/review-category-phone.png) | ![Typing past balances into an account](docs/screenshots/balance-history-phone.png) |
+
+Regenerate them against a running dev stack with
+`OUT=../docs/screenshots node scripts/readme-screenshots.mjs` from `frontend/` (set `CHROME` to a
+Chromium binary if Playwright's own is not installed).
 
 ## Product decisions (locked)
 
@@ -20,6 +41,7 @@ swipe-to-review, and reporting (Sankey cash flow, category breakdowns, net worth
 | Manual parity | **Anything automation can do, a human can do by hand** — manual accounts, transactions, holdings (with types), balances, transfers, FX rates | Fixes the common self-hosting gripe that manual/cash is second-class; also makes sync auditable and recoverable. |
 | Build order | **Manual-first, then automate** — build+prove the manual ledger, then add SimpleFIN sync as "just another writer" into the proven model | Correctness before convenience; sync can't corrupt a model it doesn't own. |
 | Robustness | **Transactions are decoupled from connections** — removing/re-adding a connection never destroys history | Directly fixes the flaky-reconnect + duplicate-transaction pain of the hosted apps. |
+| Categories | **A typed starter set with emoji, and a private auto-categorizer** — every household starts with income / expense / transfer groups; a local categorizer (no network, no model) files new transactions from their text, sign and the household's own history; Admin can re-run it over everything (ADR-0049) | A household's first sync lands mostly filed, and moves between its own accounts leave cash flow instead of reading as spending. |
 | Correctness | **Test harness is first-class**: red-green TDD, unit + integration (real Postgres, mock SimpleFIN) + e2e (Playwright), realistic fixtures, CI gates | User's hard requirement; financial correctness is non-negotiable. |
 
 ## Run it locally (container-first)

@@ -99,6 +99,44 @@ class CategoryCreate(BaseModel):
     sort: int = 0
 
 
+class BalanceIn(BaseModel):
+    """One day's balance, typed by hand. Signed, like every balance (ADR-0043)."""
+
+    balance: Decimal
+
+
+class BalanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    balance_date: date
+    balance: Decimal
+    currency: str
+
+
+class CategoryUpdate(BaseModel):
+    group_id: uuid.UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    icon: str | None = Field(default=None, max_length=40)
+    color: str | None = None
+    sort: int | None = None
+
+    @model_validator(mode="after")
+    def _required_fields_not_clearable(self) -> CategoryUpdate:
+        for field in ("group_id", "name", "sort"):
+            if is_set(self, field) and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
+class AutoCategorizeResult(BaseModel):
+    """What "auto-categorize all" did, for the admin who asked."""
+
+    examined: int
+    categorized: int
+    changed: int
+    left_blank: int
+    transfers_linked: int
+
+
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

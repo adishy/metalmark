@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
+import InstitutionsSection from "@/pages/InstitutionsSection";
 import { useAuth } from "@/auth/AuthContext";
 import {
   downloadAccountCsv,
@@ -17,6 +18,7 @@ import {
   useCreateOwner,
   useCreateTag,
   useDeleteCategory,
+  useUpdateCategory,
   useDeleteCategoryGroup,
   useDeleteOwner,
   useDeleteTag,
@@ -73,6 +75,7 @@ const TABS = [
   { id: "admin", label: "Admin", adminOnly: true },
   { id: "categories", label: "Categories" },
   { id: "tags", label: "Tags" },
+  { id: "institutions", label: "Institutions" },
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
   { id: "data", label: "Data" },
@@ -141,7 +144,7 @@ export default function Settings() {
     // can disagree. The heading spans both columns because it labels the page,
     // not the panel.
     <div className="mx-auto max-w-4xl space-y-4 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
-      <h1 className="text-lg font-medium lg:col-span-2">Settings</h1>
+      <h1 className="text-xl font-semibold lg:col-span-2">Settings</h1>
       <div
         // Below `lg:` this is the underline strip it has always been. At `lg:` it
         // is a vertical rail, and a rail is not the strip rotated: the underline
@@ -149,7 +152,7 @@ export default function Settings() {
         // `rounded-control`, because a tab that sits *beside* its panel has no
         // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
         // that may still wrap turns its overflow into extra columns.
-        className="flex flex-wrap gap-1 border-b border-border lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
+        className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:flex-wrap sm:px-0 lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
         role="tablist"
         aria-label="Settings sections"
         aria-orientation={rail ? "vertical" : "horizontal"}
@@ -171,7 +174,7 @@ export default function Settings() {
             // block is emitted after the unvariant utilities — so `lg:border-b-0`
             // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
             // without a `!` or a duplicated branch.
-            className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm lg:justify-start lg:rounded-control lg:border-b-0 ${
+            className={`inline-flex min-h-11 shrink-0 items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
               tab === t.id
                 ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
                 : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"
@@ -192,6 +195,7 @@ export default function Settings() {
         {tab === "admin" && <AdminSection onOpenConnections={() => setTab("connections")} />}
         {tab === "categories" && <CategoriesSection />}
         {tab === "tags" && <TagsSection />}
+        {tab === "institutions" && <InstitutionsSection />}
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
         {tab === "data" && <DataSection />}
@@ -234,10 +238,10 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function AdminSection({ onOpenConnections }: { onOpenConnections: () => void }) {
   return (
     <div className="space-y-4">
-      <Card title="MetalMark internals">
+      <Card title="MetalMark Money internals">
         <p className="text-sm text-fg-muted">
           <span className="font-semibold text-fg">Sync activity</span> is the control panel for
-          everything MetalMark does on its own — what is queued, what is running, what ran, and the
+          everything MetalMark Money does on its own — what is queued, what is running, what ran, and the
           log of each run.
         </p>
         <ul className="ml-4 list-disc space-y-1 text-sm text-fg-muted">
@@ -493,12 +497,14 @@ function CategoriesSection() {
   const delGroup = useDeleteCategoryGroup();
   const createCat = useCreateCategory();
   const delCat = useDeleteCategory();
+  const updateCat = useUpdateCategory();
 
   const [gName, setGName] = useState("");
   const [gType, setGType] = useState("expense");
   const [cName, setCName] = useState("");
   const [cGroup, setCGroup] = useState("");
   const [cColor, setCColor] = useState("#14b8a6");
+  const [cIcon, setCIcon] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [cErr, setCErr] = useState<string | null>(null);
 
@@ -508,6 +514,7 @@ function CategoriesSection() {
     cName: useFieldId("cat-name"),
     cGroup: useFieldId("cat-group"),
     cColor: useFieldId("cat-color"),
+    cIcon: useFieldId("cat-icon"),
   };
 
   const byGroup = useMemo(() => {
@@ -557,7 +564,7 @@ function CategoriesSection() {
 
       <Card title="Add category">
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-4"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-5"
           data-testid="add-category-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -565,8 +572,18 @@ function CategoriesSection() {
             setCErr(err);
             if (err) return;
             createCat.mutate(
-              { name: cName, group_id: cGroup || defaultGroup, color: cColor },
-              { onSuccess: () => setCName("") },
+              {
+                name: cName,
+                group_id: cGroup || defaultGroup,
+                color: cColor,
+                icon: cIcon.trim() || null,
+              },
+              {
+                onSuccess: () => {
+                  setCName("");
+                  setCIcon("");
+                },
+              },
             );
           }}
         >
@@ -579,6 +596,9 @@ function CategoriesSection() {
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="Emoji" htmlFor={ids.cIcon} hint="Optional, e.g. 🛒">
+            <Input id={ids.cIcon} value={cIcon} maxLength={16} onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
           </Field>
           <Field label="Color" htmlFor={ids.cColor}>
             <Input id={ids.cColor} type="color" value={cColor} onChange={(e) => setCColor(e.target.value)} data-testid="category-color" className="h-10 p-1" />
@@ -612,9 +632,30 @@ function CategoriesSection() {
               <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
                   <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="flex items-center gap-2">
-                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
-                      {c.name}
+                    <span className="flex min-w-0 flex-1 items-center gap-3">
+                      {/* The emoji is edited in place: it is the one field
+                          people change for fun, and a dialog for one
+                          character is a long way round. Saved on blur. The
+                          wrapper sets the width — the control is w-full. */}
+                      <span className="w-14 shrink-0">
+                      <Input
+                        aria-label={`Emoji for ${c.name}`}
+                        defaultValue={c.icon ?? ""}
+                        maxLength={16}
+                        className="px-1 text-center"
+                        onBlur={(e) => {
+                          const next = e.target.value.trim() || null;
+                          if (next !== (c.icon ?? null)) {
+                            updateCat.mutate({ id: c.id, body: { icon: next } });
+                          }
+                        }}
+                        data-testid={`category-icon-${c.id}`}
+                      />
+                      </span>
+                      {!c.icon && (
+                        <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
+                      )}
+                      <span className="truncate">{c.name}</span>
                     </span>
                     <Button
                       variant="ghost"
@@ -1027,7 +1068,7 @@ function DataSection() {
             }}
           >
             <p className="text-sm text-fg-muted">
-              A document exported from MetalMark — this household or another one. It merges:
+              A document exported from MetalMark Money — this household or another one. It merges:
               nothing here is deleted, and anything the document and this household already agree
               on is left alone rather than duplicated.
             </p>
@@ -1272,7 +1313,7 @@ function OwnerRow({
         )}
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
-            isShared ? "bg-surface-inset text-fg" : "bg-accent/15 text-accent"
+            isShared ? "bg-surface-inset text-fg" : "bg-accent/15 text-accent-ink"
           }`}
           data-testid={`owner-kind-${owner.id}`}
         >

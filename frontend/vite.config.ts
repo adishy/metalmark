@@ -13,8 +13,8 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       manifest: {
-        name: "metalmark",
-        short_name: "metalmark",
+        name: "MetalMark Money",
+        short_name: "MetalMark",
         description: "Self-hosted personal finance",
         theme_color: "#0f172a",
         background_color: "#0f172a",

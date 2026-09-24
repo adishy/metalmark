@@ -32,6 +32,21 @@ describe("<Login />", () => {
     expect(screen.getByTestId("password")).toHaveAttribute("type", "password");
   });
 
+  it("is marked up so a password manager can find and fill it", () => {
+    renderLogin();
+    const form = screen.getByTestId("login-form");
+    expect(form).toHaveAttribute("method", "post");
+    expect(form).toHaveAttribute("action", "/api/auth/login");
+    const user = screen.getByLabelText("Email");
+    expect(user).toHaveAttribute("name", "username");
+    expect(user).toHaveAttribute("autocomplete", "username");
+    expect(user).toHaveAttribute("autocapitalize", "none");
+    const pw = screen.getByLabelText("Password");
+    expect(pw).toHaveAttribute("name", "password");
+    expect(pw).toHaveAttribute("autocomplete", "current-password");
+    expect(screen.getByTestId("login-submit")).toHaveAttribute("type", "submit");
+  });
+
   it("shows the mark above the name, decoratively", () => {
     // The sign-in page is outside the shell, so it renders the mark itself
     // rather than inheriting the header's. Same decorative rule as there: the

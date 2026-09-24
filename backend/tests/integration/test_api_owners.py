@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -560,10 +561,12 @@ async def test_the_sankey_totals_the_same_window_the_bars_do(client):
 
     assert graph["attribution"] == bars["attribution"] == donut["attribution"] == "row"
     assert graph["base_currency"] == bars["base_currency"] == donut["base_currency"]
-    assert (graph["start"], graph["end"]) == (bars["start"], bars["end"]) == (
-        donut["start"],
-        donut["end"],
+    assert (graph["start"], graph["end"]) == (donut["start"], donut["end"]) == (
+        "2026-01-01", "2026-03-31",
     )
+    # The bars open at the first transaction instead (they would be empty
+    # before it), so they cover the same money over a shorter axis.
+    assert (bars["start"], bars["end"]) == ("2026-02-05", "2026-03-31")
     assert Decimal(graph["total_income"]) == bars_total("income") == Decimal("2000")
     # The one place the two shapes part company, asserted rather than glossed: the
     # series carries expense negative, the graph carries it positive.
@@ -670,8 +673,50 @@ async def test_an_omitted_start_opens_where_the_data_does(client):
 
     for path in REPORTS:
         body = (await client.get(path, params={"end": "2026-09-20"})).json()
-        assert body["start"] == "2026-02-14", path
+        # Cash flow's bars start at the first money that moved (below); every
+        # other report opens at the first dated row of any kind.
+        expected = "2026-05-01" if path == "/reports/cash-flow" else "2026-02-14"
+        assert body["start"] == expected, path
         assert body["end"] == "2026-09-20", path
+
+
+async def test_cash_flow_is_cut_to_the_span_that_has_money_in_it(client):
+    """Forty-five days of history in a twelve-month window are daily bars.
+
+    Found on a real instance whose bank history began six weeks before the
+    report: `auto` resolved over the requested 365 days to months, and the
+    whole of the household's activity was two bars at the right edge of an empty
+    year. The window now opens at the first transaction, `auto` resolves over
+    what is left, and the echoed `start` says so.
+    """
+    await _signup(client)
+    acct = (await client.post("/accounts", json={
+        "name": "Chk", "type": "depository", "currency": "USD",
+        "current_balance": "100", "balance_date": "2025-01-01",
+    })).json()
+    for day, amount in (("2026-08-10", "-40"), ("2026-08-20", "3000"), ("2026-09-20", "-12")):
+        await client.post("/transactions", json={
+            "account_id": acct["id"], "amount": amount, "transacted_at": f"{day}T12:00:00Z",
+        })
+
+    body = (await client.get(
+        "/reports/cash-flow", params={"start": "2025-09-24", "end": "2026-09-23"})).json()
+    assert body["start"] == "2026-08-10"
+    assert body["granularity"] == "day"
+    assert body["points"][0]["date"] == "2026-08-10"
+    assert body["points"][0]["expense"] == "-40.0000"
+    assert len(body["points"]) == 45
+
+    # Nor does it run past today: the future has no bars to draw.
+    ahead = (await client.get(
+        "/reports/cash-flow", params={"start": "2026-08-01", "end": "2099-12-31"})).json()
+    assert ahead["end"] == datetime.now(UTC).date().isoformat()
+    assert ahead["points"][-1]["date"] <= ahead["end"]
+
+    # A window that starts after the first transaction is left as asked.
+    inside = (await client.get(
+        "/reports/cash-flow", params={"start": "2026-09-01", "end": "2026-09-23"})).json()
+    assert inside["start"] == "2026-09-01"
 
 
 async def test_an_inverted_window_is_refused_rather_than_drawn_empty(client):

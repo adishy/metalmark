@@ -372,6 +372,131 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/balances:
+    get:
+      tags:
+      - accounts
+      summary: List Balances
+      description: The account's balance history, newest first.
+      operationId: list_balances_accounts__account_id__balances_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BalanceOut'
+                title: Response List Balances Accounts  Account Id  Balances Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/balances/{on}:
+    put:
+      tags:
+      - accounts
+      summary: Put Balance
+      description: Record or correct the balance on one day — history the provider never sent.
+      operationId: put_balance_accounts__account_id__balances__on__put
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: 'on'
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+          title: 'On'
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BalanceIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - accounts
+      summary: Delete Balance
+      operationId: delete_balance_accounts__account_id__balances__on__delete
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: 'on'
+        in: path
+        required: true
+        schema:
+          type: string
+          format: date
+          title: 'On'
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /category-groups:
     get:
       tags:
@@ -500,6 +625,113 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /categories/{category_id}:
+    patch:
+      tags:
+      - categories
+      summary: Update Category
+      operationId: update_category_categories__category_id__patch
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - categories
+      summary: Delete Category
+      operationId: delete_category_categories__category_id__delete
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /categories/auto-categorize-all:
+    post:
+      tags:
+      - categories
+      summary: Auto Categorize All
+      description: 'Link what transfers it can, then re-categorize every transaction.
+
+
+        **Overwrites** existing categories, including ones set by hand — the Admin
+
+        page says so and asks first. Split parents keep their splits. Runs locally:
+
+        nothing about a transaction leaves the server.'
+      operationId: auto_categorize_all_categories_auto_categorize_all_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutoCategorizeResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /tags:
     get:
       tags:
@@ -558,37 +790,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagOut'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /categories/{category_id}:
-    delete:
-      tags:
-      - categories
-      summary: Delete Category
-      operationId: delete_category_categories__category_id__delete
-      parameters:
-      - name: category_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Category Id
-      - name: metalmark_session
-        in: cookie
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Metalmark Session
-      responses:
-        '204':
-          description: Successful Response
         '422':
           description: Validation Error
           content:
@@ -3272,6 +3473,176 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /institutions:
+    get:
+      tags:
+      - institutions
+      summary: List Institutions
+      description: Every institution the household's accounts name, and whether it has a logo.
+      operationId: list_institutions_institutions_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InstitutionOut'
+                title: Response List Institutions Institutions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /institutions/{key}/logo:
+    get:
+      tags:
+      - institutions
+      summary: Get Logo
+      description: 'The image. ``nosniff`` and a sandboxing CSP: served from the app''s own
+
+        origin, it must only ever be an image.'
+      operationId: get_logo_institutions__key__logo_get
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - institutions
+      summary: Upload Logo
+      operationId: upload_logo_institutions__key__logo_put
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoUpload'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstitutionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - institutions
+      summary: Delete Logo
+      operationId: delete_logo_institutions__key__logo_delete
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /institutions/fetch-logos:
+    post:
+      tags:
+      - institutions
+      summary: Fetch Logos
+      description: 'Fetch the icon of every known institution in use that has no logo yet.
+
+
+        The server asks each institution''s own website, once; the browser never
+
+        does. A logo already there — fetched or uploaded — is kept.'
+      operationId: fetch_logos_institutions_fetch_logos_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FetchLogosResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /admin/agent-tokens:
     get:
       tags:
@@ -4080,6 +4451,64 @@ components:
       - percent
       - holdings
       title: AllocationRowOut
+    AutoCategorizeResult:
+      properties:
+        examined:
+          type: integer
+          title: Examined
+        categorized:
+          type: integer
+          title: Categorized
+        changed:
+          type: integer
+          title: Changed
+        left_blank:
+          type: integer
+          title: Left Blank
+        transfers_linked:
+          type: integer
+          title: Transfers Linked
+      type: object
+      required:
+      - examined
+      - categorized
+      - changed
+      - left_blank
+      - transfers_linked
+      title: AutoCategorizeResult
+      description: What "auto-categorize all" did, for the admin who asked.
+    BalanceIn:
+      properties:
+        balance:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Balance
+      type: object
+      required:
+      - balance
+      title: BalanceIn
+      description: One day's balance, typed by hand. Signed, like every balance (ADR-0043).
+    BalanceOut:
+      properties:
+        balance_date:
+          type: string
+          format: date
+          title: Balance Date
+        balance:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Balance
+        currency:
+          type: string
+          title: Currency
+      type: object
+      required:
+      - balance_date
+      - balance
+      - currency
+      title: BalanceOut
     Body_commit_csv_import_csv_commit_post:
       properties:
         file:
@@ -4529,6 +4958,39 @@ components:
         and unlike ``CashFlowPoint.expense``. The direction is carried by the report
 
         being about spending, so a signed figure would be a second place to say it.'
+    CategoryUpdate:
+      properties:
+        group_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Group Id
+        name:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Name
+        icon:
+          anyOf:
+          - type: string
+            maxLength: 40
+          - type: 'null'
+          title: Icon
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+        sort:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Sort
+      type: object
+      title: CategoryUpdate
     CheckItemOut:
       properties:
         account_id:
@@ -4831,6 +5293,33 @@ components:
         header is line 1, so a data row''s line is its file position, not its index in
 
         the parsed rows. That is the number a human needs to go and fix the cell.'
+    FetchLogosResult:
+      properties:
+        fetched:
+          items:
+            type: string
+          type: array
+          title: Fetched
+        failed:
+          items:
+            type: string
+          type: array
+          title: Failed
+        unknown:
+          items:
+            type: string
+          type: array
+          title: Unknown
+        kept:
+          type: integer
+          title: Kept
+      type: object
+      required:
+      - fetched
+      - failed
+      - unknown
+      - kept
+      title: FetchLogosResult
     FxRateOut:
       properties:
         id:
@@ -5223,6 +5712,40 @@ components:
         last month is a real, importable document, and refusing the whole file over it
 
         would make an export from a live household un-importable.'
+    InstitutionOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        key:
+          type: string
+          title: Key
+        fetchable:
+          type: boolean
+          title: Fetchable
+        has_logo:
+          type: boolean
+          title: Has Logo
+        logo_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Logo Source
+        logo_updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Logo Updated At
+      type: object
+      required:
+      - name
+      - key
+      - fetchable
+      - has_logo
+      - logo_source
+      - logo_updated_at
+      title: InstitutionOut
     InvestmentTransactionCreate:
       properties:
         account_id:
@@ -5430,6 +5953,23 @@ components:
       - email
       - password
       title: LoginRequest
+    LogoUpload:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        data_base64:
+          type: string
+          maxLength: 800000
+          minLength: 1
+          title: Data Base64
+      type: object
+      required:
+      - name
+      - data_base64
+      title: LogoUpload
     MeResponse:
       properties:
         user:

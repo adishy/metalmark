@@ -4,10 +4,13 @@ import type {
   Account,
   AccountCreate,
   AccountUpdate,
+  AutoCategorizeResult,
+  BalancePoint,
   CashFlowSankey,
   CashFlowSeries,
   Category,
   CategoryGroup,
+  CategoryUpdate,
   FxRate,
   GranularityParam,
   Household,
@@ -355,8 +358,12 @@ function useInvalidateTaxonomy() {
 export function useCreateCategory() {
   const invalidate = useInvalidateTaxonomy();
   return useMutation({
-    mutationFn: (body: { group_id: string; name: string; color?: string | null }) =>
-      api.post<Category>("/categories", body),
+    mutationFn: (body: {
+      group_id: string;
+      name: string;
+      color?: string | null;
+      icon?: string | null;
+    }) => api.post<Category>("/categories", body),
     onSuccess: invalidate,
   });
 }
@@ -421,3 +428,59 @@ export function useUpsertFxRate() {
   });
 }
 
+
+export function useUpdateCategory() {
+  const invalidate = useInvalidateTaxonomy();
+  return useMutation({
+    mutationFn: (v: { id: string; body: CategoryUpdate }) =>
+      api.patch<Category>(`/categories/${v.id}`, v.body),
+    onSuccess: invalidate,
+  });
+}
+
+/** Admin: link transfers, then re-file every transaction. Overwrites categories. */
+export function useAutoCategorizeAll() {
+  const invalidate = useInvalidateLedger();
+  return useMutation({
+    mutationFn: () => api.post<AutoCategorizeResult>("/categories/auto-categorize-all", {}),
+    onSuccess: invalidate,
+  });
+}
+
+// -- balance history --
+
+export function useBalances(accountId: string | null) {
+  return useQuery({
+    queryKey: ["balances", accountId],
+    queryFn: () => api.get<BalancePoint[]>(`/accounts/${accountId}/balances`),
+    enabled: accountId !== null,
+  });
+}
+
+export function usePutBalance() {
+  const invalidate = useInvalidateLedger();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { accountId: string; date: string; balance: string }) =>
+      api.put<BalancePoint>(`/accounts/${v.accountId}/balances/${v.date}`, {
+        balance: v.balance,
+      }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["balances", v.accountId] });
+      invalidate();
+    },
+  });
+}
+
+export function useDeleteBalance() {
+  const invalidate = useInvalidateLedger();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { accountId: string; date: string }) =>
+      api.del<void>(`/accounts/${v.accountId}/balances/${v.date}`),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["balances", v.accountId] });
+      invalidate();
+    },
+  });
+}

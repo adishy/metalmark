@@ -38,13 +38,18 @@ export default function Signup() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
+      {/* The same markup a password manager looks for on sign-in (see
+          Login.tsx), with `new-password` on the password so it offers to
+          generate one and saves it against the username above. */}
       <form
         onSubmit={submit}
+        method="post"
+        action="/api/auth/signup"
         className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8"
         data-testid="signup-form"
       >
         <div className="text-center">
-          <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
+          <h1 className="text-2xl font-semibold text-accent">MetalMark Money</h1>
           <p className="text-sm text-fg-muted">Create your account</p>
         </div>
         {/* Shared primitives — see the note in Login.tsx: the hand-rolled input
@@ -54,7 +59,13 @@ export default function Signup() {
         <Field label="Email" htmlFor="signup-email">
           <Input
             id="signup-email"
+            name="username"
             type="email"
+            inputMode="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
@@ -64,6 +75,7 @@ export default function Signup() {
         <Field label="Display name" htmlFor="signup-name">
           <Input
             id="signup-name"
+            name="name"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             autoComplete="name"
@@ -73,7 +85,10 @@ export default function Signup() {
         <Field label="Password" htmlFor="signup-password">
           <Input
             id="signup-password"
+            name="new-password"
             type="password"
+            required
+            minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="new-password"
@@ -87,6 +102,8 @@ export default function Signup() {
         >
           <Input
             id="signup-household"
+            name="household"
+            autoComplete="off"
             value={household}
             onChange={(e) => setHousehold(e.target.value)}
             data-testid="signup-household"

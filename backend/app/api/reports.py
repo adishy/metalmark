@@ -14,6 +14,7 @@ from app.schemas.reports import (
     SpendingReport,
 )
 from app.services import reports
+from app.services.ledger import today as ledger_today
 from app.services.periods import GranularityIn
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -75,6 +76,20 @@ async def cash_flow(
     ctx: RequestContext = Depends(get_context),
 ):
     start, end = await _window(ctx, start, end)
+    # The chart starts where the money does. A window opening before the first
+    # transaction is drawn from the first transaction, and `auto` is resolved over
+    # that span: forty-five days of history inside "last 12 months" are daily bars,
+    # not two monthly bars at the end of an empty year. The echoed `start` says
+    # where the points actually begin.
+    first = await reports.earliest_flow(ctx.session)
+    if first is not None and start < first <= end:
+        start = first
+    # And it ends at today: a "this year" window in September has no money in
+    # October, and three empty bars with the net line dropping to zero into them
+    # read as a collapse rather than as the future. The echoed `end` says so.
+    now = ledger_today()
+    if start <= now < end:
+        end = now
     base, resolved, out = await reports.cash_flow_series(
         ctx.session, ctx.household_id, start, end, owner_id, granularity
     )

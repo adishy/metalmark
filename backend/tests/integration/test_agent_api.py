@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy import select, text, update
 
 from app.deps import SESSION_COOKIE
+from app.services.default_categories import DEFAULT_CATEGORIES
 
 pytestmark = pytest.mark.integration
 
@@ -1045,7 +1046,11 @@ async def test_generic_labels_and_the_shared_owner_survive(agent):
     a, _s, _ids, _issued = agent
     names = {c["name"] for c in (await a.get("/agent/v1/categories")).json()}
     assert "Groceries" in names
-    assert all(n == "Groceries" or n.startswith("Category ") for n in names)
+    # The starter set is generic by construction (it ships in the repository);
+    # everything the household named itself is a pseudonym.
+    starter = {n for _g, _t, cats in DEFAULT_CATEGORIES for n, _i in cats}
+    assert all(n in starter or n.startswith("Category ") for n in names)
+    assert not any(OWNER in n or CHILD in n for n in names)
     owners = {o["name"] for o in (await a.get("/agent/v1/owners")).json()}
     assert "Shared" in owners
 

@@ -8,6 +8,7 @@ from app.models.identity import (  # noqa: F401
     Session,
     User,
 )
+from app.models.institution import InstitutionLogo  # noqa: F401
 from app.models.investments import (  # noqa: F401
     Holding,
     InvestmentTransaction,
@@ -38,6 +39,7 @@ __all__ = [
     "Session",
     "User",
     "Holding",
+    "InstitutionLogo",
     "InvestmentTransaction",
     "Security",
     "SecurityPrice",

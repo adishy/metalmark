@@ -17,6 +17,7 @@
 import { useState } from "react";
 
 import { useAgentTokens, useCreateAgentToken, useRevokeAgentToken } from "@/api/agent";
+import { useAutoCategorizeAll } from "@/api/hooks";
 import {
   useCancelJob,
   useChecks,
@@ -63,9 +64,9 @@ type Tone = "ok" | "warn" | "bad" | "busy" | "idle";
  */
 const TONES: Record<Tone, string> = {
   ok: "bg-positive/15 text-positive",
-  warn: "bg-warning/20 text-warning",
-  bad: "bg-negative/20 text-negative",
-  busy: "bg-accent/15 text-accent",
+  warn: "bg-warning/20 text-warning-ink",
+  bad: "bg-negative/20 text-negative-ink",
+  busy: "bg-accent/15 text-accent-ink",
   idle: "bg-surface-inset text-fg-muted",
 };
 
@@ -175,8 +176,8 @@ export default function Admin() {
             promise a broader console. The word is here because it is the one a
             reader scans for — this page shipped with no occurrence of it
             anywhere, which is a large part of why it could not be found. */}
-        <p className="text-xs font-semibold tracking-wide text-fg-muted uppercase">Admin</p>
-        <h1 className="text-lg font-medium text-fg">Sync activity</h1>
+        <p className="text-sm font-medium text-fg-muted">Admin</p>
+        <h1 className="text-xl font-semibold text-fg">Sync activity</h1>
         <p className="mt-1 text-sm text-fg-muted">
           What is running, what ran, and what to do about it. Adding or removing a bank's
           credentials is in Settings → Connections; operating one is here.
@@ -425,9 +426,74 @@ export default function Admin() {
         )}
       </Card>
 
+      <AutoCategorize />
       <DataChecks />
       <AgentAccess />
     </div>
+  );
+}
+
+// ---- auto-categorize ------------------------------------------------------
+
+/**
+ * One pass over every transaction by the local categorizer (ADR-0049). It
+ * overwrites, including categories set by hand, so it asks first and says so in
+ * words — the one thing a person must know before pressing it. Nothing leaves
+ * the server: the categorizer has no network.
+ */
+export function AutoCategorize() {
+  const run = useAutoCategorizeAll();
+  const [confirming, setConfirming] = useState(false);
+  const r = run.data;
+
+  return (
+    <Card
+      title="Auto-categorize"
+      note="Files every transaction into its likely category from its merchant, its amount and how you have filed that merchant before. Runs on this server; nothing is sent anywhere."
+    >
+      {confirming ? (
+        <div
+          className="space-y-3 rounded-control border border-negative/40 bg-negative/10 p-3"
+          data-testid="auto-categorize-confirm"
+        >
+          <p className="text-sm text-fg">
+            This replaces the category on every transaction it has a guess for, including ones you chose
+            yourself. Transactions it has no guess for keep what they have. Split transactions are left alone.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="danger"
+              disabled={run.isPending}
+              aria-busy={run.isPending}
+              onClick={() => run.mutate(undefined, { onSettled: () => setConfirming(false) })}
+              data-testid="auto-categorize-run"
+            >
+              {run.isPending && <Spinner />}
+              Overwrite and categorize all
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="secondary" onClick={() => setConfirming(true)} data-testid="auto-categorize">
+          Auto-categorize all transactions
+        </Button>
+      )}
+      {r && (
+        <p className="text-sm text-fg" role="status" data-testid="auto-categorize-result">
+          Looked at {r.examined.toLocaleString()} transactions: changed {r.changed.toLocaleString()},{" "}
+          {r.left_blank.toLocaleString()} still uncategorized
+          {r.transfers_linked > 0 && `, and linked ${r.transfers_linked.toLocaleString()} transfers`}.
+        </p>
+      )}
+      {run.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(run.error as Error).message}
+        </p>
+      )}
+    </Card>
   );
 }
 

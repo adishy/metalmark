@@ -145,3 +145,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0046](0046-rates-are-fetched-daily.md) | Rates are fetched daily; the most recently stated rate wins in either direction | Accepted |
 | [0047](0047-an-upgrade-is-pull-and-restart.md) | An upgrade is a pull and a restart; the deployment backs up, migrates and verifies itself | Accepted |
 | [0048](0048-agents-read-an-anonymized-mirror.md) | Agents read an anonymized, read-only mirror of the app's API, by token | Proposed |
+| [0049](0049-transfers-pair-by-date-and-categories-start-typed.md) | Identical transfers pair by date; households start with typed categories and a local categorizer | Proposed |

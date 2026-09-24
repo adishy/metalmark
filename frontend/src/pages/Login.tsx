@@ -29,8 +29,18 @@ export default function Login() {
 
   return (
     <div className="flex h-full items-center justify-center p-4">
+      {/* Marked up the way password managers look for a sign-in form (web.dev
+          "Sign-in form best practices"; Chromium's password form guidance): a
+          real <form> with method="post" and an action, a username field that
+          says `autocomplete="username"` and a password field that says
+          `current-password`, each with a stable `id` and `name` and a <label>,
+          and a real submit button. The submit handler still does the work — the
+          action is only what the form claims to be, which is what a manager
+          reads when it decides to offer to fill or save. */}
       <form
         onSubmit={submit}
+        method="post"
+        action="/api/auth/login"
         className="w-full max-w-sm space-y-4 rounded-card bg-surface-raised p-8"
         data-testid="login-form"
       >
@@ -41,7 +51,7 @@ export default function Login() {
             the brand before the form. */}
         <div className="flex flex-col items-center gap-2 text-center">
           <MetalMark size={48} />
-          <h1 className="text-2xl font-semibold text-accent">MetalMark</h1>
+          <h1 className="text-2xl font-semibold text-accent">MetalMark Money</h1>
           <p className="text-sm text-fg-muted">Sign in to your household</p>
         </div>
         {/* The shared primitives, not hand-rolled inputs. The inline version
@@ -52,7 +62,13 @@ export default function Login() {
         <Field label="Email" htmlFor="login-email">
           <Input
             id="login-email"
+            name="username"
             type="email"
+            inputMode="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="username"
@@ -62,7 +78,9 @@ export default function Login() {
         <Field label="Password" htmlFor="login-password">
           <Input
             id="login-password"
+            name="password"
             type="password"
+            required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"

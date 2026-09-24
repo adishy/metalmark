@@ -1190,9 +1190,10 @@ async def test_two_legs_arriving_in_one_payload_still_get_matched(hh) -> None:
 async def test_an_ambiguous_transfer_is_left_for_a_human(hh) -> None:
     """Two plausible legs on each side: the picker's job, not the matcher's.
 
-    The matcher links only when a row has exactly one plausible counterpart, so
-    ambiguity has to exist from *both* sides — otherwise each twin would resolve
-    against the single opposite leg and the ambiguity would never be seen.
+    The matcher links only when one plausible counterpart is strictly closer in
+    time than every other, so ambiguity has to exist from *both* sides and at the
+    same moment — otherwise each twin would resolve against the nearest opposite
+    leg and the ambiguity would never be seen.
     """
     moment = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
     payload = _payload({
@@ -1212,6 +1213,41 @@ async def test_an_ambiguous_transfer_is_left_for_a_human(hh) -> None:
     assert outcome.counts.transfers_matched == 0
     async with scoped_session(hh) as session:
         assert all(t.transfer_group_id is None for t in await _txns(session))
+
+
+async def test_identical_moves_on_consecutive_days_pair_by_date(hh) -> None:
+    """Two $20k moves a day apart are two transfers, not an ambiguity (ADR-0049).
+
+    Found on a real instance: each withdrawal had two exact deposits, one on its
+    own day and one a day off, and the "exactly one candidate" rule refused both,
+    so $40k was reported as income and $40k as spending. The closer deposit is
+    the leg, and each is used once.
+    """
+    day1 = datetime(2026, 9, 10, 12, 0, tzinfo=UTC)
+    day2 = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
+    payload = _payload({
+        scenarios.DEMO_CHECKING: [
+            _transfer_leg("out-1", "-20000.00", day1),
+            _transfer_leg("out-2", "-20000.00", day2),
+        ],
+        scenarios.DEMO_EMPTY: [
+            _transfer_leg("in-1", "20000.00", day1),
+            _transfer_leg("in-2", "20000.00", day2),
+        ],
+    })
+
+    connection_id = await _make_connection(hh)
+    outcome = await _sync(hh, connection_id, FakeProvider(script=scenarios.scenario(payload)))
+
+    assert outcome.counts.transfers_matched == 2
+    async with scoped_session(hh) as session:
+        rows = await _txns(session)
+        assert all(t.transfer_group_id is not None for t in rows)
+        by_group: dict = {}
+        for t in rows:
+            by_group.setdefault(t.transfer_group_id, []).append(t.transacted_at)
+        # Each pair is one day's withdrawal and that same day's deposit.
+        assert sorted(len(set(days)) for days in by_group.values()) == [1, 1]
 
 
 async def test_the_matcher_only_links_what_the_picker_would_offer(hh) -> None:

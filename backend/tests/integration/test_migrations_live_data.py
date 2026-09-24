@@ -328,3 +328,109 @@ def test_0008_adds_agent_tokens_to_a_live_database_and_touches_nothing_else(scra
     _alembic(scratch_db, "upgrade", "0008")
     with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
         assert _has_table(conn, "agent_tokens")
+
+
+# ---- 0009: starter categories --------------------------------------------------
+
+
+def _category_names(conn, hid) -> list[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT name FROM categories WHERE household_id = %s ORDER BY name", (hid,)
+    ).fetchall()]
+
+
+def test_0009_matches_the_apps_starter_set():
+    """The migration carries a frozen copy; at this revision the two are equal."""
+    import importlib.util
+
+    from app.services.default_categories import DEFAULT_CATEGORIES
+
+    path = BACKEND_DIR / "alembic" / "versions" / "0009_starter_categories.py"
+    spec = importlib.util.spec_from_file_location("m0009", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.DEFAULT_CATEGORIES == DEFAULT_CATEGORIES
+
+
+def test_0009_fills_only_empty_households_and_downgrade_keeps_what_is_used(scratch_db):
+    """A household with its own categories is untouched; an empty one gets the set,
+    typed; a downgrade removes the added rows except one a transaction now uses."""
+    _alembic(scratch_db, "upgrade", "0008")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        empty, empty_owner = _household(conn)
+        own, _own_owner = _household(conn)
+        group = conn.execute(
+            "INSERT INTO category_groups (household_id, name, type, sort) "
+            "VALUES (%s, 'Mine', 'expense', 0) RETURNING id", (own,)
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO categories (household_id, group_id, name, rollover, sort) "
+            "VALUES (%s, %s, 'Hobbies', false, 0)", (own, group)
+        )
+        acct = _account(conn, empty, empty_owner, "Checking", type_="depository",
+                        source=None, balance="10")
+
+    _alembic(scratch_db, "upgrade", "0009")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _category_names(conn, own) == ["Hobbies"]
+        names = _category_names(conn, empty)
+        assert "Groceries" in names and "Transfer" in names and "Paychecks" in names
+        types = dict(conn.execute(
+            "SELECT c.name, g.type FROM categories c JOIN category_groups g "
+            "ON g.id = c.group_id WHERE c.household_id = %s", (empty,)
+        ).fetchall())
+        assert types["Transfer"] == "transfer"
+        assert types["Paychecks"] == "income"
+        assert types["Rent"] == "expense"
+        icon = conn.execute(
+            "SELECT icon FROM categories WHERE household_id = %s AND name = 'Groceries'",
+            (empty,),
+        ).fetchone()[0]
+        assert icon == "🛒"
+        groceries = conn.execute(
+            "SELECT id FROM categories WHERE household_id = %s AND name = 'Groceries'",
+            (empty,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO transactions (household_id, account_id, amount, currency, "
+            "transacted_at, category_id, review_status, is_pending, is_hidden, "
+            "is_split_parent, source, field_sources) VALUES (%s, %s, -5, 'USD', now(), %s, "
+            "'needs_review', false, false, false, 'manual', '{}')",
+            (empty, acct, groceries),
+        )
+
+    _alembic(scratch_db, "downgrade", "0008")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _category_names(conn, own) == ["Hobbies"]
+        # The one in use stays, with its group; the rest are gone.
+        assert _category_names(conn, empty) == ["Groceries"]
+        assert conn.execute(
+            "SELECT count(*) FROM category_groups WHERE household_id = %s", (empty,)
+        ).fetchone()[0] == 1
+
+
+# ---- 0010: institution logos ---------------------------------------------------
+
+
+def test_0010_adds_institution_logos_with_rls_and_touches_nothing_else(scratch_db):
+    _alembic(scratch_db, "upgrade", "0009")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        conn.execute("DROP TABLE IF EXISTS institution_logos")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0010")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "institution_logos")
+        assert conn.execute(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = 'institution_logos'"
+        ).fetchone()[0]
+        assert _fingerprint(conn) == before
+
+    _alembic(scratch_db, "downgrade", "0009")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "institution_logos")
+        assert _fingerprint(conn) == before

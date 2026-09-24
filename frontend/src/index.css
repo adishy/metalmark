@@ -31,9 +31,18 @@
   --fg-muted: 71 85 105; /* slate-600  */
   --accent: 15 118 110; /* teal-700   */
   --accent-fg: 255 255 255;
+  /* Text on an accent *tint* (a selected chip, bg-accent/20). The accent itself
+     is 3.96:1 there; one step darker is 5.9:1. */
+  --accent-ink: 17 94 89; /* teal-800   */
   --positive: 4 120 87; /* emerald-700 */
   --negative: 185 28 28; /* red-700    */
+  /* Text on a negative tint: red-700 on bg-negative/20 is 4.57:1 on white and
+     under 4.5 on the page; red-800 is 6.4:1. */
+  --negative-ink: 153 27 27; /* red-800    */
   --warning: 180 83 9; /* amber-700  */
+  /* Text on a warning tint (a "needs review" badge): amber-700 is 3.80:1 on
+     bg-warning/20, amber-800 is 5.8:1. */
+  --warning-ink: 146 64 14; /* amber-800  */
   --danger: 185 28 28; /* red-700    */
   --focus: 15 118 110; /* teal-700   */
 
@@ -61,9 +70,12 @@
   --fg-muted: 148 163 184; /* slate-400  */
   --accent: 45 212 191; /* teal-400   */
   --accent-fg: 2 6 23; /* slate-950  */
+  --accent-ink: 45 212 191; /* the accent already clears 6.3:1 on its tint */
   --positive: 52 211 153; /* emerald-400 */
   --negative: 248 113 113; /* red-400    */
+  --negative-ink: 248 113 113;
   --warning: 251 191 36; /* amber-400  */
+  --warning-ink: 251 191 36; /* 6.9:1 on its tint already */
   --danger: 185 28 28; /* same fill in both themes */
   --focus: 45 212 191; /* teal-400   */
 

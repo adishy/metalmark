@@ -24,6 +24,7 @@ from app.api import (
     health,
     household,
     imports,
+    institutions,
     investments,
     owners,
     portability,
@@ -56,6 +57,7 @@ APP_ROUTERS = (
     connections.router,
     investments.router,
     portability.router,
+    institutions.router,
 )
 #: Agent access (ADR-0048): token administration, and the two anonymized surfaces.
 AGENT_ROUTERS = (agent_tokens.router, agent.router, anon_debug.router)
