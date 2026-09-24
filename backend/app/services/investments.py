@@ -310,9 +310,13 @@ async def value_account(
                 on=on,
                 base_ccy=base_ccy,
             )
-            valuation.unaccounted_cash_base = (
-                None if stated is None else quantize_storage(stated)
-            )
+            if stated is not None:
+                # The balance *is* this account's value, so it is stated here as
+                # such. Leaving `stated_balance_base` unset was read downstream as
+                # "no rate": a USD account in a USD household showed "No USD rate"
+                # and was counted at nothing (live instance, session 07).
+                valuation.stated_balance_base = quantize_storage(stated)
+                valuation.unaccounted_cash_base = quantize_storage(stated)
         return valuation
 
     sec_ids = {h.security_id for h in rows}
@@ -395,6 +399,12 @@ async def value_portfolio(
             )
             if stated is not None:
                 total += stated
+            continue
+        # A derived account with no positions yet is read from its balance, as
+        # net worth reads it (ADR-0044) — not as zero, which left the portfolio
+        # total short of the allocation beside it by that account's balance.
+        if not v.holdings and v.stated_balance_base is not None:
+            total += v.stated_balance_base
             continue
         total += v.market_value_base
     return valuations, quantize_storage(total)

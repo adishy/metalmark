@@ -696,3 +696,31 @@ async def test_an_investment_fee_is_spending_in_every_report_that_counts_it(hous
     assert total == graph["total_expense"]
     assert warnings == []
     assert all(r["category_id"] is None for r in graph["income"] + graph["expense"])
+
+
+async def test_accounts_with_no_positions_are_counted_at_their_balance(household_factory):
+    """The live instance's shape (session 07): SimpleFIN reports balances and no
+    holdings, so every investment account has no positions.
+
+    A stated account used to come back with `stated_balance_base` unset, which the
+    page reads as "no rate" — a USD account in a USD household showed "No USD rate"
+    and was counted at nothing. A derived one with no positions was counted at 0 in
+    the portfolio total while the allocation (and net worth, ADR-0044) counted its
+    balance, so the two totals on one page disagreed by exactly that balance.
+    """
+    hh = await household_factory()
+    async with scoped_session(hh) as s:
+        stated = await _account(s, hh, name="Synced", source="stated", balance=Decimal("95838.99"))
+        derived = await _account(s, hh, name="Manual", source="derived", balance=Decimal("21316"))
+
+        v_stated = await inv.value_account(s, stated, ON, BASE)
+        assert v_stated.stated_balance_base == Decimal("95838.9900")
+        assert v_stated.unaccounted_cash_base == Decimal("95838.9900")
+
+        v_derived = await inv.value_account(s, derived, ON, BASE)
+        assert v_derived.stated_balance_base == Decimal("21316.0000")
+
+        _valuations, total = await inv.value_portfolio(s, on=ON, base_ccy=BASE)
+        assert total == Decimal("117154.9900")
+        alloc = await inv.allocation(s, on=ON, base_ccy=BASE)
+        assert Decimal(alloc["total_base"]) == total

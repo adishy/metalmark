@@ -417,7 +417,40 @@ describe("<PortfolioHoldings />", () => {
     );
     render(<PortfolioHoldings />);
     expect(screen.getByTestId("account-no-positions-acct-broker")).toHaveTextContent(
-      "No positions in this account.",
+      "No positions recorded yet",
+    );
+  });
+
+  it("says a synced account with no positions reports a balance only — no rate warning", () => {
+    // The live instance's shape (session 07): SimpleFIN sends balances, not
+    // holdings. The account is counted at its balance; the page must not call
+    // that "unaccounted cash" or a missing rate.
+    h.portfolio.mockImplementation(() =>
+      query({
+        ...PORTFOLIO,
+        total_base: "95838.99",
+        accounts: [
+          {
+            ...BROKER,
+            balance_source: "stated",
+            balance_account: "95838.99",
+            market_value_account: "0",
+            market_value_base: "0",
+            stated_balance_base: "95838.99",
+            unaccounted_cash_base: "95838.99",
+            holdings: [],
+            unpriced: 0,
+            no_rate: 0,
+          },
+        ],
+      }),
+    );
+    render(<PortfolioHoldings />);
+    expect(screen.getByTestId("account-value-acct-broker")).toHaveTextContent("$95,838.99");
+    expect(screen.queryByTestId("account-no-rate-acct-broker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("account-unaccounted-acct-broker")).not.toBeInTheDocument();
+    expect(screen.getByTestId("account-no-positions-acct-broker")).toHaveTextContent(
+      "reports this account’s balance, not what it holds",
     );
   });
 

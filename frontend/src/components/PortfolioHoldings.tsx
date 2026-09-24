@@ -153,7 +153,11 @@ function AccountCard({
   // ADR-0021's plug: for a `stated` account the provider's balance is the
   // authoritative number, and the part of it these holdings do not account for
   // is real money in the account rather than a rounding error.
-  const unaccounted = !isZeroDecimal(account.unaccounted_cash_base);
+  // No positions at all is its own case, and the common one for a synced
+  // account: SimpleFIN reports a balance and nothing it holds. "Unaccounted cash
+  // $95,838" read as money gone astray; the truth is simpler, and said plainly.
+  const noPositions = account.holdings.length === 0;
+  const unaccounted = !noPositions && !isZeroDecimal(account.unaccounted_cash_base);
   // **The headline is what the total counts this account at.** For a `derived`
   // account that is Σ(holdings) and equals `market_value_base`. For a `stated`
   // one the authoritative number is the provider's balance — and `market_value_base`
@@ -180,7 +184,9 @@ function AccountCard({
             {account.currency} ·{" "}
             {account.balance_source === "stated"
               ? "balance from the account"
-              : "balance from its holdings"}
+              : noPositions
+                ? "balance as entered"
+                : "balance from its holdings"}
             {/* §6.4: a converted figure names the currency it was converted
                 from, so a cross-currency account is not read as a base-currency
                 one. `balance_account` — not `market_value_account` — because it
@@ -253,7 +259,9 @@ function AccountCard({
         ))}
         {account.holdings.length === 0 && (
           <li className="px-4 py-4 text-sm text-fg-muted" data-testid={`account-no-positions-${account.account_id}`}>
-            No positions in this account.
+            {account.balance_source === "stated"
+              ? "The bank reports this account’s balance, not what it holds. Add its positions to see the breakdown."
+              : "No positions recorded yet — the balance above is the one entered for the account."}
           </li>
         )}
       </ul>
