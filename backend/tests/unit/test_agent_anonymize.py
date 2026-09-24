@@ -475,7 +475,8 @@ def test_the_generic_list_holds_no_personal_looking_entries():
     # Every entry is one or three words of the app's vocabulary; a new entry that
     # looks like a name ("Mary") should be argued for in review, not slipped in.
     for word in GENERIC_LABELS:
-        assert len(word.split()) <= 3, word
+        # Punctuation separators ("Subscription – News") are not words.
+        assert len([w for w in word.split() if any(c.isalnum() for c in w)]) <= 3, word
 
 
 def test_placeholder_indices_round_trip():

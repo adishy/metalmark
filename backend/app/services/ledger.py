@@ -28,7 +28,7 @@ from app.models import (
     Tag,
     Transaction,
 )
-from app.schemas.ledger import AccountCreate, AccountUpdate, is_asset_for
+from app.schemas.ledger import AccountCreate, AccountUpdate, CategoryUpdate, is_asset_for
 from app.schemas.patch import is_set
 from app.services import fx
 from app.services.errors import LedgerError
@@ -373,6 +373,29 @@ async def create_tag(session: AsyncSession, household_id: uuid.UUID, name: str,
 
 async def list_tags(session: AsyncSession) -> list[Tag]:
     return list((await session.execute(select(Tag).order_by(Tag.name))).scalars().all())
+
+
+async def update_category(session: AsyncSession, category_id: uuid.UUID,
+                          data: CategoryUpdate) -> Category:
+    """Rename, re-emoji, recolour or move a category. Only the fields sent change."""
+    obj = (
+        await session.execute(select(Category).where(Category.id == category_id))
+    ).scalar_one_or_none()
+    if obj is None:
+        raise LedgerError("Category not found", 404)
+    fields = data.model_dump(exclude_unset=True)
+    if "group_id" in fields:
+        grp = (
+            await session.execute(
+                select(CategoryGroup).where(CategoryGroup.id == fields["group_id"])
+            )
+        ).scalar_one_or_none()
+        if grp is None:
+            raise LedgerError("Category group not found", 404)
+    for name, value in fields.items():
+        setattr(obj, name, value)
+    await session.flush()
+    return obj
 
 
 async def delete_category(session: AsyncSession, category_id: uuid.UUID) -> None:

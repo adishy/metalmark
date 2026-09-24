@@ -4,16 +4,18 @@ import uuid
 
 from fastapi import APIRouter, Depends
 
-from app.deps import RequestContext, get_context
+from app.deps import RequestContext, get_context, require_admin
 from app.schemas.ledger import (
+    AutoCategorizeResult,
     CategoryCreate,
     CategoryGroupCreate,
     CategoryGroupOut,
     CategoryOut,
+    CategoryUpdate,
     TagCreate,
     TagOut,
 )
-from app.services import ledger
+from app.services import categorizer, ledger
 
 router = APIRouter(tags=["categories"])
 
@@ -43,6 +45,26 @@ async def create_category(data: CategoryCreate, ctx: RequestContext = Depends(ge
         ctx.session, ctx.household_id, data.group_id, data.name, data.icon, data.color, data.sort
     )
     return CategoryOut.model_validate(c)
+
+
+@router.patch("/categories/{category_id}", response_model=CategoryOut)
+async def update_category(category_id: uuid.UUID, data: CategoryUpdate,
+                          ctx: RequestContext = Depends(get_context)):
+    return CategoryOut.model_validate(
+        await ledger.update_category(ctx.session, category_id, data)
+    )
+
+
+@router.post("/categories/auto-categorize-all", response_model=AutoCategorizeResult)
+async def auto_categorize_all(ctx: RequestContext = Depends(require_admin)):
+    """Link what transfers it can, then re-categorize every transaction.
+
+    **Overwrites** existing categories, including ones set by hand — the Admin
+    page says so and asks first. Split parents keep their splits. Runs locally:
+    nothing about a transaction leaves the server.
+    """
+    result = await categorizer.categorize_all(ctx.session, ctx.household_id)
+    return AutoCategorizeResult(**vars(result))
 
 
 @router.get("/tags", response_model=list[TagOut])

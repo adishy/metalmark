@@ -24,6 +24,7 @@ from app.security.passwords import (
     new_token,
     verify_password,
 )
+from app.services.default_categories import install_defaults as install_default_categories
 from app.services.owners import ensure_shared_owner
 from app.settings import get_settings
 
@@ -93,6 +94,9 @@ async def signup(session: AsyncSession, *, email: str, display_name: str, passwo
         # exists, so the FK and the policy agree.
         await set_scope(session, household_id=household.id)
         await ensure_shared_owner(session, household.id)
+        # The starter categories, typed, so the first sync already has somewhere
+        # to file a transfer to an account the app does not hold (session 06).
+        await install_default_categories(session, household.id)
     else:
         role, is_admin = "member", False
 

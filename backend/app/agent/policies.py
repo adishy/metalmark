@@ -29,6 +29,7 @@ from app.agent.anonymize import (
     Currency,
     Drop,
     ExternalText,
+    Icon,
     JsonTree,
     Keep,
     Key,
@@ -158,7 +159,7 @@ register(
     id=K,
     group_id=K,
     name=Label("Category"),
-    icon=Code(),
+    icon=Icon(),
     color=Color(),
     sort=K,
 )

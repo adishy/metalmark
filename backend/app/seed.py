@@ -28,7 +28,7 @@ from sqlalchemy import select
 
 from app.db import scoped_session, unscoped_session
 from app.logging import configure_logging, get_logger
-from app.models import Category, CategoryGroup, Tag, User
+from app.models import Category, Tag, User
 from app.models.ledger import Rule
 from app.schemas.ledger import AccountCreate, AccountUpdate
 from app.schemas.rules import RuleActions, RuleConditions
@@ -37,16 +37,11 @@ from app.services import auth as svc
 from app.services import ledger as ledger_svc
 from app.services import owners as owner_svc
 from app.services import transactions as txn_svc
+from app.services.default_categories import install_defaults as install_default_categories
 from app.settings import get_settings
 
 log = get_logger("seed")
 
-DEFAULT_GROUPS = {
-    "income": ["Salary", "Interest", "Dividends", "Other Income"],
-    "expense": ["Groceries", "Dining", "Housing", "Utilities", "Transport", "Shopping",
-                "Health", "Entertainment", "Fees"],
-    "transfer": ["Transfer", "Credit Card Payment"],
-}
 
 # Labels, not people: they exist so the owner pickers have something in them on a
 # fresh dev database. The seed user's own owner comes from their display name; there
@@ -75,12 +70,12 @@ DEMO_UNFILED = [
     (4, Decimal("-64.00"), "Hardware store"),
 ]
 DEMO_MONTHLY = [
-    (1, Decimal("5200"), "Salary", "Paycheque"),
+    (1, Decimal("5200"), "Paychecks", "Paycheque"),
     (5, Decimal("-420"), "Groceries", "Supermarket"),
-    (12, Decimal("-180"), "Dining", "Restaurants"),
+    (12, Decimal("-180"), "Restaurants", "Restaurants"),
     (15, Decimal("-140"), "Utilities", "Power and water"),
-    (18, Decimal("-90"), "Transport", "Transit pass"),
-    (22, Decimal("-160"), "Shopping", "Department store"),
+    (18, Decimal("-90"), "Public Transit", "Transit pass"),
+    (22, Decimal("-160"), "Clothing", "Department store"),
 ]
 
 
@@ -197,7 +192,7 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
             owner_id = mine if amount > 0 else shared
             txn = await record(checking, "checking", when, amount, category, description,
                                owner_id=owner_id)
-            if category == "Shopping" and index == DEMO_MONTHS - 2:
+            if category == "Clothing" and index == DEMO_MONTHS - 2:
                 split_candidate = txn
 
         # The savings interest is a month-end posting, so it uses the real month end
@@ -252,7 +247,7 @@ async def _demo_ledger(session, household_id: uuid.UUID, owner_name: str) -> dic
         # two different people.
         await txn_svc.replace_splits(session, split_candidate.id, [
             SplitIn(amount=Decimal("-100"), category_id=cats["groceries"], owner_id=partner),
-            SplitIn(amount=Decimal("-60"), category_id=cats["dining"], owner_id=mine),
+            SplitIn(amount=Decimal("-60"), category_id=cats["restaurants"], owner_id=mine),
         ])
 
     log.info("seed.demo_ledger", household=str(household_id), accounts=4,
@@ -292,15 +287,8 @@ async def demo_reference_data(
             )
         ).first():
             await owner_svc.create_owner(session, household_id, name=name)
-    for gtype, cats in DEFAULT_GROUPS.items():
-        group = CategoryGroup(household_id=household_id, name=gtype.title(), type=gtype)
-        session.add(group)
-        await session.flush()
-        for i, name in enumerate(cats):
-            session.add(
-                Category(household_id=household_id, group_id=group.id, name=name, sort=i)
-            )
-    await session.flush()
+    # The same starter set signup gives every household; a no-op when it has any.
+    await install_default_categories(session, household_id)
 
 
 # Labels for the tags the demo ledger's rows can be marked with. Like the demo
