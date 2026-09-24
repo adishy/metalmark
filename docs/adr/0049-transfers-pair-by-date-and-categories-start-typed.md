@@ -1,6 +1,6 @@
 # ADR 0049: Identical transfers pair by date; households start with typed categories and a local categorizer
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-24
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0007/0019 (provenance), ADR-0008 (transfers excluded from cash flow), ADR-0018

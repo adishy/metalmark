@@ -1,4 +1,4 @@
-// Whether a connection has gone quiet: syncing "ok" while bringing nothing new.
+// Whether a connection has gone quiet: syncing "ok" while bringing nothing new (ADR-0050).
 //
 // A bank bridge can keep answering with the same cached payload for days, and
 // every sync reports success (found on a live instance, session 06). Four quiet

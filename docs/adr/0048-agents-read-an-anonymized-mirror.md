@@ -1,6 +1,6 @@
 # ADR 0048: Agents read an anonymized, read-only mirror of the app's API, by token
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-23
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0013/0027 (auth, open signup), ADR-0014/0025 (RLS, identity tables outside it), ADR-0016

@@ -386,3 +386,7 @@ metalmark/
 2. `docs/PLAN.md` — workstreams, dependencies, agent assignments, acceptance criteria.
 3. `docs/adr/` — why each load-bearing decision was made. **New decisions get a new ADR in the same PR**;
    accepted ADRs are immutable and superseded rather than edited (`docs/adr/README.md` has the process).
+4. `AGENTS.md` (and `frontend/AGENTS.md`, `backend/AGENTS.md`) — the working rules for anyone, human or
+   agent, changing the code: gates, how to look at a UI change, what a migration must do.
+5. `docs/runbooks/debugging-a-live-instance.md` — reading a running instance through the anonymized agent
+   API, symptom by symptom.
