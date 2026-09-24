@@ -99,6 +99,19 @@ class CategoryCreate(BaseModel):
     sort: int = 0
 
 
+class BalanceIn(BaseModel):
+    """One day's balance, typed by hand. Signed, like every balance (ADR-0043)."""
+
+    balance: Decimal
+
+
+class BalanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    balance_date: date
+    balance: Decimal
+    currency: str
+
+
 class CategoryUpdate(BaseModel):
     group_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)

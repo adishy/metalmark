@@ -285,6 +285,87 @@ async def _retype(session: AsyncSession, acct: Account, new_type: str) -> None:
     acct.balance_source = "stated" if new_type == "investment" else None
 
 
+async def list_balances(session: AsyncSession, account_id: uuid.UUID) -> list[BalanceSnapshot]:
+    """An account's recorded balances, newest first — the history the chart reads."""
+    await get_account(session, account_id)
+    return list(
+        (
+            await session.execute(
+                select(BalanceSnapshot)
+                .where(BalanceSnapshot.account_id == account_id)
+                .order_by(BalanceSnapshot.balance_date.desc())
+            )
+        ).scalars().all()
+    )
+
+
+def _refuse_derived(acct: Account) -> None:
+    # ADR-0021: a derived account's history is its holdings'. A typed balance would
+    # be a second author the series does not read.
+    if acct.balance_source == "derived":
+        raise LedgerError(
+            "This account is valued from its holdings; its balance history comes "
+            "from them, not from typed balances.",
+            409,
+        )
+
+
+async def put_balance(session: AsyncSession, account_id: uuid.UUID, *, on: date,
+                      balance: Decimal) -> BalanceSnapshot:
+    """Record (or correct) the balance on one day, by hand.
+
+    Through ``record_balance``, like every other writer: a past day is history
+    and leaves the headline alone; a day at or after the current one becomes it.
+    """
+    acct = await get_account(session, account_id)
+    _refuse_derived(acct)
+    if on > today():
+        raise LedgerError("A balance cannot be dated in the future", 422)
+    await record_balance(session, acct, balance=balance, on=on)
+    return (
+        await session.execute(
+            select(BalanceSnapshot).where(
+                BalanceSnapshot.account_id == account_id, BalanceSnapshot.balance_date == on
+            )
+        )
+    ).scalar_one()
+
+
+async def delete_balance(session: AsyncSession, account_id: uuid.UUID, on: date) -> None:
+    """Remove one day's balance.
+
+    If it was the account's current balance, the newest remaining one becomes
+    current; with none remaining, the account keeps its number (it has to hold
+    one) and simply has no history behind it.
+    """
+    acct = await get_account(session, account_id)
+    _refuse_derived(acct)
+    snap = (
+        await session.execute(
+            select(BalanceSnapshot).where(
+                BalanceSnapshot.account_id == account_id, BalanceSnapshot.balance_date == on
+            )
+        )
+    ).scalar_one_or_none()
+    if snap is None:
+        raise LedgerError("No balance recorded on that day", 404)
+    await session.delete(snap)
+    await session.flush()
+    if acct.balance_date == on:
+        newest = (
+            await session.execute(
+                select(BalanceSnapshot)
+                .where(BalanceSnapshot.account_id == account_id)
+                .order_by(BalanceSnapshot.balance_date.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if newest is not None:
+            acct.current_balance = newest.balance
+            acct.balance_date = newest.balance_date
+            await session.flush()
+
+
 async def delete_account(session: AsyncSession, account_id: uuid.UUID) -> None:
     acct = await get_account(session, account_id)
     await session.delete(acct)

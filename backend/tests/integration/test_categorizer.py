@@ -274,3 +274,4 @@ async def test_auto_categorize_all_is_for_admins(client):  # noqa: F811 - the im
     assert set(resp.json()) == {
         "examined", "categorized", "changed", "left_blank", "transfers_linked",
     }
+

@@ -163,6 +163,7 @@ register(
     color=Color(),
     sort=K,
 )
+register(le.BalanceOut, balance_date=K, balance=K, currency=Currency())
 register(le.TagOut, id=K, name=Label("Tag"), color=Color())
 register(
     le.FxRateOut,
