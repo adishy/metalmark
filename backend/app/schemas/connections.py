@@ -92,7 +92,7 @@ class ConnectionOut(BaseModel):
     #: When a sync last brought anything new — a transaction inserted, changed
     #: or settled — and how many successful syncs have run since without any.
     #: A bank bridge can keep answering "ok" with the same cached payload for
-    #: days (found on a live instance, session 06); these say so, so a stall
+    #: days (ADR-0050); these say so, so a stall
     #: reads as a stall rather than as the app losing transactions.
     last_new_data_at: datetime | None = None
     quiet_syncs: int = 0
