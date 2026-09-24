@@ -708,6 +708,25 @@ async def list_transfer_candidates(
 TRANSFER_MATCH_DAYS = 5
 
 
+def _closest_unambiguous(
+    subject: Transaction, matching: list[TransferCandidate]
+) -> TransferCandidate | None:
+    """The one matching candidate strictly closest in time to ``subject``, if any.
+
+    Measured to the second rather than by ``days_apart``: two deposits on the same
+    calendar day are a tie only if they are equally far from the withdrawal.
+    """
+    if not matching:
+        return None
+    gaps = sorted(
+        (abs((c.txn.transacted_at - subject.transacted_at).total_seconds()), i)
+        for i, c in enumerate(matching)
+    )
+    if len(gaps) > 1 and gaps[0][0] == gaps[1][0]:
+        return None
+    return matching[gaps[0][1]]
+
+
 async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
                                txn_ids: list[uuid.UUID]) -> int:
     """Link unambiguous transfer pairs among ``txn_ids``. Returns how many it linked.
@@ -716,11 +735,15 @@ async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
     exactly — it is *called*, not reimplemented — so a pair the picker would
     refuse to offer is a pair this cannot link.
 
-    **Exactly one candidate, or none.** The picker shows a human the alternatives
-    and lets them choose; the matcher has nobody to ask, and two plausible legs
-    ("which of these two identical withdrawals is the transfer?") is exactly the
-    case where guessing silently rewrites one real payment into another. Ambiguity
-    means no match, and the pair stays available for the human to link by hand.
+    **One candidate closer than every other, or none.** The picker shows a human
+    the alternatives and lets them choose; the matcher has nobody to ask. Two
+    matching legs are not always a guess, though: a household that moves $20k on
+    two consecutive days has two identical deposits, and each withdrawal has one on
+    its own day and one a day off. The strictly closest in time is the answer a
+    human would give, and refusing it left both moves counted as $40k of income
+    and $40k of spending. A tie in time is still ambiguous ("which of these two
+    identical withdrawals is the transfer?") and still no match — the pair stays
+    available for the human to link by hand. See ADR-0049.
 
     A second pass over the rows a sync touched, never inside the insert loop:
     two legs arriving in the same payload would otherwise each be examined before
@@ -737,10 +760,11 @@ async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
             session, household_id, txn_id, days=TRANSFER_MATCH_DAYS
         )
         matching = [c for c in candidates if c.within_tolerance]
-        if len(matching) != 1:
+        chosen = _closest_unambiguous(txn, matching)
+        if chosen is None:
             continue
         await link_transfer(
-            session, household_id, txn_id, matching[0].txn.id, matched_by="auto"
+            session, household_id, txn_id, chosen.txn.id, matched_by="auto"
         )
         linked += 1
     return linked

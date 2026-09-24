@@ -233,6 +233,34 @@ async def earliest_activity(session: AsyncSession) -> date | None:
     return min(days) if days else None
 
 
+async def earliest_flow(session: AsyncSession) -> date | None:
+    """The first day money moved in this household, or ``None``.
+
+    ``earliest_activity`` less the balance snapshots: a cash-flow chart has
+    nothing to draw before the first transaction or trade, and a balance typed
+    in years earlier would otherwise open it on a run of empty bars. Same
+    visibility and same SQL-side cast, for the same reasons.
+    """
+    visible = select(Account.id).where(Account.is_hidden.is_(False))
+    rows = (
+        await session.execute(
+            select(func.min(Transaction.transacted_at).cast(Date)).where(
+                Transaction.is_hidden.is_(False),
+                Transaction.account_id.in_(visible),
+            )
+        )
+    ).scalar()
+    trade = (
+        await session.execute(
+            select(func.min(InvestmentTransaction.trade_date)).where(
+                InvestmentTransaction.account_id.in_(visible)
+            )
+        )
+    ).scalar()
+    days = [d for d in (rows, trade) if d is not None]
+    return min(days) if days else None
+
+
 async def accounts_owned_by(session: AsyncSession, owner_id: uuid.UUID) -> set[uuid.UUID]:
     """The accounts an owner filter means — hidden ones included in the *exclusion*
     for the same reason `_reporting_transactions` drops their rows: `net_worth_at`
