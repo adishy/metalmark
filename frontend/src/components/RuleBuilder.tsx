@@ -22,6 +22,7 @@
 // are what closes the gap, in the words the API's own 422 uses.
 
 import { useState, type ReactNode } from "react";
+import { categoryLabel } from "@/components/CategoryPicker";
 import { useAccounts, useCategories, useOwners, useTags } from "@/api/hooks";
 import {
   useCreateRule,
@@ -320,7 +321,7 @@ export default function RuleBuilder({
               >
                 <option value="">Any category</option>
                 {categories.data?.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
                 ))}
               </Select>
             </Field>
@@ -358,7 +359,7 @@ export default function RuleBuilder({
               >
                 <option value="">Leave unchanged</option>
                 {categories.data?.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
                 ))}
               </Select>
             </Field>
@@ -526,7 +527,7 @@ export default function RuleBuilder({
                         >
                           <option value="">Uncategorized</option>
                           {categories.data?.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
+                            <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
                           ))}
                         </Select>
                       </Field>

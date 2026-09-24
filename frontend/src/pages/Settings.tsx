@@ -17,6 +17,7 @@ import {
   useCreateOwner,
   useCreateTag,
   useDeleteCategory,
+  useUpdateCategory,
   useDeleteCategoryGroup,
   useDeleteOwner,
   useDeleteTag,
@@ -234,10 +235,10 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function AdminSection({ onOpenConnections }: { onOpenConnections: () => void }) {
   return (
     <div className="space-y-4">
-      <Card title="MetalMark internals">
+      <Card title="MetalMark Money internals">
         <p className="text-sm text-fg-muted">
           <span className="font-semibold text-fg">Sync activity</span> is the control panel for
-          everything MetalMark does on its own — what is queued, what is running, what ran, and the
+          everything MetalMark Money does on its own — what is queued, what is running, what ran, and the
           log of each run.
         </p>
         <ul className="ml-4 list-disc space-y-1 text-sm text-fg-muted">
@@ -493,12 +494,14 @@ function CategoriesSection() {
   const delGroup = useDeleteCategoryGroup();
   const createCat = useCreateCategory();
   const delCat = useDeleteCategory();
+  const updateCat = useUpdateCategory();
 
   const [gName, setGName] = useState("");
   const [gType, setGType] = useState("expense");
   const [cName, setCName] = useState("");
   const [cGroup, setCGroup] = useState("");
   const [cColor, setCColor] = useState("#14b8a6");
+  const [cIcon, setCIcon] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [cErr, setCErr] = useState<string | null>(null);
 
@@ -508,6 +511,7 @@ function CategoriesSection() {
     cName: useFieldId("cat-name"),
     cGroup: useFieldId("cat-group"),
     cColor: useFieldId("cat-color"),
+    cIcon: useFieldId("cat-icon"),
   };
 
   const byGroup = useMemo(() => {
@@ -557,7 +561,7 @@ function CategoriesSection() {
 
       <Card title="Add category">
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-4"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-5"
           data-testid="add-category-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -565,8 +569,18 @@ function CategoriesSection() {
             setCErr(err);
             if (err) return;
             createCat.mutate(
-              { name: cName, group_id: cGroup || defaultGroup, color: cColor },
-              { onSuccess: () => setCName("") },
+              {
+                name: cName,
+                group_id: cGroup || defaultGroup,
+                color: cColor,
+                icon: cIcon.trim() || null,
+              },
+              {
+                onSuccess: () => {
+                  setCName("");
+                  setCIcon("");
+                },
+              },
             );
           }}
         >
@@ -579,6 +593,9 @@ function CategoriesSection() {
                 <option key={g.id} value={g.id}>{g.name}</option>
               ))}
             </Select>
+          </Field>
+          <Field label="Emoji" htmlFor={ids.cIcon} hint="Optional, e.g. 🛒">
+            <Input id={ids.cIcon} value={cIcon} maxLength={16} onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
           </Field>
           <Field label="Color" htmlFor={ids.cColor}>
             <Input id={ids.cColor} type="color" value={cColor} onChange={(e) => setCColor(e.target.value)} data-testid="category-color" className="h-10 p-1" />
@@ -613,7 +630,25 @@ function CategoriesSection() {
                 {(byGroup.get(g.id) ?? []).map((c) => (
                   <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <span className="flex items-center gap-2">
-                      <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
+                      {/* The emoji is edited in place: it is the one field
+                          people change for fun, and a dialog for one
+                          character is a long way round. Saved on blur. */}
+                      <Input
+                        aria-label={`Emoji for ${c.name}`}
+                        defaultValue={c.icon ?? ""}
+                        maxLength={16}
+                        className="w-14 text-center"
+                        onBlur={(e) => {
+                          const next = e.target.value.trim() || null;
+                          if (next !== (c.icon ?? null)) {
+                            updateCat.mutate({ id: c.id, body: { icon: next } });
+                          }
+                        }}
+                        data-testid={`category-icon-${c.id}`}
+                      />
+                      {!c.icon && (
+                        <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
+                      )}
                       {c.name}
                     </span>
                     <Button
@@ -1027,7 +1062,7 @@ function DataSection() {
             }}
           >
             <p className="text-sm text-fg-muted">
-              A document exported from MetalMark — this household or another one. It merges:
+              A document exported from MetalMark Money — this household or another one. It merges:
               nothing here is deleted, and anything the document and this household already agree
               on is left alone rather than duplicated.
             </p>

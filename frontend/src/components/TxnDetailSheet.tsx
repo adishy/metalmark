@@ -4,6 +4,7 @@
 // The transfer panel at the bottom is where a leg is matched to its counterpart,
 // unlinked, or shown the FX cost it came with (ADR-0008/0018).
 import { useMemo, useState } from "react";
+import { categoryLabel } from "@/components/CategoryPicker";
 import {
   useDeleteTransaction,
   useHousehold,
@@ -181,7 +182,7 @@ function TxnDetailForm({
             <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="detail-category">
               <option value="">Uncategorized</option>
               {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
               ))}
             </Select>
           </Field>
@@ -638,7 +639,7 @@ function SplitEditor({
                 >
                   <option value="">Uncategorized</option>
                   {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
                   ))}
                 </select>
               </div>

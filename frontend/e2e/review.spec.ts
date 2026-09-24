@@ -307,3 +307,18 @@ test.describe("reduced motion (§2.8)", () => {
     );
   });
 });
+
+test("review: the category is changed from the deck, and the card keeps its place", async ({ page }) => {
+  const merchant = `Pick Category ${Date.now()}`;
+  await queueUncategorized(page, merchant);
+
+  await page.getByTestId("review-category").click();
+  const picker = page.getByTestId("review-category-picker");
+  await expect(picker).toBeVisible();
+  await picker.getByTestId("review-category-picker-search").fill("Groceries");
+  await picker.getByRole("button", { name: /Groceries/ }).first().click();
+
+  await expect(page.getByTestId("review-category")).toContainText("Groceries");
+  // Filing it is not deciding it: the same card is still asking.
+  await expect(page.getByTestId("swipe-card")).toContainText(merchant);
+});

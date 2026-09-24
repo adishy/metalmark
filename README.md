@@ -1,6 +1,7 @@
-# MetalMark — Self-Hosted Personal Finance
+# MetalMark Money — Self-Hosted Personal Finance
 
-> Named for the butterfly family — **MetalMark**, self-hosted.
+> Named for the butterfly family — **MetalMark Money**, self-hosted. (Inside the code, the database and the
+> environment variables it is `metalmark`; the name people see is MetalMark Money.)
 
 A self-hostable personal-finance app for a small household (a few users, some with joined
 finances). Feature target: **what the mainstream personal-finance apps do** — auto-syncing
@@ -20,6 +21,7 @@ swipe-to-review, and reporting (Sankey cash flow, category breakdowns, net worth
 | Manual parity | **Anything automation can do, a human can do by hand** — manual accounts, transactions, holdings (with types), balances, transfers, FX rates | Fixes the common self-hosting gripe that manual/cash is second-class; also makes sync auditable and recoverable. |
 | Build order | **Manual-first, then automate** — build+prove the manual ledger, then add SimpleFIN sync as "just another writer" into the proven model | Correctness before convenience; sync can't corrupt a model it doesn't own. |
 | Robustness | **Transactions are decoupled from connections** — removing/re-adding a connection never destroys history | Directly fixes the flaky-reconnect + duplicate-transaction pain of the hosted apps. |
+| Categories | **A typed starter set with emoji, and a private auto-categorizer** — every household starts with income / expense / transfer groups; a local categorizer (no network, no model) files new transactions from their text, sign and the household's own history; Admin can re-run it over everything (ADR-0049) | A household's first sync lands mostly filed, and moves between its own accounts leave cash flow instead of reading as spending. |
 | Correctness | **Test harness is first-class**: red-green TDD, unit + integration (real Postgres, mock SimpleFIN) + e2e (Playwright), realistic fixtures, CI gates | User's hard requirement; financial correctness is non-negotiable. |
 
 ## Run it locally (container-first)

@@ -142,6 +142,6 @@ describe("<AppShell /> navigation", () => {
     // anywhere in the interface, which is a large part of why it went unfound.
     me = who({ isAdmin: true });
     renderShell({ at: "/admin" });
-    expect(document.title).toBe("Admin · MetalMark");
+    expect(document.title).toBe("Admin · MetalMark Money");
   });
 });

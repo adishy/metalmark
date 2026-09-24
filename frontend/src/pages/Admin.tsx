@@ -17,6 +17,7 @@
 import { useState } from "react";
 
 import { useAgentTokens, useCreateAgentToken, useRevokeAgentToken } from "@/api/agent";
+import { useAutoCategorizeAll } from "@/api/hooks";
 import {
   useCancelJob,
   useChecks,
@@ -425,9 +426,74 @@ export default function Admin() {
         )}
       </Card>
 
+      <AutoCategorize />
       <DataChecks />
       <AgentAccess />
     </div>
+  );
+}
+
+// ---- auto-categorize ------------------------------------------------------
+
+/**
+ * One pass over every transaction by the local categorizer (ADR-0049). It
+ * overwrites, including categories set by hand, so it asks first and says so in
+ * words — the one thing a person must know before pressing it. Nothing leaves
+ * the server: the categorizer has no network.
+ */
+export function AutoCategorize() {
+  const run = useAutoCategorizeAll();
+  const [confirming, setConfirming] = useState(false);
+  const r = run.data;
+
+  return (
+    <Card
+      title="Auto-categorize"
+      note="Files every transaction into its likely category from its merchant, its amount and how you have filed that merchant before. Runs on this server; nothing is sent anywhere."
+    >
+      {confirming ? (
+        <div
+          className="space-y-3 rounded-control border border-negative/40 bg-negative/10 p-3"
+          data-testid="auto-categorize-confirm"
+        >
+          <p className="text-sm text-fg">
+            This replaces the category on every transaction it has a guess for, including ones you chose
+            yourself. Transactions it has no guess for keep what they have. Split transactions are left alone.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="danger"
+              disabled={run.isPending}
+              aria-busy={run.isPending}
+              onClick={() => run.mutate(undefined, { onSettled: () => setConfirming(false) })}
+              data-testid="auto-categorize-run"
+            >
+              {run.isPending && <Spinner />}
+              Overwrite and categorize all
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="secondary" onClick={() => setConfirming(true)} data-testid="auto-categorize">
+          Auto-categorize all transactions
+        </Button>
+      )}
+      {r && (
+        <p className="text-sm text-fg" role="status" data-testid="auto-categorize-result">
+          Looked at {r.examined.toLocaleString()} transactions: changed {r.changed.toLocaleString()},{" "}
+          {r.left_blank.toLocaleString()} still uncategorized
+          {r.transfers_linked > 0 && `, and linked ${r.transfers_linked.toLocaleString()} transfers`}.
+        </p>
+      )}
+      {run.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(run.error as Error).message}
+        </p>
+      )}
+    </Card>
   );
 }
 

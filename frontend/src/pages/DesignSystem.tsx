@@ -586,7 +586,7 @@ export default function DesignSystem() {
           <div className="flex flex-col items-center gap-2">
             <span className="flex items-center gap-2">
               <MetalMark size={28} />
-              <span className="text-lg font-semibold text-accent">MetalMark</span>
+              <span className="text-lg font-semibold text-accent">MetalMark Money</span>
             </span>
             <span className="font-mono text-xs text-fg-muted">28 · header</span>
           </div>

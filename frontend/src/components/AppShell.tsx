@@ -101,7 +101,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   // switcher, and it was the same string on every route (§7.11).
   useEffect(() => {
     const here = items.find((n) => n.to === pathname)?.label ?? EXTRA_TITLES[pathname];
-    document.title = here ? `${here} · MetalMark` : "MetalMark";
+    document.title = here ? `${here} · MetalMark Money` : "MetalMark Money";
     // `items` is a new array each render; `isAdmin` is what actually varies.
   }, [pathname, isAdmin]);
 
@@ -121,7 +121,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               has to survive next to a lot of other things. */}
           <span className="flex min-w-0 items-center gap-2">
             <MetalMark size={28} />
-            <span className="text-lg font-semibold text-accent">MetalMark</span>
+            <span className="text-lg font-semibold text-accent">MetalMark Money</span>
           </span>
           <nav className="hidden gap-1 sm:flex" aria-label="Main">
             {items.map((n) => (

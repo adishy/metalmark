@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { categoryLabel } from "@/components/CategoryPicker";
 import {
   useAccounts,
   useCategories,
@@ -83,7 +84,7 @@ export default function Transactions() {
 
   const catName = useMemo(() => {
     const m = new Map<string, string>();
-    categories.data?.forEach((c) => m.set(c.id, c.name));
+    categories.data?.forEach((c) => m.set(c.id, categoryLabel(c)));
     return m;
   }, [categories.data]);
 
@@ -529,7 +530,7 @@ function FilterBar({
           >
             <option value="">All categories</option>
             {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+              <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
             ))}
           </Select>
         </Field>
@@ -664,7 +665,7 @@ function AddTxnForm({
         <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="txn-category">
           <option value="">Uncategorized</option>
           {categories.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+            <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
           ))}
         </Select>
       </Field>

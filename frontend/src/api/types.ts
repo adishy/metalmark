@@ -771,3 +771,26 @@ export interface AgentTokenCreate {
   scopes: AgentScope[];
   expires_in_days: number;
 }
+
+export interface CategoryUpdate {
+  group_id?: UUID;
+  name?: string;
+  icon?: string | null;
+  color?: string | null;
+  sort?: number;
+}
+
+export interface AutoCategorizeResult {
+  examined: number;
+  categorized: number;
+  changed: number;
+  left_blank: number;
+  transfers_linked: number;
+}
+
+/** One day's recorded balance. Signed, like every balance (ADR-0043). */
+export interface BalancePoint {
+  balance_date: string;
+  balance: string;
+  currency: string;
+}

@@ -31,6 +31,7 @@ import { animate, motion, useMotionValue, useReducedMotion, useTransform } from 
 import {
   useAccounts,
   useCategories,
+  useCategoryGroups,
   useTags,
   useTransactions,
   useUpdateTransaction,
@@ -41,6 +42,7 @@ import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import { Button } from "@/components/form";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
+import CategoryPicker, { UNCATEGORIZED_ICON, categoryLabel } from "@/components/CategoryPicker";
 
 /** How long a decided card stays in the DOM, flying to the side. Long enough to
  *  read as a throw, short enough that a fast reviewer is never waiting on it.
@@ -60,14 +62,22 @@ const LIFT_TRIGGER = 80;
 export default function Review() {
   const queue = useTransactions({ review_status: "needs_review" });
   const categories = useCategories();
+  const groups = useCategoryGroups();
   const accounts = useAccounts();
   const tags = useTags();
   const update = useUpdateTransaction();
+  // Its own mutation, so a failed verdict is never reported as a failed category.
+  const setCategory = useUpdateTransaction();
   // The card the detail sheet is open on, or null. Held as the whole row for the
   // same reason `leaving` is: the sheet is keyed on the id and edits the row it
   // was handed, so a query that refetches underneath it must not be what the
   // form is reading from.
   const [editing, setEditing] = useState<Transaction | null>(null);
+  // The category picker, open on the current card. A pick is shown on the card
+  // at once — before the refetch lands — so the card never says the old answer
+  // after the person has given a new one.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   // Track the cards we have decided by id, never by position: the query
   // refetches after each decision and the decided txn drops out of the list, so
   // an index would skip the card that slid into the vacated slot.
@@ -85,7 +95,7 @@ export default function Review() {
 
   const catName = useMemo(() => {
     const m = new Map<string, string>();
-    categories.data?.forEach((c) => m.set(c.id, c.name));
+    categories.data?.forEach((c) => m.set(c.id, categoryLabel(c)));
     return m;
   }, [categories.data]);
 
@@ -161,7 +171,7 @@ export default function Review() {
       // is open belongs to the field the user is in — without this, pressing →
       // in the amount box files the card the sheet is open on, behind the sheet,
       // where it cannot be seen to happen.
-      if (editing) return;
+      if (editing || picking) return;
       // And a key a form control is using is that control's. Review has no
       // fields of its own, so this is the line that matters the day it grows
       // one — which is exactly when nobody will remember to come back here.
@@ -173,10 +183,35 @@ export default function Review() {
       if (e.key === "ArrowRight") decide(current, true);
       else if (e.key === "ArrowLeft") decide(current, false);
       else if (e.key === "e") openEditor();
+      else if (e.key === "c" && !inFlight.current) setPicking(true);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [current, decide, editing, openEditor]);
+  }, [current, decide, editing, picking, openEditor]);
+
+  const currentCategory = current
+    ? picked.has(current.id)
+      ? (picked.get(current.id) ?? null)
+      : current.category_id
+    : null;
+
+  const pickCategory = (categoryId: string | null) => {
+    if (!current) return;
+    const id = current.id;
+    setPicked((prev) => new Map(prev).set(id, categoryId));
+    setCategory.mutate(
+      { id, body: { category_id: categoryId } },
+      {
+        // A failed save must not leave the card claiming the new answer.
+        onError: () =>
+          setPicked((prev) => {
+            const next = new Map(prev);
+            next.delete(id);
+            return next;
+          }),
+      },
+    );
+  };
 
   const remaining = items.length;
 
@@ -275,7 +310,7 @@ export default function Review() {
               key={current.id}
               txn={current}
               account={accountFor.get(current.account_id)}
-              categoryName={current.category_id ? catName.get(current.category_id) : undefined}
+              categoryName={currentCategory ? catName.get(currentCategory) : undefined}
               onDecide={(keep) => decide(current, keep)}
               onEdit={openEditor}
               // Which way it is on its way out, if it is. Only ever set on the
@@ -291,6 +326,35 @@ export default function Review() {
               the layout knew they existed. `min-h-11` on both, because these are
               the primary phone interaction and `py-2 text-sm` alone computed to
               36 px (§4.1, §5). */}
+          {/* The category, one tap from the deck: the most common reason to
+              stop on a card is that it is filed wrong, and opening the whole
+              sheet for that was the long way round. Above the verdicts, so the
+              order on screen is the order of the job — file it, then decide. */}
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => setPicking(true)}
+              disabled={leaving !== null}
+              className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-border-strong bg-surface-raised px-4 text-base hover:bg-surface-inset"
+              aria-haspopup="dialog"
+              data-testid="review-category"
+            >
+              {currentCategory && catName.get(currentCategory) ? (
+                <span className="truncate">{catName.get(currentCategory)}</span>
+              ) : (
+                <span className="truncate text-fg-muted">
+                  <span aria-hidden="true">{UNCATEGORIZED_ICON} </span>Choose a category
+                </span>
+              )}
+              <span className="text-sm text-fg-muted">Change</span>
+            </button>
+          </div>
+          {setCategory.isError && (
+            <p className="text-center text-sm text-negative" role="alert" data-testid="review-category-error">
+              Couldn&rsquo;t save the category: {(setCategory.error as Error).message}
+            </p>
+          )}
+
           <div className="flex flex-wrap justify-center gap-2 sm:gap-4">
             <button
               onClick={() => decide(current, false)}
@@ -327,6 +391,19 @@ export default function Review() {
 
           `presentation="overlay"` and not the pane — §9.3's Review shape is one
           centred card, and a pane needs a second column to sit in. */}
+      {current && (
+        <CategoryPicker
+          open={picking}
+          onClose={() => setPicking(false)}
+          categories={categories.data ?? []}
+          groups={groups.data ?? []}
+          value={currentCategory}
+          amount={current.amount}
+          onPick={pickCategory}
+          testid="review-category-picker"
+        />
+      )}
+
       {editing && (
         <TxnDetailSheet
           txn={editing}
