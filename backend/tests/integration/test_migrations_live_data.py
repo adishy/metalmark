@@ -407,3 +407,30 @@ def test_0009_fills_only_empty_households_and_downgrade_keeps_what_is_used(scrat
         assert conn.execute(
             "SELECT count(*) FROM category_groups WHERE household_id = %s", (empty,)
         ).fetchone()[0] == 1
+
+
+# ---- 0010: institution logos ---------------------------------------------------
+
+
+def test_0010_adds_institution_logos_with_rls_and_touches_nothing_else(scratch_db):
+    _alembic(scratch_db, "upgrade", "0009")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        conn.execute("DROP TABLE IF EXISTS institution_logos")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0010")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "institution_logos")
+        assert conn.execute(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = 'institution_logos'"
+        ).fetchone()[0]
+        assert _fingerprint(conn) == before
+
+    _alembic(scratch_db, "downgrade", "0009")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "institution_logos")
+        assert _fingerprint(conn) == before

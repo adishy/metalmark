@@ -3473,6 +3473,176 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /institutions:
+    get:
+      tags:
+      - institutions
+      summary: List Institutions
+      description: Every institution the household's accounts name, and whether it has a logo.
+      operationId: list_institutions_institutions_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InstitutionOut'
+                title: Response List Institutions Institutions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /institutions/{key}/logo:
+    get:
+      tags:
+      - institutions
+      summary: Get Logo
+      description: 'The image. ``nosniff`` and a sandboxing CSP: served from the app''s own
+
+        origin, it must only ever be an image.'
+      operationId: get_logo_institutions__key__logo_get
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - institutions
+      summary: Upload Logo
+      operationId: upload_logo_institutions__key__logo_put
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoUpload'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstitutionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - institutions
+      summary: Delete Logo
+      operationId: delete_logo_institutions__key__logo_delete
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Key
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /institutions/fetch-logos:
+    post:
+      tags:
+      - institutions
+      summary: Fetch Logos
+      description: 'Fetch the icon of every known institution in use that has no logo yet.
+
+
+        The server asks each institution''s own website, once; the browser never
+
+        does. A logo already there — fetched or uploaded — is kept.'
+      operationId: fetch_logos_institutions_fetch_logos_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FetchLogosResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /admin/agent-tokens:
     get:
       tags:
@@ -5123,6 +5293,33 @@ components:
         header is line 1, so a data row''s line is its file position, not its index in
 
         the parsed rows. That is the number a human needs to go and fix the cell.'
+    FetchLogosResult:
+      properties:
+        fetched:
+          items:
+            type: string
+          type: array
+          title: Fetched
+        failed:
+          items:
+            type: string
+          type: array
+          title: Failed
+        unknown:
+          items:
+            type: string
+          type: array
+          title: Unknown
+        kept:
+          type: integer
+          title: Kept
+      type: object
+      required:
+      - fetched
+      - failed
+      - unknown
+      - kept
+      title: FetchLogosResult
     FxRateOut:
       properties:
         id:
@@ -5515,6 +5712,40 @@ components:
         last month is a real, importable document, and refusing the whole file over it
 
         would make an export from a live household un-importable.'
+    InstitutionOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        key:
+          type: string
+          title: Key
+        fetchable:
+          type: boolean
+          title: Fetchable
+        has_logo:
+          type: boolean
+          title: Has Logo
+        logo_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Logo Source
+        logo_updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Logo Updated At
+      type: object
+      required:
+      - name
+      - key
+      - fetchable
+      - has_logo
+      - logo_source
+      - logo_updated_at
+      title: InstitutionOut
     InvestmentTransactionCreate:
       properties:
         account_id:
@@ -5722,6 +5953,23 @@ components:
       - email
       - password
       title: LoginRequest
+    LogoUpload:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        data_base64:
+          type: string
+          maxLength: 800000
+          minLength: 1
+          title: Data Base64
+      type: object
+      required:
+      - name
+      - data_base64
+      title: LogoUpload
     MeResponse:
       properties:
         user:

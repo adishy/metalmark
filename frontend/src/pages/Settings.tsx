@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
+import InstitutionsSection from "@/pages/InstitutionsSection";
 import { useAuth } from "@/auth/AuthContext";
 import {
   downloadAccountCsv,
@@ -74,6 +75,7 @@ const TABS = [
   { id: "admin", label: "Admin", adminOnly: true },
   { id: "categories", label: "Categories" },
   { id: "tags", label: "Tags" },
+  { id: "institutions", label: "Institutions" },
   { id: "currencies", label: "Currencies" },
   { id: "household", label: "Household" },
   { id: "data", label: "Data" },
@@ -193,6 +195,7 @@ export default function Settings() {
         {tab === "admin" && <AdminSection onOpenConnections={() => setTab("connections")} />}
         {tab === "categories" && <CategoriesSection />}
         {tab === "tags" && <TagsSection />}
+        {tab === "institutions" && <InstitutionsSection />}
         {tab === "currencies" && <CurrenciesSection />}
         {tab === "household" && <HouseholdSection />}
         {tab === "data" && <DataSection />}

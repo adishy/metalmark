@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { useSyncNotices } from "@/api/sync";
+import { InstitutionLogosProvider } from "@/components/InstitutionLogos";
 import { MetalMark } from "@/components/MetalMark";
 import { ThemeButton } from "@/components/ThemeToggle";
 import { AdminIcon, ChartIcon, ListIcon, ReviewIcon, SettingsIcon, WalletIcon } from "@/components/icons";
@@ -172,7 +173,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
           promised `lg:p-6` since the token layer landed and the shell never took
           it; this is that gutter arriving, one breakpoint up where the extra
           8 px is not worth the content it costs at 360. */}
-      <main className="mx-auto w-full max-w-7xl flex-1 p-4 lg:p-6">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 p-4 lg:p-6">
+        <InstitutionLogosProvider>{children}</InstitutionLogosProvider>
+      </main>
 
       {/* Phone navigation. `aria-current` gives the screen reader what
           `font-semibold` gives the eye — the accent hue alone is a colour-only

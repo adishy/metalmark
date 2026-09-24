@@ -125,7 +125,9 @@ export default function Reports() {
         {
           name: "Net",
           type: "line",
-          smooth: true,
+          // Straight, as on the net-worth chart: a smoothed line overshoots
+          // between bars and draws values no bucket had.
+          smooth: false,
           lineStyle: { color: t.accent },
           itemStyle: { color: t.accent },
           emphasis: emphasisLine(t),

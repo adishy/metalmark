@@ -400,7 +400,7 @@ function AccountGroups({
                     data-testid={`account-edit-${a.id}`}
                     aria-label={`${a.name}, open details`}
                   >
-                    <AccountMark name={a.name} institution={a.institution} size="md" />
+                    <AccountMark name={a.name} institution={a.institution} size="lg" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium">
                         {a.name}
@@ -518,7 +518,7 @@ function AddAccountForm({
       <Field label="Type" htmlFor={ids.type}>
         <Select id={ids.type} value={type} onChange={(e) => setType(e.target.value as AccountType)} data-testid="account-type">
           {TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t}>{TYPE_LABEL[t]}</option>
           ))}
         </Select>
       </Field>
@@ -604,7 +604,7 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
     <Dialog
       open
       onClose={onClose}
-      title="Edit account"
+      title={account.name}
       testid="edit-account-dialog"
       footer={
         <>
@@ -642,7 +642,7 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
             data-testid="edit-account-type"
           >
             {TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
+              <option key={t} value={t}>{TYPE_LABEL[t]}</option>
             ))}
           </Select>
         </Field>

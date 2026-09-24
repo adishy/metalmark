@@ -8,6 +8,26 @@ finances). Feature target: **what the mainstream personal-finance apps do** — 
 accounts, a bulletproof transaction pipeline with categories/owners/splits, shared accounts,
 swipe-to-review, and reporting (Sankey cash flow, category breakdowns, net worth over time).
 
+## Screenshots
+
+From the demo household (`python -m app.seed --demo`); every name and number is made up.
+
+| Accounts | Transactions |
+|---|---|
+| ![Accounts: net worth and its line first, then accounts grouped by kind](docs/screenshots/accounts.png) | ![Transactions: filters, and each row's category with its emoji](docs/screenshots/transactions.png) |
+
+| Income vs expense | Auto-categorize (Admin) |
+|---|---|
+| ![Cash flow: monthly income and expense bars with a net line](docs/screenshots/cash-flow.png) | ![Auto-categorize: a local once-over that warns before it overwrites](docs/screenshots/auto-categorize.png) |
+
+| Accounts on a phone | Review | Pick a category | Balance history |
+|---|---|---|---|
+| ![Accounts on a phone](docs/screenshots/accounts-phone.png) | ![The review deck](docs/screenshots/review-phone.png) | ![Choosing a category from the review deck](docs/screenshots/review-category-phone.png) | ![Typing past balances into an account](docs/screenshots/balance-history-phone.png) |
+
+Regenerate them against a running dev stack with
+`OUT=../docs/screenshots node scripts/readme-screenshots.mjs` from `frontend/` (set `CHROME` to a
+Chromium binary if Playwright's own is not installed).
+
 ## Product decisions (locked)
 
 | Decision | Choice | Why |

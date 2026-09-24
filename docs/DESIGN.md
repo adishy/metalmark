@@ -955,11 +955,21 @@ detail sheet.
   Capital One, Wells Fargo, Discover, Fidelity, Vanguard) and a hash of the name
   otherwise. Colour is never the only signal (§7, item 8) — the initials are always
   there.
-- **No network, ever.** No favicon service and no per-institution request: which banks
-  this household uses is not something to leak to a third party (ADR-0002). The mark is
-  computed, so the same account gives the same mark in every session and on every
-  machine; nothing in it reads the clock, a random source, or the environment.
-- **Size**: `sm` 20 px in a list row, `md` 24 px in a card or sheet, `rounded-full`
+- **No network, ever — from the browser.** No favicon service and no per-institution
+  request: which banks this household uses is not something to leak to a third party
+  (ADR-0002). The mark is computed, so the same account gives the same mark in every
+  session and on every machine; nothing in it reads the clock, a random source, or the
+  environment.
+- **A logo, when the household has one.** Settings → Institutions stores a logo per
+  institution — uploaded, or fetched once *by the server* from that institution's own
+  site on an admin's request (session 06). The mark then draws it on a white disc with a
+  1 px `border` (logos are designed for a light ground; a dark one smudges most of them),
+  and falls back to the initials if it fails to load. It is served by this app, never
+  by the web, so the rule above still holds. Raster only: an SVG can carry script, and
+  these are served from the app's own origin. `lg` (40 px) is for the Accounts list,
+  where a logo has to be big enough to recognise.
+- **Size**: `sm` 20 px in a list row, `md` 24 px in a card or sheet, `lg` 40 px on the
+  Accounts list, `rounded-full`
   (§2.6). Initials are `text-xs` — the floor §2.4 sets, and the largest that fits two
   letters in 20 px. `text-accent-fg` on every fill is at least 4.5:1 in both themes,
   pinned by test rather than asserted here.

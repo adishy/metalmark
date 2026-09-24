@@ -14,6 +14,7 @@ from app.schemas.reports import (
     SpendingReport,
 )
 from app.services import reports
+from app.services.ledger import today as ledger_today
 from app.services.periods import GranularityIn
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -83,6 +84,12 @@ async def cash_flow(
     first = await reports.earliest_flow(ctx.session)
     if first is not None and start < first <= end:
         start = first
+    # And it ends at today: a "this year" window in September has no money in
+    # October, and three empty bars with the net line dropping to zero into them
+    # read as a collapse rather than as the future. The echoed `end` says so.
+    now = ledger_today()
+    if start <= now < end:
+        end = now
     base, resolved, out = await reports.cash_flow_series(
         ctx.session, ctx.household_id, start, end, owner_id, granularity
     )

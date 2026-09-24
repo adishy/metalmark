@@ -24,7 +24,8 @@
 // It is small because it lives in a list row: 20 or 24 px, the sizes §2.6 gives
 // avatars, with the initials at `text-xs` — the floor §2.4 sets, which is also
 // the largest that fits inside 20 px with two letters.
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
+import { useInstitutionLogo } from "@/components/InstitutionLogos";
 
 /**
  * The fills, as literal class strings rather than `bg-chart-${n}`.
@@ -136,6 +137,9 @@ const SIZES = {
   sm: "size-5",
   /** 24 px — for a card or a sheet, where the row is not sharing space. */
   md: "size-6",
+  /** 40 px — a list that leads with the account, like the Accounts page, where
+   *  a logo has to be big enough to recognise. */
+  lg: "size-10 text-sm",
 } as const;
 
 export interface AccountMarkProps {
@@ -159,6 +163,11 @@ export default function AccountMark({
   style,
 }: AccountMarkProps) {
   const fill = FILLS[fillFor(name, institution) - 1] ?? FILLS[0];
+  // The household's logo for the institution, served by this server (never
+  // fetched from the web by the browser — §4.15). A logo that fails to load
+  // falls back to the initials rather than a broken-image glyph.
+  const logo = useInstitutionLogo(institution);
+  const [broken, setBroken] = useState(false);
   const inst = (institution ?? "").trim();
   // "Chase Checking (Chase)" is noise; only add the institution when the name
   // does not already contain it.
@@ -174,10 +183,25 @@ export default function AccountMark({
       aria-label={label}
       title={label}
       style={style}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full text-xs leading-none font-semibold text-accent-fg ${SIZES[size]} ${fill} ${className ?? ""}`}
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full text-xs leading-none font-semibold ${
+        logo && !broken ? "border border-border bg-white" : `text-accent-fg ${fill}`
+      } ${SIZES[size]} ${className ?? ""}`}
       data-testid="account-mark"
     >
-      <span aria-hidden="true">{initialsFor(name)}</span>
+      {logo && !broken ? (
+        // A logo is drawn on white in both themes: logos are designed for a
+        // light ground, and a dark one turns most of them into a smudge.
+        <img
+          src={logo}
+          alt=""
+          aria-hidden="true"
+          className="size-full object-contain p-0.5"
+          onError={() => setBroken(true)}
+          data-testid="account-mark-logo"
+        />
+      ) : (
+        <span aria-hidden="true">{initialsFor(name)}</span>
+      )}
     </span>
   );
 }

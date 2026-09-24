@@ -74,8 +74,11 @@ describe("<AppShell /> notice poll", () => {
   it("reads the notice feed from wherever the tab happens to be", async () => {
     renderShell({ at: "/transactions" });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/connections/notifications");
+    // The shell also loads institution logos for the account marks; the notice
+    // feed is the call this test is about, wherever it falls in the order.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map((c) => c[0])).toContain("/api/connections/notifications"),
+    );
   });
 });
 

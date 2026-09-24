@@ -47,6 +47,7 @@ from app.schemas import auth as au
 from app.schemas import checks as ch
 from app.schemas import connections as co
 from app.schemas import household as hh
+from app.schemas import institutions as ins
 from app.schemas import investments as inv
 from app.schemas import ledger as le
 from app.schemas import owners as ow
@@ -162,6 +163,15 @@ register(
     icon=Icon(),
     color=Color(),
     sort=K,
+)
+register(
+    ins.InstitutionOut,
+    name=Pseudonym("Institution"),
+    key=Pseudonym("Institution"),
+    fetchable=K,
+    has_logo=K,
+    logo_source=Code("fetched", "uploaded"),
+    logo_updated_at=K,
 )
 register(le.BalanceOut, balance_date=K, balance=K, currency=Currency())
 register(le.TagOut, id=K, name=Label("Tag"), color=Color())

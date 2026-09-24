@@ -131,3 +131,75 @@ Behaviour:
 - The same on Signup, which uses `new-password`.
 
 **G. Branding:** "MetalMark Money" in the README, the page title, the header and the sign-in pages.
+
+## Asked later in the session
+
+- "is it possible to add a view to allow the user to manually add historical balance data for the acct.
+  instead of only leaning on the sync provider?" This became item **H**.
+- "we should also add (real image / icon) for each institutaion, enabling the user to set logos for
+  institutions, with some common institutions like chase, capital one, fidelity etc. already uploaded,
+  looking good". This became item **I**.
+- "use the frontend design plugin to rejigger and make friendly the existing views".
+- "could you add representative screenshots to the readme?"
+
+## What was built
+
+**A. Cash flow.**
+- The window runs from the first transaction to today before `auto` is resolved.
+- The net line is straight.
+- The transfer matcher links the strictly closest candidate in time.
+- Found while taking screenshots: a "this year" window drew empty bars for the months still to come, with the
+  net line dropping into them. The end is now clamped to today as well.
+
+**B. Starter categories.** About 70 typed categories with emoji. Migration 0009 adds them only to households
+with no categories.
+
+**C. Auto-categorizer.**
+- Runs locally, with provenance `auto`.
+- Sync fills blank categories with it.
+- Admin → Auto-categorize re-runs the matcher, then overwrites categories after a confirmation.
+
+**D. Review deck.** A category chip above the verdicts opens a searchable picker. The groups that match the
+money's direction come first, and `c` opens it.
+
+**E. Accounts page.**
+- Net worth, its change and its line come first, with a range control (1M to All).
+- Tabs per account type, with grouped lists and group totals.
+- The portfolio sits under the Investments tab.
+- The owner filter moves behind a button in the top right on phones.
+- Whole rows open an account.
+- Account marks are 40 px.
+
+**F. Sign-in markup.** Login and signup use the markup password managers look for:
+- `method="post"` and an `action` on the form;
+- `name` and `autocomplete` (`username` / `current-password` / `new-password`) on each field;
+- `autocapitalize=none` and `spellcheck=false` on the username;
+- `required`, and `minLength` matching the server's rule.
+
+**G. Branding.** "MetalMark Money" in the page title, the header, the sign-in pages, the PWA name and the README.
+
+**H. Balance history.**
+- `GET/PUT/DELETE /accounts/{id}/balances[/{date}]`, with an editor in the account dialog.
+- A past day never moves the current balance. Removing the current day promotes the newest remaining balance.
+- Refused for accounts whose value is computed from their holdings.
+
+**I. Institution logos.**
+- A new household-scoped table (migration 0010, with RLS).
+- Settings → Institutions lists each institution: upload, replace or remove a logo, or "Get logos from bank
+  websites" (admin).
+- The **server** fetches the touch icon from the institution's own site, only for the ~45 institutions whose
+  site it knows.
+- Images are raster only and checked by their bytes (SVG is refused), and served with `nosniff` and a
+  sandboxing CSP.
+- The account mark draws the logo on a white disc and falls back to initials.
+- Logos are not bundled in the repository, because they are trademarks and the repository and image are
+  public. The browser never loads a logo from the web (DESIGN §4.15, updated).
+
+**Screenshots.** `docs/screenshots/`, taken from the demo household on a local dev stack by
+`frontend/scripts/readme-screenshots.mjs`, and shown in a README section.
+
+## Verification
+
+- Backend: 1,100 passed, and ruff is clean.
+- Frontend: typecheck and design-lint are clean; vitest passed 361.
+- The screenshots were reviewed by eye at 390 and 1280 px.

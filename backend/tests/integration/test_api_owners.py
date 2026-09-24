@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -705,6 +706,12 @@ async def test_cash_flow_is_cut_to_the_span_that_has_money_in_it(client):
     assert body["points"][0]["date"] == "2026-08-10"
     assert body["points"][0]["expense"] == "-40.0000"
     assert len(body["points"]) == 45
+
+    # Nor does it run past today: the future has no bars to draw.
+    ahead = (await client.get(
+        "/reports/cash-flow", params={"start": "2026-08-01", "end": "2099-12-31"})).json()
+    assert ahead["end"] == datetime.now(UTC).date().isoformat()
+    assert ahead["points"][-1]["date"] <= ahead["end"]
 
     # A window that starts after the first transaction is left as asked.
     inside = (await client.get(
