@@ -188,5 +188,14 @@ async def test_the_api_serves_the_checks_to_the_household():
         resp = await client.get("/checks")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["schema_version"] == "0007"
+    # The head revision, read from the migrations rather than written here, so a
+    # new migration does not have to find this line.
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from tests.conftest import BACKEND_DIR
+
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    assert body["schema_version"] == ScriptDirectory.from_config(cfg).get_current_head()
     assert [c["id"] for c in body["checks"]][0] == "headline_matches_chart"

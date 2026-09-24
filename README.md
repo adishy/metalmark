@@ -304,6 +304,24 @@ fallback, the `/api` proxy, TLS, the login round trip, that the generated creden
 that the published image carries no `.env`, and, in a real browser, that the built app registers a
 service worker — the only test of the thing no other gate can reach. See ADR-0038 and ADR-0039.
 
+## Agent access (read-only, anonymized)
+
+An AI agent can read the app — to answer questions about the household, or to debug the app — without
+seeing anyone's name. In **Admin → Agent access**, issue a token (an admin or the owner can), choose what
+it reads, and copy it; it is shown once. Then point the agent at the catalog, which lists every route:
+
+```bash
+curl -H "Authorization: Bearer mmk_…" https://<host>/api/agent        # structured API (agent:read)
+curl -H "Authorization: Bearer mmk_…" https://<host>/api/anon_debug   # debug views (debug:read)
+```
+
+`/api/agent/v1/<path>` is the app's own `GET /api/<path>`; `/api/anon_debug/view?path=/api/…` takes a URL
+from the browser's network tab; `/api/anon_debug/pages/<page>` is everything a page loads, and
+`/api/anon_debug/transactions/<id>/explain` says why a row is categorized as it is. Every request is
+read-only in the database. Ids, amounts and dates are real; names, descriptions, notes and account numbers
+are replaced on the server by stable pseudonyms (`Account 3f9a2c`). That makes a token a credential to the
+household's *finances* — keep it short-lived and revoke it when done. See ADR-0048.
+
 ## Stack (boring on purpose)
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, Pydantic v2. Deps via **uv**.

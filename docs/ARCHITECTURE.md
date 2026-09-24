@@ -111,6 +111,9 @@ lists the accounts it cannot count and why (`not_started`, `no_balance`, `no_rat
   household table; exactly one `kind='shared'` owner per household; name case-insensitively unique per household.
 - **sessions** — **server-side** session table (decided, not "or cookie") so we get revocation /
   logout-everywhere and idle + absolute expiry. `id, user_id, csrf_token, created_at, last_seen_at, expires_at`.
+- **agent_tokens** — bearer tokens for agents (ADR-0048). `id, user_id (the issuer), name, token_hash (sha256),
+  prefix, scopes (agent:read|debug:read), expires_at, last_used_at, revoked_at`. An identity table like
+  `sessions`: no `household_id`; the household is the issuer's, resolved per request.
 
 **Signup is open (ADR-0027).** `POST /auth/signup` on a database with **no users** creates the household (that
 signer becomes its `owner` member and `is_admin`); every later signup joins the **oldest** household as a
@@ -509,9 +512,10 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   - The bypass refusal is enforced, not just documented: the worker reads `rolsuper` / `rolbypassrls` for
     `current_user` at startup and `SystemExit(1)`s if either is set or if it connected as any role but the
     app role. A worker that would silently lose RLS refuses to start.
-- **Tables outside RLS, and what that costs**: `users`, `households`, `household_members`, `sessions`
-  (identity — a session has to be read before its household is known; ADR-0025), `fx_rates` (global
-  reference data: the same fact for everyone) and `alembic_version` carry **no policy**. For these six, RLS
+- **Tables outside RLS, and what that costs**: `users`, `households`, `household_members`, `sessions`,
+  `agent_tokens` (identity — a session or a token has to be read before its household is known; ADR-0025,
+  ADR-0048), `fx_rates` (global reference data: the same fact for everyone) and `alembic_version` carry
+  **no policy**. For these seven, RLS
   is not merely absent — it is not a backstop at all: the app role holds ordinary
   `SELECT/INSERT/UPDATE/DELETE` on every one, deliberately, because it has to read `sessions` and write
   `household_members` in order to authenticate. What keeps them isolated is that each is reached by
@@ -522,6 +526,13 @@ provider is an adapter that produces the *same* writes a human would (tagging it
   login rate-limit + lockout. **Signup is open (ADR-0027)** — the first signer creates the household (as its
   `owner` + `is_admin`), later signers join the oldest one as members; `METALMARK_OPEN_SIGNUP=false` closes it.
   No 2FA is an accepted risk given Tailscale only. (No invite landing page any more, so no `Lax` carve-out.)
+- **Agent access (ADR-0048)**: `/api/agent` (structured) and `/api/anon_debug` (debug views) take an agent
+  token as `Authorization: Bearer mmk_…` — never the cookie — issued by an admin or the owner, scoped,
+  expiring, and dead once its issuer can no longer issue. An agent request runs the app's own `GET` route
+  in-process, in a `READ ONLY` transaction, and the response is **anonymized on the server by allowlist**
+  (`app/agent/policies.py`): ids, amounts and dates are kept; names and free text become per-token
+  pseudonyms; a field without a policy is dropped and fails a test; free-text query parameters are refused.
+  Anonymized is not harmless — a token still reads the household's amounts.
 - **Privacy caveat**: v1 ownership drives *views*, not *access* — any household member can read a partner's
   accounts. The UI must not imply privacy it can't enforce; truly private accounts are out of scope for v1.
   Open signup sharpens this: **anyone who can reach the instance can join the household and read all of it**,

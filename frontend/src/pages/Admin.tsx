@@ -16,6 +16,7 @@
 
 import { useState } from "react";
 
+import { useAgentTokens, useCreateAgentToken, useRevokeAgentToken } from "@/api/agent";
 import {
   useCancelJob,
   useChecks,
@@ -27,10 +28,27 @@ import {
   useTriggerSync,
   useUpdateConnection,
 } from "@/api/sync";
-import type { Check, CheckStatus, RunStatus, SyncJob, SyncRun } from "@/api/types";
+import type {
+  AgentScope,
+  AgentTokenCreated,
+  AgentTokenStatus,
+  Check,
+  CheckStatus,
+  RunStatus,
+  SyncJob,
+  SyncRun,
+} from "@/api/types";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { Instant, Time } from "@/components/datetime";
-import { Button, Select, Spinner } from "@/components/form";
+import {
+  Button,
+  Checkbox,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  useFieldId,
+} from "@/components/form";
 import NoticePermission from "@/components/NoticePermission";
 import { formatDuration } from "@/lib/format";
 
@@ -408,7 +426,234 @@ export default function Admin() {
       </Card>
 
       <DataChecks />
+      <AgentAccess />
     </div>
+  );
+}
+
+// ---- agent access ---------------------------------------------------------
+
+const SCOPE_LABELS: Record<AgentScope, { label: string; hint: string }> = {
+  "agent:read": {
+    label: "Agent API",
+    hint: "/api/agent — every screen's data, as structured, anonymized JSON.",
+  },
+  "debug:read": {
+    label: "Debug views",
+    hint: "/api/anon_debug — what a page shows, and why a row or a balance is what it is.",
+  },
+};
+
+const EXPIRY_DAYS = [7, 30, 90, 365];
+
+const TOKEN_TONES: Record<AgentTokenStatus, Tone> = {
+  active: "ok",
+  expired: "idle",
+  revoked: "idle",
+};
+
+/**
+ * Tokens that let an agent read the household, anonymized and read-only
+ * (ADR-0048). The token is shown once, when it is issued: the server keeps only
+ * its hash, so "copy it now" is not a suggestion.
+ */
+export function AgentAccess() {
+  const tokens = useAgentTokens();
+  const create = useCreateAgentToken();
+  const revoke = useRevokeAgentToken();
+
+  const nameId = useFieldId("agent-token-name");
+  const expiryId = useFieldId("agent-token-expiry");
+  const [name, setName] = useState("");
+  const [scopes, setScopes] = useState<AgentScope[]>(["agent:read", "debug:read"]);
+  const [days, setDays] = useState(90);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<AgentTokenCreated | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
+
+  function toggle(scope: AgentScope) {
+    setScopes((s) => (s.includes(scope) ? s.filter((x) => x !== scope) : [...s, scope]));
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return setFormError("Name the token after the agent that will hold it.");
+    if (scopes.length === 0) return setFormError("Choose at least one thing it can read.");
+    setFormError(null);
+    create.mutate(
+      { name: name.trim(), scopes, expires_in_days: days },
+      {
+        onSuccess: (t) => {
+          setIssued(t);
+          setCopied(false);
+          setName("");
+        },
+        onError: (err) => setFormError((err as Error).message),
+      },
+    );
+  }
+
+  async function copy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+    } catch {
+      // A browser that refuses the clipboard (an insecure origin) still shows the
+      // token selected in the field, which is the fallback.
+      setCopied(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Agent access"
+      note="Tokens for AI agents: read-only, and names, descriptions, notes and account numbers are replaced on the server before anything leaves."
+    >
+      <form className="space-y-3" onSubmit={submit} data-testid="agent-token-form">
+        <Field label="Name" htmlFor={nameId} required>
+          <Input
+            id={nameId}
+            value={name}
+            maxLength={80}
+            placeholder="Claude, debugging reports"
+            onChange={(e) => setName(e.target.value)}
+            data-testid="agent-token-name"
+          />
+        </Field>
+        <fieldset className="space-y-1">
+          <legend className="text-xs font-medium text-fg-muted">Can read</legend>
+          {(Object.keys(SCOPE_LABELS) as AgentScope[]).map((scope) => (
+            <Checkbox
+              key={scope}
+              label={SCOPE_LABELS[scope].label}
+              hint={SCOPE_LABELS[scope].hint}
+              checked={scopes.includes(scope)}
+              onChange={() => toggle(scope)}
+              data-testid={`agent-scope-${scope}`}
+            />
+          ))}
+        </fieldset>
+        <Field label="Expires after" htmlFor={expiryId}>
+          <Select
+            id={expiryId}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            data-testid="agent-token-expiry"
+          >
+            {EXPIRY_DAYS.map((d) => (
+              <option key={d} value={d}>
+                {d === 365 ? "1 year" : `${d} days`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {formError && (
+          <p className="text-sm text-negative" role="alert" data-testid="agent-token-error">
+            {formError}
+          </p>
+        )}
+        <Button type="submit" disabled={create.isPending} aria-busy={create.isPending}>
+          {create.isPending && <Spinner />}
+          Issue token
+        </Button>
+      </form>
+
+      {issued && (
+        <div className="space-y-2 rounded-control bg-surface-inset p-3" data-testid="agent-token-issued">
+          <p className="text-sm text-fg">
+            Copy this token now — it is not shown again. Give it to the agent as{" "}
+            <code className="text-xs">Authorization: Bearer …</code> and point it at{" "}
+            <code className="text-xs">/api/agent</code>, which lists every route it can call.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              value={issued.token}
+              aria-label="The new agent token"
+              onFocus={(e) => e.currentTarget.select()}
+              className="font-mono text-xs"
+              data-testid="agent-token-value"
+            />
+            <Button type="button" variant="secondary" onClick={() => copy(issued.token)}>
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <Button type="button" variant="ghost" onClick={() => setIssued(null)}>
+            Done
+          </Button>
+        </div>
+      )}
+
+      {tokens.isPending && <Spinner />}
+      {tokens.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(tokens.error as Error).message}
+        </p>
+      )}
+      {tokens.data && tokens.data.length === 0 && (
+        <p className="text-sm text-fg-muted">No tokens yet.</p>
+      )}
+      {tokens.data && tokens.data.length > 0 && (
+        <ul className="divide-y divide-border" data-testid="agent-tokens">
+          {tokens.data.map((t) => (
+            <li key={t.id} className="space-y-1 py-2" data-testid={`agent-token-${t.id}`}>
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 text-sm break-words text-fg">{t.name}</span>
+                <Badge tone={TOKEN_TONES[t.status]}>{t.status}</Badge>
+              </div>
+              <p className="text-xs text-fg-muted">
+                <code>{t.prefix}…</code> ·{" "}
+                {t.scopes.map((s) => SCOPE_LABELS[s]?.label ?? s).join(", ")} · by {t.created_by}
+              </p>
+              <p className="text-xs text-fg-muted">
+                {t.last_used_at ? (
+                  <>
+                    Last used <Instant value={t.last_used_at} style="long" />
+                  </>
+                ) : (
+                  "Never used"
+                )}
+                {t.expires_at && t.status === "active" && (
+                  <>
+                    {" "}
+                    · expires <Instant value={t.expires_at} style="long" />
+                  </>
+                )}
+              </p>
+              {t.status === "active" &&
+                (confirming === t.id ? (
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={revoke.isPending}
+                      onClick={() =>
+                        revoke.mutate(t.id, { onSettled: () => setConfirming(null) })
+                      }
+                      data-testid={`agent-token-confirm-${t.id}`}
+                    >
+                      Revoke now
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setConfirming(null)}>
+                      Keep
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setConfirming(t.id)}
+                    data-testid={`agent-token-revoke-${t.id}`}
+                  >
+                    Revoke
+                  </Button>
+                ))}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

@@ -204,28 +204,33 @@ def _direction_ok(direction: str, amount) -> bool:
     return amount > 0 if direction == "in" else amount < 0
 
 
-def _matches(conditions: RuleConditions, txn: Transaction) -> bool:
-    """Every set condition must hold (AND); an unset one constrains nothing.
+def condition_results(conditions: RuleConditions, txn: Transaction) -> dict[str, bool]:
+    """Each *set* condition, and whether it holds for ``txn``; an unset one is absent.
 
-    Written as the conjunction it is, so a reader can see the whole rule at once
-    and adding a key is one line. Bounds are on the SIGNED amount — expenses are
-    negative, so "spending over $100" is ``amount_max = -100``, not ``amount_min``.
+    The one place a condition is evaluated. ``_matches`` is the conjunction of
+    these, and the agent debug view (``/anon_debug/transactions/{id}/explain``)
+    reports them one by one — so "why did this rule not match?" is answered by the
+    engine's own arithmetic, not a second copy of it. Bounds are on the SIGNED
+    amount — expenses are negative, so "spending over $100" is
+    ``amount_max = -100``, not ``amount_min``.
     """
-    return all(
-        (
-            conditions.merchant_contains is None
-            or _contains(txn.merchant, conditions.merchant_contains),
-            conditions.description_regex is None
-            or _searches(txn.description, conditions.description_regex),
-            conditions.amount_min is None or txn.amount >= conditions.amount_min,
-            conditions.amount_max is None or txn.amount <= conditions.amount_max,
-            conditions.direction is None
-            or _direction_ok(conditions.direction, txn.amount),
-            conditions.account_ids is None or txn.account_id in conditions.account_ids,
-            conditions.category_id is None or txn.category_id == conditions.category_id,
-            conditions.is_pending is None or txn.is_pending == conditions.is_pending,
-        )
-    )
+    c = conditions
+    checks = {
+        "merchant_contains": lambda: _contains(txn.merchant, c.merchant_contains),
+        "description_regex": lambda: _searches(txn.description, c.description_regex),
+        "amount_min": lambda: txn.amount >= c.amount_min,
+        "amount_max": lambda: txn.amount <= c.amount_max,
+        "direction": lambda: _direction_ok(c.direction, txn.amount),
+        "account_ids": lambda: txn.account_id in c.account_ids,
+        "category_id": lambda: txn.category_id == c.category_id,
+        "is_pending": lambda: txn.is_pending == c.is_pending,
+    }
+    return {name: bool(check()) for name, check in checks.items() if getattr(c, name) is not None}
+
+
+def _matches(conditions: RuleConditions, txn: Transaction) -> bool:
+    """Every set condition must hold (AND); an unset one constrains nothing."""
+    return all(condition_results(conditions, txn).values())
 
 
 def _write(

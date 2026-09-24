@@ -144,3 +144,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0045](0045-history-before-the-first-balance-and-what-a-point-leaves-out.md) | History before an account's first balance is derived; every net-worth point says what it leaves out | Accepted |
 | [0046](0046-rates-are-fetched-daily.md) | Rates are fetched daily; the most recently stated rate wins in either direction | Accepted |
 | [0047](0047-an-upgrade-is-pull-and-restart.md) | An upgrade is a pull and a restart; the deployment backs up, migrates and verifies itself | Accepted |
+| [0048](0048-agents-read-an-anonymized-mirror.md) | Agents read an anonymized, read-only mirror of the app's API, by token | Proposed |
