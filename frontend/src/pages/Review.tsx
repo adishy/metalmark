@@ -42,6 +42,7 @@ import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import { Button } from "@/components/form";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
+import { ChevronDownIcon } from "@/components/icons";
 import CategoryPicker, { UNCATEGORIZED_ICON, categoryLabel } from "@/components/CategoryPicker";
 
 /** How long a decided card stays in the DOM, flying to the side. Long enough to
@@ -355,7 +356,10 @@ export default function Review() {
                   <span aria-hidden="true">{UNCATEGORIZED_ICON} </span>Choose a category
                 </span>
               )}
-              <span className="text-sm text-fg-muted">Change</span>
+              {/* A caret, not the word "Change": the pill already reads as
+                  something to tap, and the word looked like a second label. */}
+              <ChevronDownIcon className="size-4 shrink-0 text-fg-muted" />
+              <span className="sr-only">Change category</span>
             </button>
           </div>
           {setCategory.isError && (
