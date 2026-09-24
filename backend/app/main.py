@@ -13,6 +13,9 @@ from starlette.requests import Request
 
 from app.api import (
     accounts,
+    agent,
+    agent_tokens,
+    anon_debug,
     auth,
     categories,
     checks,
@@ -34,6 +37,28 @@ from app.services.errors import LedgerError
 from app.settings import get_settings
 
 log = get_logger("app")
+
+#: The app's own routes. The agent routes (ADR-0048) read this list to find the
+#: route an agent path names, so it is data rather than a run of include calls.
+APP_ROUTERS = (
+    health.router,
+    checks.router,
+    auth.router,
+    accounts.router,
+    categories.router,
+    owners.router,
+    transactions.router,
+    fx.router,
+    reports.router,
+    rules.router,
+    imports.router,
+    household.router,
+    connections.router,
+    investments.router,
+    portability.router,
+)
+#: Agent access (ADR-0048): token administration, and the two anonymized surfaces.
+AGENT_ROUTERS = (agent_tokens.router, agent.router, anon_debug.router)
 
 
 class NoStoreForDataMiddleware(BaseHTTPMiddleware):
@@ -108,21 +133,8 @@ def create_app() -> FastAPI:
         ]
         return JSONResponse(status_code=422, content={"detail": errors})
 
-    app.include_router(health.router)
-    app.include_router(checks.router)
-    app.include_router(auth.router)
-    app.include_router(accounts.router)
-    app.include_router(categories.router)
-    app.include_router(owners.router)
-    app.include_router(transactions.router)
-    app.include_router(fx.router)
-    app.include_router(reports.router)
-    app.include_router(rules.router)
-    app.include_router(imports.router)
-    app.include_router(household.router)
-    app.include_router(connections.router)
-    app.include_router(investments.router)
-    app.include_router(portability.router)
+    for router in APP_ROUTERS + AGENT_ROUTERS:
+        app.include_router(router)
     return app
 
 

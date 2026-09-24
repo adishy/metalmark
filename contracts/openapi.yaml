@@ -3272,6 +3272,337 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /admin/agent-tokens:
+    get:
+      tags:
+      - agent
+      summary: List Tokens
+      description: Every token issued in this household, newest first.
+      operationId: list_tokens_admin_agent_tokens_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentTokenOut'
+                title: Response List Tokens Admin Agent Tokens Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - agent
+      summary: Create Token
+      description: Issue a token. Its value is in this response and never again.
+      operationId: create_token_admin_agent_tokens_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTokenCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTokenCreated'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/agent-tokens/{token_id}:
+    delete:
+      tags:
+      - agent
+      summary: Revoke Token
+      description: Revoke a token. It stops working on its next request.
+      operationId: revoke_token_admin_agent_tokens__token_id__delete
+      parameters:
+      - name: token_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Token Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTokenOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent:
+    get:
+      tags:
+      - agent
+      summary: Agent Index
+      description: The catalog of every route an agent can read. Start here.
+      operationId: agent_index_agent_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogOut'
+  /agent/v1:
+    get:
+      tags:
+      - agent
+      summary: Agent V1 Index
+      description: The catalog of every route in v1 (the same as ``GET /agent``).
+      operationId: agent_v1_index_agent_v1_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogOut'
+  /agent/v1/{path}:
+    get:
+      tags:
+      - agent
+      summary: Agent Read
+      description: The app's ``GET /{path}``, anonymized. See the catalog for every path.
+      operationId: agent_read_agent_v1__path__get
+      parameters:
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /anon_debug:
+    get:
+      tags:
+      - agent
+      summary: Debug Index
+      description: The catalog of the debug views. Start here.
+      operationId: debug_index_anon_debug_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogOut'
+  /anon_debug/view:
+    get:
+      tags:
+      - agent
+      summary: View
+      description: 'Any readable app route, anonymized: what the page receives from it.'
+      operationId: view_anon_debug_view_get
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+          description: An app API path with its query string.
+          title: Path
+        description: An app API path with its query string.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /anon_debug/pages:
+    get:
+      tags:
+      - agent
+      summary: List Pages
+      description: The app's pages, and the requests each one makes.
+      operationId: list_pages_anon_debug_pages_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /anon_debug/pages/{page}:
+    get:
+      tags:
+      - agent
+      summary: Show Page
+      description: Everything one page loads, each response anonymized as the page gets it.
+      operationId: show_page_anon_debug_pages__page__get
+      parameters:
+      - name: page
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Page
+      - name: start
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Start
+      - name: end
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: End
+      - name: owner_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /anon_debug/transactions/{txn_id}/explain:
+    get:
+      tags:
+      - agent
+      summary: Explain Transaction
+      description: 'Why a transaction looks as it does: provenance, rules, owner, transfer.'
+      operationId: explain_transaction_anon_debug_transactions__txn_id__explain_get
+      parameters:
+      - name: txn_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Txn Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /anon_debug/accounts/{account_id}/balance:
+    get:
+      tags:
+      - agent
+      summary: Explain Balance
+      description: 'How an account''s balance is built: snapshots, drift, holdings, checks.'
+      operationId: explain_balance_anon_debug_accounts__account_id__balance_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /anon_debug/system:
+    get:
+      tags:
+      - agent
+      summary: System
+      description: Versions, non-secret settings, counts, FX coverage and connection health.
+      operationId: system_anon_debug_system_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
 components:
   schemas:
     AccountCreate:
@@ -3524,6 +3855,161 @@ components:
       - max_stale_days
       - is_fully_valued
       title: AccountValuationOut
+    AgentTokenCreate:
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          minLength: 1
+          title: Name
+        scopes:
+          items:
+            type: string
+            enum:
+            - agent:read
+            - debug:read
+          type: array
+          minItems: 1
+          title: Scopes
+        expires_in_days:
+          type: integer
+          maximum: 365.0
+          minimum: 1.0
+          title: Expires In Days
+          default: 90
+      type: object
+      required:
+      - name
+      - scopes
+      title: AgentTokenCreate
+    AgentTokenCreated:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        prefix:
+          type: string
+          title: Prefix
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+        revoked_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Revoked At
+        created_by:
+          type: string
+          title: Created By
+        status:
+          type: string
+          enum:
+          - active
+          - expired
+          - revoked
+          title: Status
+        token:
+          type: string
+          title: Token
+      type: object
+      required:
+      - id
+      - name
+      - prefix
+      - scopes
+      - created_at
+      - expires_at
+      - last_used_at
+      - revoked_at
+      - created_by
+      - status
+      - token
+      title: AgentTokenCreated
+    AgentTokenOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        prefix:
+          type: string
+          title: Prefix
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+        revoked_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Revoked At
+        created_by:
+          type: string
+          title: Created By
+        status:
+          type: string
+          enum:
+          - active
+          - expired
+          - revoked
+          title: Status
+      type: object
+      required:
+      - id
+      - name
+      - prefix
+      - scopes
+      - created_at
+      - expires_at
+      - last_used_at
+      - revoked_at
+      - created_by
+      - status
+      title: AgentTokenOut
     AllocationOut:
       properties:
         as_of:
@@ -3864,6 +4350,45 @@ components:
       - granularity
       - points
       title: CashFlowSeries
+    CatalogOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        version:
+          type: string
+          title: Version
+        description:
+          type: string
+          title: Description
+        anonymization:
+          items:
+            type: string
+          type: array
+          title: Anonymization
+        auth:
+          type: string
+          title: Auth
+        routes:
+          items:
+            $ref: '#/components/schemas/RouteOut'
+          type: array
+          title: Routes
+        links:
+          additionalProperties:
+            type: string
+          type: object
+          title: Links
+      type: object
+      required:
+      - name
+      - version
+      - description
+      - anonymization
+      - auth
+      - routes
+      - links
+      title: CatalogOut
     CategoryCreate:
       properties:
         group_id:
@@ -5382,6 +5907,42 @@ components:
       type: object
       title: OwnerUpdate
       description: Send only the fields you want to change; an explicit null is rejected.
+    ParamOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        location:
+          type: string
+          enum:
+          - path
+          - query
+          title: Location
+        required:
+          type: boolean
+          title: Required
+        type:
+          type: string
+          title: Type
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        enum:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Enum
+      type: object
+      required:
+      - name
+      - location
+      - required
+      - type
+      title: ParamOut
     PortfolioOut:
       properties:
         as_of:
@@ -5458,6 +6019,46 @@ components:
       - price_date
       - price
       title: PriceUpsert
+    RouteOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        method:
+          type: string
+          const: GET
+          title: Method
+        path:
+          type: string
+          title: Path
+        href:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Href
+        description:
+          type: string
+          title: Description
+        params:
+          items:
+            $ref: '#/components/schemas/ParamOut'
+          type: array
+          title: Params
+        returns:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Returns
+      type: object
+      required:
+      - name
+      - method
+      - path
+      - href
+      - description
+      - params
+      title: RouteOut
+      description: One route an agent can call, described well enough to call it.
     RuleActions-Input:
       properties:
         set_category_id:

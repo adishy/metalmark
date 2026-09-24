@@ -739,3 +739,35 @@ export interface Checks {
   schema_version: string | null;
   checks: Check[];
 }
+
+// ---- agent access (ADR-0048) ----------------------------------------------
+
+/** `agent:read` opens `/api/agent`; `debug:read` opens `/api/anon_debug`. */
+export type AgentScope = "agent:read" | "debug:read";
+
+export type AgentTokenStatus = "active" | "expired" | "revoked";
+
+export interface AgentToken {
+  id: UUID;
+  name: string;
+  /** The first characters of the token, to tell tokens apart. Never the token. */
+  prefix: string;
+  scopes: AgentScope[];
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_by: string;
+  status: AgentTokenStatus;
+}
+
+/** The answer to issuing a token — the only response that carries `token`. */
+export interface AgentTokenCreated extends AgentToken {
+  token: string;
+}
+
+export interface AgentTokenCreate {
+  name: string;
+  scopes: AgentScope[];
+  expires_in_days: number;
+}

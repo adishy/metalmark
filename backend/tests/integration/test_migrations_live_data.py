@@ -281,3 +281,50 @@ def test_0007_downgrade_keeps_a_balance_written_after_it(scratch_db):
             "SELECT current_balance::text FROM accounts WHERE id = %s", (card,)
         ).fetchone()[0] == "-900.0000"
         assert _snapshots(conn, card) == [("2026-01-01", "850.0000")]
+
+
+# ---- 0008: agent tokens --------------------------------------------------------
+
+
+def _has_table(conn, name: str) -> bool:
+    return conn.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{name}",)).fetchone()[0]
+
+
+def test_0008_adds_agent_tokens_to_a_live_database_and_touches_nothing_else(scratch_db):
+    """Additive: the table appears, the app role can use it, and the household's
+    rows are the same before, after, and after a downgrade."""
+    _alembic(scratch_db, "upgrade", "0007")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from live metadata, so a database created today already has
+        # the table at 0007. Drop it to be the database an existing install has.
+        conn.execute("DROP TABLE IF EXISTS agent_tokens")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="120.50")
+        _snapshot(conn, hid, acct, "2026-09-01", "120.50")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0008")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "agent_tokens")
+        app_role = os.environ["APP_DB_USER"]
+        for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+            assert conn.execute(
+                "SELECT has_table_privilege(%s, 'agent_tokens', %s)", (app_role, privilege)
+            ).fetchone()[0], privilege
+        # An identity table: no household column, so no household RLS to forget.
+        columns = {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'agent_tokens'"
+        ).fetchall()}
+        assert "household_id" not in columns
+        assert _fingerprint(conn) == before
+
+    _alembic(scratch_db, "downgrade", "0007")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "agent_tokens")
+        assert _fingerprint(conn) == before
+
+    # And up again: the shape-detecting create is safe to re-run.
+    _alembic(scratch_db, "upgrade", "0008")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "agent_tokens")
