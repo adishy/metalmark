@@ -148,6 +148,11 @@ export function chartTooltip(
   return {
     trigger,
     confine: true,
+    // A tap shows the tooltip where a hover would: on a phone there is no
+    // hover, and a chart that answered only to a mouse was a picture.
+    triggerOn: "mousemove|click",
+    // Big enough to read at arm's length, and kept clear of the thumb.
+    extraCssText: "border-radius: 12px; padding: 8px 12px; font-size: 14px;",
     backgroundColor: t.surface,
     borderColor: t.border,
     textStyle: { color: t.fg },

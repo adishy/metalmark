@@ -519,6 +519,8 @@ register(
     sync_interval_minutes=K,
     next_sync_at=K,
     created_at=K,
+    last_new_data_at=K,
+    quiet_syncs=K,
 )
 register(
     co.ConnectionDefaults,

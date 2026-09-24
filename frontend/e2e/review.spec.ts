@@ -180,7 +180,11 @@ test("review: editing a card from the deck files nothing (§4.17)", async ({ pag
   // question, and it now answers the one the sheet was opened to change.
   const card = page.getByTestId("swipe-card");
   await expect(card).toContainText(merchant);
-  await expect(card).toContainText(label!);
+  // The option reads "🛒 Groceries"; the card draws the emoji in its disc and
+  // the name under the merchant, so each is looked for on its own.
+  const [icon, ...rest] = label!.split(" ");
+  await expect(card).toContainText(rest.join(" "));
+  await expect(card).toContainText(icon);
 });
 
 test("review: the keyboard does not decide the card under the open sheet", async ({ page }) => {

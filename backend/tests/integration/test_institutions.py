@@ -117,3 +117,36 @@ async def test_upload_serve_and_delete_through_the_api(client):  # noqa: F811
 
     assert (await client.delete("/institutions/chase bank/logo")).status_code == 204
     assert (await client.get("/institutions/chase bank/logo")).status_code == 404
+
+
+# ---- sync freshness (session 06): a bridge that answers "ok" with nothing new ----
+
+
+async def test_a_connection_says_when_it_last_brought_new_data(hh):
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import AccountConnection, SyncRun
+    from app.services import connections as conn_svc
+
+    async with scoped_session(hh) as s:
+        conn = AccountConnection(household_id=hh, provider="fake", org_name="Bank",
+                                 access_url_encrypted="x")
+        s.add(conn)
+        await s.flush()
+        t0 = datetime(2026, 9, 23, 3, 0, tzinfo=UTC)
+        rows = [
+            (t0, "ok", 164),                          # the first sync
+            (t0 + timedelta(hours=6), "ok", 9),       # the last one with anything new
+            (t0 + timedelta(hours=12), "ok", 0),
+            (t0 + timedelta(hours=18), "error", 0),   # a failure is not "quiet"
+            (t0 + timedelta(hours=24), "ok", 0),
+            (t0 + timedelta(hours=30), "ok", 0),
+        ]
+        for started, status, inserted in rows:
+            s.add(SyncRun(household_id=hh, connection_id=conn.id, started_at=started,
+                          status=status, trigger="cron", txns_inserted=inserted))
+        await s.flush()
+
+        fresh = await conn_svc.data_freshness(s)
+        assert fresh[conn.id]["last_new_data_at"] == t0 + timedelta(hours=6)
+        assert fresh[conn.id]["quiet_syncs"] == 3

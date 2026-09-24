@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import InstitutionsSection from "@/pages/InstitutionsSection";
@@ -100,6 +100,11 @@ export default function Settings() {
   // `aria-orientation` has to say which one is on screen. An ARIA attribute is
   // not a style, so there is no class that can carry it — hence the hook.
   const rail = useIsDesktop();
+  // Keep the chosen tab in view in the phone's swiping strip.
+  useEffect(() => {
+    const i = tabs.findIndex((t) => t.id === tab);
+    tabRefs.current[i]?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps -- `tabs` is rebuilt each render
   // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
   // it. Declaring role="tablist" without that model announces a tab widget that
   // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
@@ -152,7 +157,12 @@ export default function Settings() {
         // `rounded-control`, because a tab that sits *beside* its panel has no
         // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
         // that may still wrap turns its overflow into extra columns.
-        className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:flex-wrap sm:px-0 lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
+        // Phone: one row of tabs that swipes sideways — the one strip in the
+        // app allowed to (DESIGN §5), because eleven sections are a lot to read
+        // from a picker and tabs show where you are among them. The edges fade
+        // to say there is more; the selected tab is scrolled into view.
+        data-scroll-x-ok
+        className="-mx-4 flex snap-x gap-1 overflow-x-auto border-b border-border px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:[mask-image:none] lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
         role="tablist"
         aria-label="Settings sections"
         aria-orientation={rail ? "vertical" : "horizontal"}
@@ -174,7 +184,7 @@ export default function Settings() {
             // block is emitted after the unvariant utilities — so `lg:border-b-0`
             // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
             // without a `!` or a duplicated branch.
-            className={`inline-flex min-h-11 shrink-0 items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
+            className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
               tab === t.id
                 ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
                 : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"

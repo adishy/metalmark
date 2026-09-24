@@ -42,7 +42,11 @@ router = APIRouter(prefix="/connections", tags=["connections"])
 
 @router.get("", response_model=list[ConnectionOut])
 async def list_connections(ctx: RequestContext = Depends(require_owner)):
-    return [ConnectionOut.model_validate(c) for c in await svc.list_connections(ctx.session)]
+    fresh = await svc.data_freshness(ctx.session)
+    return [
+        ConnectionOut.model_validate(c).model_copy(update=fresh.get(c.id, {}))
+        for c in await svc.list_connections(ctx.session)
+    ]
 
 
 @router.get("/defaults", response_model=ConnectionDefaults)

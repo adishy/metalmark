@@ -1087,6 +1087,28 @@ default and the design target — build at 360 px first, then widen.
 
 **Test viewports.** 360×640 (the design target), 390×844 (iPhone), 768×1024, 1280×800.
 
+**Nothing scrolls sideways on a phone. Not the page, and not a strip inside it.**
+A row of chips or tabs that does not fit is not made to scroll: below `sm:` a choice
+from a list is a **pill that opens a sheet** (`SheetSelect` — "Range · This year ⌄"),
+and chips that stay are allowed to wrap. Two exceptions, each marked `data-scroll-x-ok`
+or a labelled region: the **Settings section tabs** (eleven sections read better as
+tabs than from a picker — one swipeable row, edges faded, the chosen tab kept in
+view), and a data table whose columns are the point (the CSV import preview). `e2e/mobile.spec.ts` walks every route at 360 and 390 px and fails on any
+element past the edge or any container that scrolls sideways. Date inputs carry
+`min-width: 0` in `index.css`, because iOS gives them an intrinsic width wider than a
+phone column.
+
+**Dropdowns.** The native `<select>` keeps its platform picker (it is the right one
+on a phone) but not its platform arrow: `Select` draws the app's chevron. A filter or
+view switch on a phone is a `SheetSelect`, not a `<select>`.
+
+**The bottom bar is 64 px tall** and each destination is the whole fifth of it; the
+active one's icon sits in a pill, so it is a shape change and never colour alone.
+
+**Charts answer a tap** (`triggerOn: "mousemove|click"`) and let a vertical drag
+scroll the page (`touch-action: pan-y` on the wrapper) — a chart the width of the
+phone must never be a dead zone.
+
 **Touch targets are ≥44×44 CSS px. Always.** WCAG 2.2 AA actually requires only
 24×24 (SC 2.5.8) and permits a spacing exception; **we do not use that exception.**
 44 px is the AAA figure (SC 2.5.5, which has no spacing exception) and matches what

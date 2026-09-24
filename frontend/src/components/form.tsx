@@ -13,7 +13,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
-import { CheckIcon } from "@/components/icons";
+import { CheckIcon, ChevronDownIcon } from "@/components/icons";
 
 /*
  * `min-h-11` (44 px) is the target floor, not the text box's natural height:
@@ -28,7 +28,7 @@ import { CheckIcon } from "@/components/icons";
 // `@layer components` and every control in the app silently loses its ring. The
 // border change below is an *addition* to the ring, never a replacement for it.
 const CONTROL =
-  "w-full min-h-11 rounded-control border border-border-strong bg-surface-inset px-3 text-base text-fg " +
+  "w-full min-w-0 max-w-full min-h-11 rounded-control border border-border-strong bg-surface-inset px-3 text-base text-fg " +
   "placeholder:text-fg-muted focus:border-accent " +
   "disabled:opacity-50 aria-[invalid=true]:border-negative";
 
@@ -110,12 +110,25 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   },
 );
 
-export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
-  function Select({ className, children, ...props }, ref) {
+export const Select = forwardRef<
+  HTMLSelectElement,
+  SelectHTMLAttributes<HTMLSelectElement> & { inline?: boolean }
+>(
+  function Select({ className, children, inline = false, ...props }, ref) {
+    // The browser's own arrow is drawn differently on every platform and reads
+    // as unfinished; ours is the app's chevron, in the muted tone, with the
+    // control's padding making room for it. The wrapper carries the width.
     return (
-      <select ref={ref} className={`${CONTROL} ${className ?? ""}`} {...props}>
-        {children}
-      </select>
+      <span className={`relative min-w-0 ${inline ? "inline-block" : "block w-full"}`}>
+        <select
+          ref={ref}
+          className={`${CONTROL} appearance-none truncate pr-10 ${className ?? ""}`}
+          {...props}
+        >
+          {children}
+        </select>
+        <ChevronDownIcon className="pointer-events-none absolute top-1/2 right-3 size-5 -translate-y-1/2 text-fg-muted" />
+      </span>
     );
   },
 );

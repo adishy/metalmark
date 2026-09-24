@@ -14,6 +14,8 @@ import {
   useUpdateAccount,
 } from "@/api/hooks";
 import { downloadAccountCsv } from "@/api/portability";
+import { useConnections } from "@/api/sync";
+import { isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { isoDay, todayIso } from "@/lib/dates";
@@ -104,6 +106,8 @@ export default function Accounts() {
   const netWorth = useNetWorth(ownerFilter);
   const accounts = useAccounts(ownerFilter);
   const create = useCreateAccount();
+  const connections = useConnections();
+  const stalled = (connections.data ?? []).filter((c) => isStalled(c));
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
 
@@ -180,6 +184,21 @@ export default function Accounts() {
         />
       )}
 
+      {stalled.length > 0 && (
+        // Said where the numbers are, not only in Admin: a bridge that stops
+        // sending new transactions looks, from here, like money gone missing.
+        <p
+          className="rounded-card bg-warning/15 px-4 py-3 text-sm text-warning-ink"
+          role="status"
+          data-testid="bank-stalled"
+        >
+          {stalled.length === 1
+            ? `${stalled[0].org_name ?? "A bank"} hasn’t sent new transactions for a while, though its syncs succeed.`
+            : `${stalled.length} banks haven’t sent new transactions for a while, though their syncs succeed.`}{" "}
+          Check the link at SimpleFIN Bridge; Admin has the details.
+        </p>
+      )}
+
       <NetWorthHero
         ownerFilter={ownerFilter}
         ownerLabel={ownerFilter ? (ownerName.get(ownerFilter) ?? "owner") : null}
@@ -192,7 +211,6 @@ export default function Accounts() {
         value={tab}
         onChange={setTab}
         testid={VIEW_TESTID}
-        className="flex-nowrap overflow-x-auto"
       />
 
       <div

@@ -46,11 +46,15 @@ export default function Chart({
   );
 
   return (
-    <div role="img" aria-label={label} data-testid={testid}>
+    // `touch-action: pan-y`: a finger dragging up and down over a chart scrolls
+    // the page, as it does everywhere else; only a tap (or a sideways drag along
+    // the axis) belongs to the chart. Without it a chart the width of the phone
+    // was a dead zone the page could not be scrolled from.
+    <div role="img" aria-label={label} data-testid={testid} style={{ touchAction: "pan-y" }}>
       <ReactECharts
         key={resolved}
         option={merged}
-        style={{ height }}
+        style={{ height, touchAction: "pan-y" }}
         opts={{ renderer: "canvas" }}
         notMerge
       />

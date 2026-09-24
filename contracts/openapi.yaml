@@ -5153,6 +5153,16 @@ components:
           type: string
           format: date-time
           title: Created At
+        last_new_data_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last New Data At
+        quiet_syncs:
+          type: integer
+          title: Quiet Syncs
+          default: 0
       type: object
       required:
       - id
