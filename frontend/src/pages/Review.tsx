@@ -222,7 +222,7 @@ export default function Review() {
     // is what stops the shell's new width from making that worse.
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-medium">Review</h1>
+        <h1 className="text-xl font-semibold">Review</h1>
         {/* The queue count changes on every decision, and nothing moves focus to
             it — the whole string is the status, not the numeral in it (§7.6). */}
         <span

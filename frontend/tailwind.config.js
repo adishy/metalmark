@@ -46,12 +46,22 @@ export default {
           // Label/icon *on* an accent fill. Flips with the theme because
           // teal-500 needs dark text and teal-700 needs light text.
           fg: token("accent-fg"),
+          // Text on an accent tint (`bg-accent/20`): the accent alone is under
+          // 4.5:1 there in light mode. DESIGN.md §2.1.
+          ink: token("accent-ink"),
         },
         // Money, not status. An expense is a normal event and is NOT red — see
         // DESIGN.md §6.2. These two are for gains/losses and negative balances.
         positive: token("positive"),
-        negative: token("negative"),
-        warning: token("warning"),
+        negative: {
+          DEFAULT: token("negative"),
+          ink: token("negative-ink"),
+        },
+        warning: {
+          DEFAULT: token("warning"),
+          // Text on a warning tint (`bg-warning/20`) — same reason as accent.ink.
+          ink: token("warning-ink"),
+        },
         // The destructive *fill*. Theme-independent, so a delete button is the
         // same red everywhere and never has to be re-reasoned.
         danger: token("danger"),

@@ -299,7 +299,7 @@ export default function DesignSystem() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-lg font-medium text-fg">Design system</h1>
+        <h1 className="text-xl font-semibold text-fg">Design system</h1>
         <p className="mt-1 text-sm text-fg-muted">
           Every control below is the component the app itself renders. Flip the theme to check
           both palettes; the specification is <code>docs/DESIGN.md</code>.
@@ -445,8 +445,8 @@ export default function DesignSystem() {
       <Section title="Chips and filters" note="A real <button aria-pressed>, so selection is never carried by colour alone.">
         <OwnerFilterChips owners={DEMO_OWNERS} value={chips} onChange={setChips} />
         <div className="flex flex-wrap items-center gap-2 pt-2">
-          <span className="rounded-full bg-accent/15 px-3 py-1 text-sm text-accent">Badge</span>
-          <span className="rounded-full bg-negative/20 px-3 py-1 text-sm text-negative">Overdue</span>
+          <span className="rounded-full bg-accent/15 px-3 py-1 text-sm text-accent-ink">Badge</span>
+          <span className="rounded-full bg-negative/20 px-3 py-1 text-sm text-negative-ink">Overdue</span>
           <span className="rounded-full bg-surface-inset px-3 py-1 text-sm text-fg">Neutral</span>
         </div>
         <p className="text-xs text-fg-muted">

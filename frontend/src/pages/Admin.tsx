@@ -64,9 +64,9 @@ type Tone = "ok" | "warn" | "bad" | "busy" | "idle";
  */
 const TONES: Record<Tone, string> = {
   ok: "bg-positive/15 text-positive",
-  warn: "bg-warning/20 text-warning",
-  bad: "bg-negative/20 text-negative",
-  busy: "bg-accent/15 text-accent",
+  warn: "bg-warning/20 text-warning-ink",
+  bad: "bg-negative/20 text-negative-ink",
+  busy: "bg-accent/15 text-accent-ink",
   idle: "bg-surface-inset text-fg-muted",
 };
 
@@ -176,8 +176,8 @@ export default function Admin() {
             promise a broader console. The word is here because it is the one a
             reader scans for — this page shipped with no occurrence of it
             anywhere, which is a large part of why it could not be found. */}
-        <p className="text-xs font-semibold tracking-wide text-fg-muted uppercase">Admin</p>
-        <h1 className="text-lg font-medium text-fg">Sync activity</h1>
+        <p className="text-sm font-medium text-fg-muted">Admin</p>
+        <h1 className="text-xl font-semibold text-fg">Sync activity</h1>
         <p className="mt-1 text-sm text-fg-muted">
           What is running, what ran, and what to do about it. Adding or removing a bank's
           credentials is in Settings → Connections; operating one is here.

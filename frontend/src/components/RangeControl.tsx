@@ -118,9 +118,9 @@ export default function RangeControl({ state }: { state: ReportRangeState }) {
   // targets (§4.5), and selection is carried by `aria-pressed` as well as the
   // fill, so it is never colour alone.
   const chip = (on: boolean) =>
-    `inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
+    `inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap ${
       on
-        ? "border-accent bg-accent/20 font-medium text-accent"
+        ? "border-accent bg-accent/20 font-medium text-accent-ink"
         : "border-border-strong text-fg-muted hover:text-fg"
     }`;
 
@@ -128,7 +128,7 @@ export default function RangeControl({ state }: { state: ReportRangeState }) {
     <div className="flex flex-wrap gap-x-8 gap-y-4" data-testid="range-control">
       <div>
         <p className="mb-2 text-xs font-medium text-fg-muted">Range</p>
-        <div className="flex flex-wrap gap-2" data-testid="range-presets">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0" data-testid="range-presets">
           {MODES.map((m) => {
             const on = mode === m.id;
             return (
@@ -149,7 +149,7 @@ export default function RangeControl({ state }: { state: ReportRangeState }) {
 
       <div>
         <p className="mb-2 text-xs font-medium text-fg-muted">Granularity</p>
-        <div className="flex flex-wrap gap-2" data-testid="range-granularity">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0" data-testid="range-granularity">
           {GRANULARITY_CHOICES.map((g) => {
             const on = granularity === g.id;
             return (

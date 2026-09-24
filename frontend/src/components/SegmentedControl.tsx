@@ -91,7 +91,7 @@ export default function SegmentedControl<T extends string>({
           tabIndex={value === s.id ? 0 : -1}
           onClick={() => onChange(s.id)}
           onKeyDown={onKeyDown}
-          className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm ${
+          className={`inline-flex min-h-11 shrink-0 items-center rounded-t-lg px-3 text-sm whitespace-nowrap ${
             value === s.id ? "border-b-2 border-accent text-fg" : "text-fg-muted hover:text-fg"
           }`}
           data-testid={`${testid}-${s.id}`}

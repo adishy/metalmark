@@ -26,6 +26,7 @@ import {
 } from "@/components/form";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
+import { FilterIcon } from "@/components/icons";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import ImportDialog from "@/components/ImportDialog";
 
@@ -76,9 +77,21 @@ export default function Transactions() {
   const tags = useTags();
   const owners = useOwners();
   const [filter, setFilter] = useState<TxnFilter>({});
+  const activeFilters = [
+    filter.account_id?.length,
+    filter.category_id?.length,
+    filter.owner_id,
+    filter.start,
+    filter.end,
+    filter.search,
+  ].filter(Boolean).length;
   const txns = useInfiniteTransactions(filter);
   const create = useCreateTransaction();
   const [open, setOpen] = useState(false);
+  // On a phone the filter panel folds behind a button: open, it is a whole
+  // screen of chips and fields before the first transaction (§5 — the list is
+  // what the page is for). From `sm:` up it is always shown.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [selected, setSelected] = useState<Transaction | null>(null);
 
@@ -137,8 +150,21 @@ export default function Transactions() {
         {/* flex-wrap: the title plus two actions do not fit at 360px, and an
             unwrapped header is what pushes the page into horizontal scroll (§5). */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-lg font-medium">Transactions</h1>
+          <h1 className="text-xl font-semibold">Transactions</h1>
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              className="sm:hidden"
+              aria-expanded={filtersOpen}
+              aria-controls="txn-filters"
+              onClick={() => setFiltersOpen((v) => !v)}
+              data-testid="txn-filters-toggle"
+            >
+              <FilterIcon />
+              <span className="sr-only">Filters</span>
+              {activeFilters > 0 && <span aria-hidden="true">{activeFilters}</span>}
+              <span className="sr-only">{activeFilters > 0 ? `, ${activeFilters} active` : ""}</span>
+            </Button>
             {/* A whole statement at once — CSV, OFX or QFX, the dialog asks which
                 by looking at the file — next to adding one row by hand. */}
             <Button
@@ -146,10 +172,14 @@ export default function Transactions() {
               onClick={() => setImporting(true)}
               data-testid="import-csv"
             >
-              Import a statement
+              {/* Short on a phone: three buttons in one row at 360 px wrapped
+                  both labels onto two lines. The dialog says the rest. */}
+              <span className="sm:hidden">Import</span>
+              <span className="hidden sm:inline">Import a statement</span>
             </Button>
             <Button onClick={() => setOpen((v) => !v)} data-testid="add-transaction">
-              Add transaction
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add transaction</span>
             </Button>
           </div>
         </div>
@@ -165,13 +195,15 @@ export default function Transactions() {
           />
         )}
 
-        <FilterBar
-          accounts={accounts.data ?? []}
-          categories={categories.data ?? []}
-          owners={owners.data ?? []}
-          filter={filter}
-          onChange={setFilter}
-        />
+        <div id="txn-filters" className={filtersOpen ? "block" : "hidden sm:block"}>
+          <FilterBar
+            accounts={accounts.data ?? []}
+            categories={categories.data ?? []}
+            owners={owners.data ?? []}
+            filter={filter}
+            onChange={setFilter}
+          />
+        </div>
 
         {/* The header row and the list share a wrapper so they are one item in the
             page's `space-y-4` stack rather than two.
@@ -289,6 +321,12 @@ export default function Transactions() {
                             {catName.get(t.category_id) ?? ""}
                           </>
                         )}
+                        {/* An empty cell reads as "not loaded"; saying so is the
+                            prompt to file it. Desktop only — on a phone the row's
+                            "needs review" badge already says it. */}
+                        {!t.category_id && !t.is_split_parent && (
+                          <span className="hidden lg:inline">Uncategorized</span>
+                        )}
                       </span>
                       {/* The effective owner is what reports actually bucket by, so
                           that is what the row shows; a muted style marks the ones
@@ -335,7 +373,7 @@ export default function Transactions() {
                           cases pays for an empty track. */}
                       {t.review_status === "needs_review" && (
                         <span
-                          className="lg:col-start-2 lg:row-start-3 lg:justify-self-start lg:rounded lg:bg-warning/15 lg:px-1.5 lg:py-0.5 lg:text-warning"
+                          className="lg:col-start-2 lg:row-start-3 lg:justify-self-start lg:rounded lg:bg-warning/15 lg:px-1.5 lg:py-0.5 lg:text-warning-ink"
                           data-testid={`txn-review-${t.id}`}
                         >
                           <span aria-hidden="true" className="lg:hidden">
@@ -352,7 +390,7 @@ export default function Transactions() {
                     {t.tag_ids.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1 lg:col-start-2 lg:row-start-2 lg:mt-0">
                         {t.tag_ids.map((id) => (
-                          <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
+                          <span key={id} className="rounded bg-accent/15 px-1.5 py-0.5 text-xs text-accent-ink">
                             {tagName.get(id) ?? "tag"}
                           </span>
                         ))}
@@ -492,7 +530,7 @@ function FilterBar({
 
       <div>
         <p className="mb-1 text-xs font-medium text-fg-muted">Accounts</p>
-        <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0 sm:pb-0" data-testid="filter-accounts">
           {accounts.map((a) => {
             const on = selectedAccounts.has(a.id);
             // Same geometry as OwnerFilterChips: `px-3 py-1 text-xs` computes to
@@ -503,9 +541,9 @@ function FilterBar({
                 type="button"
                 onClick={() => toggleAccount(a.id)}
                 aria-pressed={on}
-                className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
+                className={`inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-sm whitespace-nowrap ${
                   on
-                    ? "border-accent bg-accent/20 font-medium text-accent"
+                    ? "border-accent bg-accent/20 font-medium text-accent-ink"
                     : "border-border-strong text-fg-muted hover:text-fg"
                 }`}
                 data-testid={`filter-account-${a.id}`}

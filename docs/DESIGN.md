@@ -35,8 +35,9 @@ Scope: the `frontend/` React app. Not the API, not the finance rules.
 
 ### 2.1 Colour roles
 
-Fourteen tokens: the nine content roles, plus five support tokens
-(`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`). Contrast ratios
+Seventeen tokens: the nine content roles, five support tokens
+(`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`), and three `-ink`
+variants for text on a tint (below the table). Contrast ratios
 below are computed against the surface each token is actually used on, and the
 **worst case in each theme** is the number shown.
 
@@ -56,6 +57,14 @@ below are computed against the surface each token is actually used on, and the
 | `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.80:1** light / **10.69:1** dark (needs 4.5:1) |
 | `danger` — destructive button fill | `#b91c1c` | `#b91c1c` | **6.47:1** with `#ffffff` label, both themes |
 | `focus` — focus ring | `#0f766e` | `#2dd4bf` | **5.23:1** light / **9.59:1** dark (needs 3:1) |
+
+**Ink tokens — text on a tint.** A selected chip (`bg-accent/20`), a "needs review"
+badge (`bg-warning/20`) and an error pill (`bg-negative/20`) put the role colour on a
+20 % wash of itself, and in light mode that fails 4.5:1 — measured 3.96:1 (accent),
+3.80:1 (warning), 4.4:1 (negative, on the page). Each role has an **`-ink`** token for
+exactly this: one step darker in light mode (teal-800 5.9:1, amber-800 5.8:1, red-800
+6.4:1), and equal to the role in dark mode, where it already clears 6.3:1. Rule: **text
+on a `bg-{role}/N` tint is `text-{role}-ink`**, never `text-{role}`.
 
 Three rules that follow from the table and are not negotiable:
 
@@ -168,9 +177,12 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --fg-muted: 71 85 105;         /* #475569 */
   --accent: 15 118 110;          /* #0f766e */
   --accent-fg: 255 255 255;      /* #ffffff */
+  --accent-ink: 17 94 89;        /* #115e59 — text on an accent tint */
   --positive: 4 120 87;          /* #047857 */
   --negative: 185 28 28;         /* #b91c1c */
+  --negative-ink: 153 27 27;     /* #991b1b — text on a negative tint */
   --warning: 180 83 9;           /* #b45309 */
+  --warning-ink: 146 64 14;      /* #92400e — text on a warning tint */
   --danger: 185 28 28;           /* #b91c1c */
   --focus: 15 118 110;           /* #0f766e */
 
@@ -193,9 +205,12 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --fg-muted: 148 163 184;       /* #94a3b8 */
   --accent: 45 212 191;          /* #2dd4bf */
   --accent-fg: 2 6 23;           /* #020617 */
+  --accent-ink: 45 212 191;      /* = accent; already 6.3:1 on its tint */
   --positive: 52 211 153;        /* #34d399 */
   --negative: 248 113 113;       /* #f87171 */
+  --negative-ink: 248 113 113;   /* = negative */
   --warning: 251 191 36;         /* #fbbf24 */
+  --warning-ink: 251 191 36;     /* = warning; 6.9:1 on its tint */
   --danger: 185 28 28;           /* #b91c1c — same fill in both themes */
   --focus: 45 212 191;           /* #2dd4bf */
 
@@ -251,7 +266,7 @@ Windows, and Android — that is why `font-variant-numeric` on `body` is enough.
 | `text-sm` | 14 / 20 | 400–500 | Body and form labels (desktop). |
 | `text-base` | 16 / 24 | 400–600 | **All inputs on touch**, transaction amounts, list primaries. |
 | `text-lg` | 18 / 28 | 500 | Section headings. |
-| `text-xl` | 20 / 28 | 600 | Card hero figure. |
+| `text-xl` | 20 / 28 | 600 | Page title (the one `<h1>`); card hero figure. |
 | `text-2xl` | 24 / 32 | 600 | Report headline figure. |
 | `text-3xl` | 30 / 36 | 600 | Net worth, one per screen. |
 
@@ -1428,6 +1443,10 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 #    printed `2026-01-01 to 2026-01-31` at the reader and its own test asserted
 #    that it did.
 grep -rnE '\$\{[^}]*\.slice\(0, ?10\)|>\{[^}]*\.slice\(0, ?10\)\}<' src/
+
+# 10. A role's text colour on its own tint (`bg-warning/20 … text-warning`). Under
+#     4.5:1 in light mode for accent, warning and negative (§2.1); the -ink token
+#     is the text colour for a tint. Checked in the same class string.
 ```
 
 **Viewports to look at, in this order:** 360×640 → 390×844 → 768×1024 → 1280×800.

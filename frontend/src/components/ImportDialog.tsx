@@ -262,7 +262,7 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
       {error && (
         <p
           role="alert"
-          className="mb-3 rounded-control bg-negative/10 px-3 py-2 text-sm text-negative"
+          className="mb-3 rounded-control bg-negative/10 px-3 py-2 text-sm text-negative-ink"
           data-testid="import-error"
         >
           {error}

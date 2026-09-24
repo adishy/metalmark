@@ -361,7 +361,7 @@ export default function Reports() {
       className="mx-auto max-w-6xl space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
       data-testid="reports-page"
     >
-      <h1 className="text-lg font-medium lg:col-span-2">Reports</h1>
+      <h1 className="text-xl font-semibold lg:col-span-2">Reports</h1>
 
       <div className="space-y-4 rounded-card bg-surface-raised p-4 lg:col-span-2">
         <RangeControl state={range} />

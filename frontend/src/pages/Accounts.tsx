@@ -132,7 +132,7 @@ export default function Accounts() {
     // being two stretched columns. `mx-auto` centres it in the wider shell.
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-lg font-medium">Accounts</h1>
+        <h1 className="text-xl font-semibold">Accounts</h1>
         <div className="flex items-center gap-2">
           {/* On a phone the owner chips fold behind this button, top right, so
               the net worth is the first thing on screen. From `sm:` up there is
@@ -312,7 +312,7 @@ function NetWorthHero({
               aria-pressed={range === r.id}
               onClick={() => setRange(r.id)}
               className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-2 text-sm ${
-                range === r.id ? "bg-accent/20 font-medium text-accent" : "text-fg-muted hover:text-fg"
+                range === r.id ? "bg-accent/20 font-medium text-accent-ink" : "text-fg-muted hover:text-fg"
               }`}
               data-testid={`net-worth-range-${r.id}`}
             >
@@ -416,7 +416,7 @@ function AccountGroups({
                           // The bank stopped reporting it; its last balance is still
                           // counted. Hiding or closing it is the reader's call.
                           <span
-                            className="ml-1 rounded bg-warning/20 px-1.5 py-0.5 text-warning"
+                            className="ml-1 rounded bg-warning/20 px-1.5 py-0.5 text-warning-ink"
                             data-testid={`account-stale-${a.id}`}
                           >
                             not reported since <Day value={a.stale_since} />

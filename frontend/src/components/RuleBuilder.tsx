@@ -617,7 +617,7 @@ export default function RuleBuilder({
         {failure && (
           <p
             role="alert"
-            className="rounded-control bg-negative/10 px-3 py-2 text-sm text-negative"
+            className="rounded-control bg-negative/10 px-3 py-2 text-sm text-negative-ink"
             data-testid="rule-error"
           >
             {(failure as Error).message}

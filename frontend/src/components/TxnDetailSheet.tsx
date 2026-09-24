@@ -224,7 +224,7 @@ function TxnDetailForm({
                   // seeded, none of these buttons ever rendered for the
                   // target-size sweep to measure.
                   className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm ${
-                    on ? "border-accent bg-accent/20 font-medium text-accent" : "border-border-strong text-fg-muted hover:text-fg"
+                    on ? "border-accent bg-accent/20 font-medium text-accent-ink" : "border-border-strong text-fg-muted hover:text-fg"
                   }`}
                   data-testid={`detail-tag-${t.id}`}
                 >

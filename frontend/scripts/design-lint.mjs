@@ -109,6 +109,17 @@ const RULES = [
       /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie|Sankey)\()/.test(line),
   },
   {
+    id: "10",
+    why: "role text on its own tint fails 4.5:1 in light mode — use text-{role}-ink (§2.1)",
+    // Same class string: `bg-warning/20 … text-warning`. A tint and its role's
+    // plain text colour on one element is the pairing the -ink tokens exist for.
+    test: (line) =>
+      ["accent", "warning", "negative"].some((role) =>
+        new RegExp(`\\bbg-${role}/\\d+`).test(line) &&
+        new RegExp(`(?<![\\w-])text-${role}(?![\\w/-])`).test(line),
+      ),
+  },
+  {
     id: "9",
     why: "an ISO date as visible text — render it through <Day>/<Instant> (§9.5)",
     /*
@@ -187,7 +198,7 @@ for (const file of await walk(SRC)) {
 }
 
 if (findings.length === 0) {
-  console.log("design-lint: clean (DESIGN.md §8 rules 1-6, 8, 9)");
+  console.log("design-lint: clean (DESIGN.md §8 rules 1-6, 8-10)");
   process.exit(0);
 }
 

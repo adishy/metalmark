@@ -14,8 +14,8 @@ import type { Connection, ConnectionStatus } from "@/api/types";
 
 const TONES: Record<ConnectionStatus, string> = {
   ok: "bg-positive/15 text-positive",
-  auth_error: "bg-negative/20 text-negative",
-  error: "bg-warning/20 text-warning",
+  auth_error: "bg-negative/20 text-negative-ink",
+  error: "bg-warning/20 text-warning-ink",
 };
 
 /**

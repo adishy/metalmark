@@ -71,7 +71,7 @@ export default function CategoryPicker({
         aria-pressed={value === c.id}
         onClick={() => pick(c.id)}
         className={`flex min-h-11 w-full items-center gap-3 rounded-control px-3 text-left text-base ${
-          value === c.id ? "bg-accent/20 font-medium text-accent" : "hover:bg-surface-inset"
+          value === c.id ? "bg-accent/20 font-medium text-accent-ink" : "hover:bg-surface-inset"
         }`}
         data-testid={`${testid}-option-${c.id}`}
       >

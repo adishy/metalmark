@@ -144,7 +144,7 @@ export default function Settings() {
     // can disagree. The heading spans both columns because it labels the page,
     // not the panel.
     <div className="mx-auto max-w-4xl space-y-4 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
-      <h1 className="text-lg font-medium lg:col-span-2">Settings</h1>
+      <h1 className="text-xl font-semibold lg:col-span-2">Settings</h1>
       <div
         // Below `lg:` this is the underline strip it has always been. At `lg:` it
         // is a vertical rail, and a rail is not the strip rotated: the underline
@@ -152,7 +152,7 @@ export default function Settings() {
         // `rounded-control`, because a tab that sits *beside* its panel has no
         // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
         // that may still wrap turns its overflow into extra columns.
-        className="flex flex-wrap gap-1 border-b border-border lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
+        className="-mx-4 flex gap-1 overflow-x-auto border-b border-border px-4 sm:mx-0 sm:flex-wrap sm:px-0 lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
         role="tablist"
         aria-label="Settings sections"
         aria-orientation={rail ? "vertical" : "horizontal"}
@@ -174,7 +174,7 @@ export default function Settings() {
             // block is emitted after the unvariant utilities — so `lg:border-b-0`
             // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
             // without a `!` or a duplicated branch.
-            className={`inline-flex min-h-11 items-center rounded-t-lg px-3 text-sm lg:justify-start lg:rounded-control lg:border-b-0 ${
+            className={`inline-flex min-h-11 shrink-0 items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
               tab === t.id
                 ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
                 : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"
@@ -632,15 +632,17 @@ function CategoriesSection() {
               <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
                   <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="flex items-center gap-2">
+                    <span className="flex min-w-0 flex-1 items-center gap-3">
                       {/* The emoji is edited in place: it is the one field
                           people change for fun, and a dialog for one
-                          character is a long way round. Saved on blur. */}
+                          character is a long way round. Saved on blur. The
+                          wrapper sets the width — the control is w-full. */}
+                      <span className="w-14 shrink-0">
                       <Input
                         aria-label={`Emoji for ${c.name}`}
                         defaultValue={c.icon ?? ""}
                         maxLength={16}
-                        className="w-14 text-center"
+                        className="px-1 text-center"
                         onBlur={(e) => {
                           const next = e.target.value.trim() || null;
                           if (next !== (c.icon ?? null)) {
@@ -649,10 +651,11 @@ function CategoriesSection() {
                         }}
                         data-testid={`category-icon-${c.id}`}
                       />
+                      </span>
                       {!c.icon && (
                         <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
                       )}
-                      {c.name}
+                      <span className="truncate">{c.name}</span>
                     </span>
                     <Button
                       variant="ghost"
@@ -1310,7 +1313,7 @@ function OwnerRow({
         )}
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
-            isShared ? "bg-surface-inset text-fg" : "bg-accent/15 text-accent"
+            isShared ? "bg-surface-inset text-fg" : "bg-accent/15 text-accent-ink"
           }`}
           data-testid={`owner-kind-${owner.id}`}
         >
