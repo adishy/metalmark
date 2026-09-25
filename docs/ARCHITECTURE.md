@@ -147,8 +147,9 @@ signups are serialized with a Postgres advisory transaction lock so exactly one 
     attribution nor deadlock household deletion.
 - **securities** — a reusable instrument. `id, household_id, name, ticker, security_type
   (stock|etf|mutual_fund|bond|option|crypto|cash|other), currency, is_manual`.
-- **holdings** — a position in an account (SimpleFIN has no holdings object → always manual/imported).
-  `id, account_id, security_id, quantity, cost_basis, as_of`. **Market value is derived**, not stored:
+- **holdings** — a position in an account: hand-entered/imported (`source = manual`), or written by sync
+  from the bank's `holdings` list (`source = simplefin`, ADR-0051).
+  `id, account_id, security_id, quantity, cost_basis, as_of, source`. **Market value is derived**, not stored:
   quantity × latest `security_prices.price`, converted to base. **Cost basis is average-cost for v1**
   (ADR-0020); lot/FIFO tracking is deferred (no lot table). `cost_basis` has one writer per policy: if
   `investment_transactions` exist for the security, basis is computed from them; otherwise the manual scalar
@@ -566,7 +567,7 @@ provider is an adapter that produces the *same* writes a human would (tagging it
 
 | Risk | Mitigation | Owner WS |
 |---|---|---|
-| SimpleFIN has no holdings/securities data | First-class manual holdings/prices/investment txns; balance-only auto for investment accounts | INV |
+| SimpleFIN holdings are only as good as the bank's valuation, and it sends no investment transactions | Sync lands holdings as positions with a price per sync day (ADR-0051); the account stays `stated`; manual holdings/prices/investment txns stay first-class | INV |
 | TreasuryDirect coverage unreliable | OFX/manual fallback (already the plan) | IMP |
 | Amounts are decimal strings; float drift | `Decimal`/`NUMERIC` everywhere; property tests | L, T |
 | pending→posted id instability / disappearing pendings | `pending_reconcile` state + match by (amount,~date,desc); low-water mark, not fixed window; adversarial fixtures | SYNC |

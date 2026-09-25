@@ -55,6 +55,11 @@ from app.models.ledger import MONEY
 #: A quantity or a price. Eight decimals, for the reason above.
 QTY = Numeric(19, 8)
 
+#: Who wrote a ``holdings`` row. ``simplefin`` rows are the bank's report of the
+#: position and are rewritten or removed by every sync (ADR-0051); ``manual`` rows
+#: are a human's and sync never touches them.
+HOLDING_SOURCES = ("manual", "simplefin")
+
 SECURITY_TYPES = ("stock", "etf", "mutual_fund", "bond", "option", "crypto", "cash", "other")
 INVESTMENT_TX_TYPES = ("buy", "sell", "dividend", "interest", "fee", "split", "transfer")
 
@@ -153,6 +158,10 @@ class Holding(UUIDPkMixin, TimestampMixin, Base):
         # appending a second one that would double the account's value.
         UniqueConstraint("account_id", "security_id"),
         CheckConstraint("quantity <> 0", name="quantity_nonzero"),
+        CheckConstraint(
+            "source IN (" + ", ".join(f"'{s}'" for s in HOLDING_SOURCES) + ")",
+            name="source_valid",
+        ),
     )
 
     household_id: Mapped[uuid.UUID] = mapped_column(
@@ -175,6 +184,12 @@ class Holding(UUIDPkMixin, TimestampMixin, Base):
     # (ADR-0032 §5); this is the other half of staleness — a holding nobody has
     # touched in a year is worth flagging even if its price is current.
     as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # ``simplefin`` when sync wrote the row from the bank's holdings (ADR-0051).
+    # Such a row is the provider's statement, replaced on each sync and removed
+    # when the bank stops reporting it, so a hand edit to it would not survive.
+    source: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="manual", server_default="manual"
+    )
 
     security: Mapped[Security] = relationship()
 

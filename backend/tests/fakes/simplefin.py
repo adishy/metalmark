@@ -30,6 +30,7 @@ from datetime import UTC, datetime, timedelta
 from app.services.aggregator import (
     AccountSet,
     ProviderAccount,
+    ProviderHolding,
     ProviderTransaction,
 )
 from app.services.fake_simplefin import load_demo_capture
@@ -97,6 +98,17 @@ def with_transactions(
     account = account_named(account_set, name)
     return replace_account(
         account_set, dataclasses.replace(account, transactions=tuple(transactions))
+    )
+
+
+def with_holdings(
+    account_set: AccountSet, name: str, holdings: list[ProviderHolding]
+) -> AccountSet:
+    """The bank reporting a different set of positions. CONSTRUCTED: the capture
+    has one holding, and a change in positions over time is what sync must mirror."""
+    account = account_named(account_set, name)
+    return replace_account(
+        account_set, dataclasses.replace(account, holdings=tuple(holdings))
     )
 
 

@@ -1,6 +1,6 @@
 # ADR 0021: Investment account balance source — derived vs stated, with a reconciling plug
 
-- **Status:** Accepted, amended by 0044 (a derived account with no positions is read from its balance; synced accounts are stated)
+- **Status:** Accepted, amended by 0044 (a derived account with no positions is read from its balance; synced accounts are stated) and 0051 (sync writes the bank's holdings as positions)
 - **Date:** 2026-09-19
 - **Deciders:** household + Claude
 - **Related:** ADR-0011 (refines), ADR-0020, ARCHITECTURE.md §2, §4
