@@ -495,6 +495,13 @@ async def allocation(
 
 HISTORY = "history"
 MANUAL = "manual"
+#: A position sync wrote from the bank's holdings (ADR-0051). Like ``history``, it
+#: is not a human's to set: the next sync would put the bank's number back.
+PROVIDER = "provider"
+
+
+def _row_source(holding: Holding) -> str:
+    return PROVIDER if holding.source == "simplefin" else MANUAL
 
 
 @dataclass(frozen=True)
@@ -654,7 +661,7 @@ async def effective_position(session: AsyncSession, holding: Holding) -> Positio
     return Position(
         quantity=holding.quantity,
         cost_basis=holding.cost_basis if holding.cost_basis is not None else ZERO,
-        source=MANUAL,
+        source=_row_source(holding),
     )
 
 
@@ -730,7 +737,7 @@ async def positions_for(
             holding=holding,
             quantity=holding.quantity,
             cost_basis=holding.cost_basis if holding.cost_basis is not None else ZERO,
-            source=MANUAL,
+            source=_row_source(holding),
         )
     # History overwrites, and keeps the row when there was one: the row still
     # carries `as_of`, and the FK on deleting the position still has a target.
@@ -1353,12 +1360,18 @@ async def delete_holding(session: AsyncSession, holding_id: uuid.UUID) -> None:
 async def _reject_manual_write(
     session: AsyncSession, holding: Holding, field: str
 ) -> None:
-    """409 when history owns the field (ADR-0020/0034).
+    """409 when history owns the field (ADR-0020/0034), or the bank does (ADR-0051).
 
     Refused rather than ignored. A silently-dropped write is worse than a
     rejection: the client believes a value was stored and the next read
     contradicts it with nothing to explain the difference.
     """
+    if holding.source == "simplefin":
+        raise LedgerError(
+            f"This position's {field} comes from your bank and is updated on every "
+            f"sync, so it cannot be set by hand.",
+            409,
+        )
     current = (await history_positions(session, account_ids=[holding.account_id])).get(
         (holding.account_id, holding.security_id)
     )

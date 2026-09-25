@@ -434,3 +434,65 @@ def test_0010_adds_institution_logos_with_rls_and_touches_nothing_else(scratch_d
     with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
         assert not _has_table(conn, "institution_logos")
         assert _fingerprint(conn) == before
+
+
+# ---- 0011: holdings.source ------------------------------------------------------
+
+
+def _holdings(conn) -> list[tuple]:
+    return conn.execute("SELECT * FROM holdings ORDER BY id").fetchall()
+
+
+def test_0011_marks_every_existing_holding_manual_and_downgrade_drops_only_synced(scratch_db):
+    _alembic(scratch_db, "upgrade", "0010")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from today's metadata, so undo the column to be the old shape.
+        conn.execute(
+            "ALTER TABLE holdings DROP CONSTRAINT IF EXISTS ck_holdings_source_valid, "
+            "DROP COLUMN IF EXISTS source"
+        )
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Brokerage", source="stated", balance="5000")
+        vti = conn.execute(
+            "INSERT INTO securities (household_id, name, ticker, security_type, currency, "
+            "is_manual) VALUES (%s, 'Vanguard', 'VTI', 'etf', 'USD', true) RETURNING id",
+            (hid,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO holdings (household_id, account_id, security_id, quantity) "
+            "VALUES (%s, %s, %s, 10)",
+            (hid, acct, vti),
+        )
+        before = _fingerprint(conn)
+        held_before = _holdings(conn)
+
+    _alembic(scratch_db, "upgrade", "0011")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute("SELECT source FROM holdings").fetchall() == [("manual",)]
+        assert _fingerprint(conn) == before
+        # What sync would write after the upgrade: one position in a security only
+        # the bank reports, and one in the human's own security in another account.
+        aapl = conn.execute(
+            "INSERT INTO securities (household_id, name, ticker, security_type, currency, "
+            "is_manual) VALUES (%s, 'Apple', 'AAPL', 'stock', 'USD', false) RETURNING id",
+            (hid,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO security_prices (household_id, security_id, price_date, price, "
+            "currency, source) VALUES (%s, %s, '2026-09-21', 190, 'USD', 'auto')",
+            (hid, aapl),
+        )
+        ira = _account(conn, hid, owner, "IRA", source="stated", balance="900")
+        for security in (aapl, vti):
+            conn.execute(
+                "INSERT INTO holdings (household_id, account_id, security_id, quantity, "
+                "source) VALUES (%s, %s, %s, 2, 'simplefin')",
+                (hid, ira, security),
+            )
+
+    _alembic(scratch_db, "downgrade", "0010")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _holdings(conn) == held_before
+        tickers = [r[0] for r in conn.execute("SELECT ticker FROM securities").fetchall()]
+        assert tickers == ["VTI"]
+        assert conn.execute("SELECT count(*) FROM security_prices").fetchone()[0] == 0

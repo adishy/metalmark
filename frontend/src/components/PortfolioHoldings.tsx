@@ -357,6 +357,11 @@ function HoldingRow({
             {h.stale_days === 1 ? "day" : "days"} old)
           </span>
         )}
+        {/* Said so a household knows why editing it would not stick: the next
+            sync writes the bank's number back (ADR-0051). */}
+        {recorded?.quantity_source === "provider" && (
+          <span data-testid={`holding-synced-${pos}`}> · from your bank</span>
+        )}
       </p>
 
       {h.reason === "no_price" && (

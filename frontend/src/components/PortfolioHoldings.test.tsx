@@ -520,6 +520,19 @@ describe("<PortfolioHoldings />", () => {
     expect(screen.queryByTestId("holding-manual-acct-broker:sec-vti")).not.toBeInTheDocument();
   });
 
+  it("says a position came from the bank, and says nothing for one entered by hand", () => {
+    h.holdings.mockImplementation(() =>
+      query([
+        recorded({ security_id: "sec-vti", quantity_source: "provider", manual_quantity: "10.00000000" }),
+        recorded({ security_id: "sec-mystery", quantity: "5.00000000", manual_quantity: "5.00000000" }),
+      ]),
+    );
+    render(<PortfolioHoldings />);
+
+    expect(screen.getByTestId("holding-synced-acct-broker:sec-vti")).toHaveTextContent("from your bank");
+    expect(screen.queryByTestId("holding-synced-acct-broker:sec-mystery")).not.toBeInTheDocument();
+  });
+
   it("reserves the rows' space while loading rather than collapsing the card", () => {
     h.portfolio.mockImplementation(() => query(undefined, { isPending: true, data: undefined }));
     render(<PortfolioHoldings />);

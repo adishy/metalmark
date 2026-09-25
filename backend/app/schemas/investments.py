@@ -141,7 +141,8 @@ class HoldingOut(BaseModel):
     quantity: Decimal
     cost_basis: Decimal | None
     #: ``history`` when ``investment_transactions`` exist for this (account,
-    #: security) and are therefore authoritative; ``manual`` otherwise.
+    #: security) and are therefore authoritative; ``provider`` when sync wrote the
+    #: row from the bank's holdings (ADR-0051); ``manual`` otherwise.
     quantity_source: str
     basis_source: str
 

@@ -586,10 +586,11 @@ export type UnpricedReason = "no_price" | "no_rate";
 
 /**
  * Where a position's quantity came from (ADR-0034). `history` when recorded
- * trades exist and are therefore authoritative; `manual` when the stored scalar
- * is all there is.
+ * trades exist and are therefore authoritative; `provider` when sync wrote it from
+ * the bank's holdings and rewrites it on every sync (ADR-0051); `manual` when a
+ * hand-entered scalar is all there is.
  */
-export type QuantitySource = "history" | "manual";
+export type QuantitySource = "history" | "provider" | "manual";
 
 export interface AllocationRow {
   /** A UUID or a vocabulary token, always a string — the grouping is a wire

@@ -71,6 +71,7 @@ from app.services.aggregator import (
 from app.services.errors import LedgerError
 from app.services.ledger import base_currency, record_balance
 from app.services.owners import ensure_shared_owner
+from app.services.sync_holdings import sync_holdings
 from app.settings import get_settings
 
 #: ``Transaction.source`` for a synced row. The column documents
@@ -456,11 +457,10 @@ async def _insert_account(
         available_balance=pa.available_balance,
         balance_date=pa.balance_date,
         is_asset=is_asset_for(account_type),
-        # *Stated*, unlike the manual path: ADR-0021's derived default assumes
-        # holdings to derive from, and sync writes none — so a derived synced
-        # account was valued at nothing on the chart while the Accounts page showed
-        # the provider's balance. The provider's number is the only statement of
-        # this account's value there is, so it is snapshotted like any other.
+        # *Stated*, unlike the manual path. The bank's balance is its statement of
+        # the account's value, and it covers what the holdings the bank lists do
+        # not (ADR-0051): cash it leaves out, or a line without a share count. So
+        # the balance is snapshotted like any other, and the positions explain it.
         balance_source="stated" if account_type == "investment" else None,
         owner_id=owner.id,
         is_manual=False,
@@ -1009,6 +1009,12 @@ class RunCounts:
     transfers_matched: int = 0
     auto_categorized: int = 0
     rules_applied: int = 0
+    #: The bank's holdings lines, and how many became positions (ADR-0051). Seen
+    #: without written is the number that says the bank sends them and something
+    #: here declined them; the ``holdings.synced`` event says why.
+    holdings_seen: int = 0
+    holdings_written: int = 0
+    holdings_removed: int = 0
 
 
 @dataclass(slots=True)
@@ -1257,6 +1263,21 @@ async def ingest_account_set(
                 )
 
         await _apply_balance(session, account, pa, log=log, now=now)
+
+        held = await sync_holdings(session, account, pa, on=pa.balance_date or now.date())
+        counts.holdings_seen += held.seen
+        counts.holdings_written += held.written
+        counts.holdings_removed += held.removed
+        if held.changed:
+            await log.emit(
+                "warning" if held.skipped else "info",
+                "holdings.synced",
+                account_id=str(account.id),
+                seen=held.seen,
+                written=held.written,
+                removed=held.removed,
+                skipped=dict(held.skipped),
+            )
 
     await _report_unreported_accounts(session, connection, account_ids, log=log)
 

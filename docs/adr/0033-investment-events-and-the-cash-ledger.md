@@ -1,6 +1,6 @@
 # ADR 0033: Investment events and the cash ledger — a buy is not a transaction
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by 0051 (SimpleFIN does report holdings, and sync lands them)
 - **Date:** 2026-09-20
 - **Deciders:** household + Claude
 - **Refines:** ADR-0032 (§2)

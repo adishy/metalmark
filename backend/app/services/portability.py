@@ -87,6 +87,7 @@ from app.models import (
     TransactionTag,
     TransferGroup,
 )
+from app.models.investments import HOLDING_SOURCES
 from app.services import fx
 from app.services.balance_sign import LIABILITY_TYPES, positives_are_amounts_owed
 from app.services.errors import LedgerError
@@ -293,7 +294,7 @@ _ACCOUNT_FIELDS = (
 _SNAPSHOT_FIELDS = ("account_id", "balance_date", "balance", "currency")
 _SECURITY_FIELDS = ("id", "name", "ticker", "security_type", "currency", "is_manual")
 _PRICE_FIELDS = ("security_id", "price_date", "price", "currency", "source")
-_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of")
+_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of", "source")
 _TRANSFER_GROUP_FIELDS = ("id", "matched_by", "fx_cost_base")
 # ``base_amount`` and ``fx_rate_date`` are absent on purpose; see the module docstring.
 # So is ``import_hash``: it is a digest of the *source* account's uuid, so in the
@@ -1184,9 +1185,18 @@ async def _import_holdings(session: AsyncSession, household_id: uuid.UUID, doc: 
             quantity=_money(entry, "quantity", where),
             cost_basis=_money(entry, "cost_basis", where, required=False),
             as_of=_date(entry, "as_of", where, required=False),
+            source=_holding_source(entry, where),
         ))
         await session.flush()
         result.made("holdings")
+
+
+def _holding_source(entry: dict[str, Any], where: str) -> str:
+    """``manual`` when absent: a file written before ADR-0051 has only those."""
+    source = _text(entry, "source", where, required=False) or "manual"
+    if source not in HOLDING_SOURCES:
+        raise _fail(f"{where}.source", f"expected one of {', '.join(HOLDING_SOURCES)}")
+    return source
 
 
 async def _import_transfer_groups(session: AsyncSession, household_id: uuid.UUID,

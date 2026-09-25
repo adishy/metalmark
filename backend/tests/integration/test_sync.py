@@ -1051,8 +1051,8 @@ async def test_a_stated_account_snapshots_its_balance_at_the_providers_date(hh) 
 async def test_a_derived_account_does_not_write_its_statement_balance_into_history(hh) -> None:
     """ADR-0021's interaction with sync.
 
-    Sync creates investment accounts *stated* — it writes no holdings, so there is
-    nothing to derive from (session 04). The guard is for the other case: an
+    Sync creates investment accounts *stated*: the bank's balance is the value, and
+    its holdings explain it (ADR-0051). The guard is for the other case: an
     account created derived before migration 0006 that has holdings entered by
     hand. Its history is its holdings', and a synced stated balance must not put a
     second, disagreeing series in the same column — while the column itself still
