@@ -4,10 +4,13 @@
 // sections already work (§5, and see ScrollTabs.tsx for why the same strip is
 // reused rather than reinvented here).
 //
-// Tab state lives in the URL (`/insights/:tab`), not in useState like
-// Settings' — a report a reader is looking at is exactly the kind of state a
-// deep link or Back button should reach, the same reasoning RangeControl
-// already applies to the window within a report.
+// Tab state lives in the URL (`/insights/:tab`) — a report a reader is looking
+// at is exactly the kind of state a deep link or Back button should reach, the
+// same reasoning RangeControl already applies to the window within a report.
+// Settings holds its eleven sections in its own query string for the same
+// reason since the command palette started listing them as destinations
+// (issue #35) — this is the shape a tab list takes when something other than
+// the page has to be able to name a tab.
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import ScrollTabs from "@/components/ScrollTabs";
 import Overview from "@/pages/insights/Overview";
@@ -16,7 +19,10 @@ import Allocations from "@/pages/insights/Allocations";
 // One declared list drives the tab strip, the route guard and which panel
 // renders — adding a tab (Agent A's `recurring`, task B7) is one line here
 // plus one line in the switch below; nothing else needs to know the list grew.
-const TABS = [
+// Exported for the same reason `AppShell`'s `NAV` is: the command palette
+// (issue #35) lists these tabs as destinations, and it reads them from here
+// rather than keeping a second copy that could name a tab this page deleted.
+export const TABS = [
   { id: "overview", label: "Overview" },
   { id: "allocations", label: "Allocations" },
   // { id: "recurring", label: "Recurring" },  <- next entry goes here

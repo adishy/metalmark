@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import InstitutionsSection from "@/pages/InstitutionsSection";
 import { useAuth } from "@/auth/AuthContext";
@@ -72,7 +72,11 @@ import {
   validRate,
 } from "@/components/form";
 
-const TABS = [
+// Exported for the same reason `AppShell`'s `NAV` is: the command palette
+// (issue #35) lists these eleven sections as destinations, and it reads the
+// list from here rather than keeping a copy that could name a section this page
+// has renamed or dropped.
+export const TABS = [
   // First, and admin-only. The position is deliberate: the sync control panel
   // shipped complete and could not be found, so the settings entry point is the
   // first thing an administrator sees here rather than the fifth of eight.
@@ -92,13 +96,33 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function Settings() {
-  const [tab, setTab] = useState<TabId>("categories");
   const { me } = useAuth();
   const isAdmin = me?.user.is_admin === true;
   // `adminOnly` is declared on exactly one member of the union, so a bare
   // property read would not typecheck — the `in` check narrows to it, and its
   // only value there is `true`. A member's list is the eight that follow.
   const tabs = TABS.filter((t) => !("adminOnly" in t) || isAdmin);
+
+  /*
+   * The section is in the URL (`/settings?tab=owners`), the same way Insights'
+   * tabs are in the path — and for the same reason: the command palette (issue
+   * #35) lists the eleven sections as destinations, and an entry that landed on
+   * `/settings` and stopped there would be a destination that is not one.
+   *
+   * The URL is the whole of the state; there is no `useState` shadowing it, so
+   * the two cannot disagree about which section is showing. Selecting a tab
+   * *replaces* the entry rather than pushing one: tapping through a strip of
+   * eleven is not eleven places worth going Back through, and leaving Settings
+   * is what Back is for here.
+   *
+   * The section is validated against the same filtered list the strip renders,
+   * so `?tab=admin` typed by a member falls back to Categories instead of
+   * opening the admin panel through the back door.
+   */
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("tab");
+  const tab: TabId = tabs.some((t) => t.id === requested) ? (requested as TabId) : "categories";
+  const selectTab = (id: string) => setParams({ tab: id }, { replace: true });
 
   return (
     // §9.1 files Settings under form width — `max-w-2xl` (672 px), because a
@@ -123,7 +147,7 @@ export default function Settings() {
       <ScrollTabs
         tabs={tabs}
         selected={tab}
-        onSelect={(id) => setTab(id as TabId)}
+        onSelect={(id) => selectTab(id as TabId)}
         ariaLabel="Settings sections"
         testidPrefix="settings-tab"
         rail
@@ -135,7 +159,7 @@ export default function Settings() {
         aria-labelledby={`tab-${tab}`}
         data-testid={`settings-panel-${tab}`}
       >
-        {tab === "admin" && <AdminSection onOpenConnections={() => setTab("connections")} />}
+        {tab === "admin" && <AdminSection onOpenConnections={() => selectTab("connections")} />}
         {tab === "categories" && <CategoriesSection />}
         {tab === "tags" && <TagsSection />}
         {tab === "institutions" && <InstitutionsSection />}
