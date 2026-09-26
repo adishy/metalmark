@@ -445,8 +445,23 @@ async def world(app):
         uuid.UUID(me["household_id"]), INSTITUTION, f"{OWNER} Joint {ACCOUNT_NO}", now
     )
 
+    paystub = await s.ok(
+        "POST",
+        f"/owners/{child['id']}/paystubs",
+        json={
+            "pay_date": today.isoformat(),
+            "employer": f"{OWNER}'s Bakery",
+            "gross": "100.00",
+            "net": "100.00",
+            "lines": [
+                {"kind": "earning", "label": "Regular pay", "amount": "100.00"},
+            ],
+        },
+    )
+
     ids.update(
         child=child["id"],
+        paystub=paystub["id"],
         allowance=allowance["id"],
         groceries=groceries["id"],
         tag=tag["id"],
@@ -849,6 +864,8 @@ def _fill(path: str, ids: dict) -> str:
         .replace("{group_id}", ids["transfer"])
         .replace("{security_id}", ids["security"])
         .replace("{run_id}", ids["run"])
+        .replace("{owner_id}", ids["child"])
+        .replace("{paystub_id}", ids["paystub"])
     )
 
 

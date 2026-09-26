@@ -805,3 +805,108 @@ export interface BalancePoint {
   balance: string;
   currency: string;
 }
+
+// ---- owner income and paystubs (ADR-0052) ----------------------------------
+
+export type PayFrequency = "weekly" | "biweekly" | "semimonthly" | "monthly" | "annual";
+export type FilingStatus =
+  | "single"
+  | "married_joint"
+  | "married_separate"
+  | "head_of_household";
+export type PaystubLineKind =
+  | "earning"
+  | "pre_tax_deduction"
+  | "tax"
+  | "post_tax_deduction"
+  | "employer_contribution";
+
+export interface YtdKindTotal {
+  kind: PaystubLineKind;
+  amount: Money;
+}
+
+export interface IncomeSummary {
+  annualized_gross: Money | null;
+  ytd: YtdKindTotal[];
+  effective_tax_rate: Money | null;
+}
+
+export interface OwnerIncomeProfileFields {
+  id: UUID;
+  currency: string;
+  annual_gross_income: Money | null;
+  pay_frequency: PayFrequency | null;
+  filing_status: FilingStatus | null;
+  tax_region: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** ``profile`` is null until the household's first save — a real state, not a
+ *  loading placeholder (see the backend schema's own note). */
+export interface OwnerIncomeProfile {
+  owner_id: UUID;
+  profile: OwnerIncomeProfileFields | null;
+  summary: IncomeSummary;
+}
+
+export interface OwnerIncomeProfileUpdate {
+  currency?: string;
+  annual_gross_income?: Money | null;
+  pay_frequency?: PayFrequency | null;
+  filing_status?: FilingStatus | null;
+  tax_region?: string | null;
+}
+
+export interface PaystubLineIn {
+  kind: PaystubLineKind;
+  label: string;
+  amount: Money;
+  ytd_amount?: Money | null;
+  position?: number;
+}
+
+export interface PaystubLine extends PaystubLineIn {
+  id: UUID;
+  position: number;
+}
+
+export interface Paystub {
+  id: UUID;
+  owner_id: UUID;
+  pay_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  employer: string | null;
+  currency: string;
+  gross: Money;
+  net: Money;
+  lines: PaystubLine[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaystubCreate {
+  pay_date: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  employer?: string | null;
+  currency?: string | null;
+  gross: Money;
+  net: Money;
+  lines?: PaystubLineIn[];
+}
+
+/** Absent means unchanged, including for ``lines`` — omit the key entirely to
+ *  leave a paystub's lines as they are; send ``lines: []`` to clear them. */
+export interface PaystubPatch {
+  pay_date?: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  employer?: string | null;
+  currency?: string | null;
+  gross?: Money;
+  net?: Money;
+  lines?: PaystubLineIn[];
+}

@@ -78,6 +78,9 @@ from app.models import (
     Household,
     InvestmentTransaction,
     Owner,
+    OwnerIncomeProfile,
+    Paystub,
+    PaystubLine,
     Rule,
     Security,
     SecurityPrice,
@@ -314,6 +317,18 @@ _INVESTMENT_TX_FIELDS = (
     "field_sources", "description", "notes", "source",
 )
 _RATE_FIELDS = ("base_currency", "quote_currency", "rate_date", "rate")
+# ADR-0052: foundation-only, nothing else references these yet.
+_INCOME_PROFILE_FIELDS = (
+    "id", "owner_id", "currency", "annual_gross_income", "pay_frequency",
+    "filing_status", "tax_region",
+)
+_PAYSTUB_FIELDS = (
+    "id", "owner_id", "pay_date", "period_start", "period_end", "employer",
+    "currency", "gross", "net",
+)
+_PAYSTUB_LINE_FIELDS = (
+    "id", "paystub_id", "kind", "label", "amount", "ytd_amount", "position",
+)
 
 
 async def _select(session: AsyncSession, model: type, order_by=None) -> list[Any]:
@@ -373,6 +388,13 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
     rates = await _select(
         session, FxRate, (FxRate.base_currency, FxRate.quote_currency, FxRate.rate_date)
     )
+    income_profiles = await _select(
+        session, OwnerIncomeProfile, (OwnerIncomeProfile.owner_id,)
+    )
+    paystubs = await _select(session, Paystub, (Paystub.owner_id, Paystub.pay_date, Paystub.id))
+    paystub_lines = await _select(
+        session, PaystubLine, (PaystubLine.paystub_id, PaystubLine.position)
+    )
 
     return {
         "format": FORMAT,
@@ -405,6 +427,9 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
         "investment_transactions": [_row(t, _INVESTMENT_TX_FIELDS) for t in investment_txns],
         "rules": [_row(r, _RULE_FIELDS) for r in rules],
         "fx_rates": [_row(r, _RATE_FIELDS) for r in rates],
+        "owner_income_profiles": [_row(p, _INCOME_PROFILE_FIELDS) for p in income_profiles],
+        "paystubs": [_row(p, _PAYSTUB_FIELDS) for p in paystubs],
+        "paystub_lines": [_row(pl, _PAYSTUB_LINE_FIELDS) for pl in paystub_lines],
     }
 
 
@@ -727,6 +752,9 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
         await _import_transfer_groups(session, household_id, doc, remap, result, legs)
         await _import_rules(session, household_id, doc, remap, result)
         await _import_fx_rates(session, doc, result)
+        await _import_income_profiles(session, household_id, doc, remap, result)
+        pay_rows, pay_created = await _import_paystubs(session, household_id, doc, remap, result)
+        await _import_paystub_lines(session, household_id, doc, pay_rows, pay_created, result)
     except IntegrityError as exc:
         # Nothing here adopts a source id, so a primary-key collision is no longer
         # the expected shape of failure — it means the document contradicts itself
@@ -1727,3 +1755,102 @@ async def _import_fx_rates(session: AsyncSession, doc: dict[str, Any],
     ).scalars().all()
     result.made("fx_rates", len(inserted))
     result.found("fx_rates", len(rows) - len(inserted))
+
+
+# ---- owner income and paystubs (ADR-0052) ----------------------------------
+
+
+async def _import_income_profiles(session: AsyncSession, household_id: uuid.UUID,
+                                   doc: dict[str, Any], remap: _Remap,
+                                   result: ImportResult) -> None:
+    """One per owner (the model's own unique constraint) — an owner that
+    already has a profile on this instance keeps it; the document's copy is
+    not a right the target household's own edits since export should lose to."""
+    existing_owner_ids = set(
+        (await session.execute(select(OwnerIncomeProfile.owner_id))).scalars().all()
+    )
+    for i, entry in enumerate(_entries(doc, "owner_income_profiles")):
+        where = f"owner_income_profiles[{i}]"
+        owner_id = remap.get(
+            _str_id(_get(entry, "owner_id", where), f"{where}.owner_id"), where, "owner"
+        )
+        if owner_id in existing_owner_ids:
+            result.found("owner_income_profiles")
+            continue
+        session.add(OwnerIncomeProfile(
+            household_id=household_id,
+            owner_id=owner_id,
+            currency=(_text(entry, "currency", where, required=False) or "USD").upper(),
+            annual_gross_income=_money(entry, "annual_gross_income", where, required=False),
+            pay_frequency=_text(entry, "pay_frequency", where, required=False),
+            filing_status=_text(entry, "filing_status", where, required=False),
+            tax_region=_text(entry, "tax_region", where, required=False),
+        ))
+        existing_owner_ids.add(owner_id)
+        result.made("owner_income_profiles")
+    await session.flush()
+
+
+async def _import_paystubs(
+    session: AsyncSession, household_id: uuid.UUID, doc: dict[str, Any], remap: _Remap,
+    result: ImportResult,
+) -> tuple[dict[uuid.UUID, uuid.UUID], set[uuid.UUID]]:
+    """Always created, never deduped — like transactions, a paystub is a fact
+    about one pay date and re-importing the same document is expected to be
+    idempotent at the *line* level (below), not by silently dropping rows here.
+
+    Returns ``(old_id -> new_id, {old_ids created})`` for ``_import_paystub_lines``
+    to key off, the same shape ``_import_transactions``/``_import_splits`` use.
+    """
+    rows: dict[uuid.UUID, uuid.UUID] = {}
+    created: set[uuid.UUID] = set()
+    for i, entry in enumerate(_entries(doc, "paystubs")):
+        where = f"paystubs[{i}]"
+        old_id = _str_id(_get(entry, "id", where), f"{where}.id")
+        if old_id is None:
+            raise _fail(where, "a paystub must carry its id")
+        owner_id = remap.get(
+            _str_id(_get(entry, "owner_id", where), f"{where}.owner_id"), where, "owner"
+        )
+        paystub = Paystub(
+            household_id=household_id,
+            owner_id=owner_id,
+            pay_date=_date(entry, "pay_date", where),
+            period_start=_date(entry, "period_start", where, required=False),
+            period_end=_date(entry, "period_end", where, required=False),
+            employer=_text(entry, "employer", where, required=False),
+            currency=(_text(entry, "currency", where, required=False) or "USD").upper(),
+            gross=_money(entry, "gross", where) or Decimal("0"),
+            net=_money(entry, "net", where) or Decimal("0"),
+        )
+        session.add(paystub)
+        await session.flush()
+        rows[old_id] = paystub.id
+        created.add(old_id)
+        result.made("paystubs")
+    return rows, created
+
+
+async def _import_paystub_lines(
+    session: AsyncSession, household_id: uuid.UUID, doc: dict[str, Any],
+    rows: dict[uuid.UUID, uuid.UUID], created: set[uuid.UUID], result: ImportResult,
+) -> None:
+    """Lines for the paystubs this import just created — the same "only the
+    parent's own new rows" rule ``_import_splits`` follows, and for the same
+    reason: an existing paystub is never touched by this import at all."""
+    for i, entry in enumerate(_entries(doc, "paystub_lines")):
+        where = f"paystub_lines[{i}]"
+        old_paystub = _str_id(_get(entry, "paystub_id", where), f"{where}.paystub_id")
+        if old_paystub not in created:
+            continue
+        session.add(PaystubLine(
+            household_id=household_id,
+            paystub_id=rows[old_paystub],
+            kind=_text(entry, "kind", where) or "earning",
+            label=_text(entry, "label", where) or "",
+            amount=_money(entry, "amount", where) or Decimal("0"),
+            ytd_amount=_money(entry, "ytd_amount", where, required=False),
+            position=_int(entry, "position", where, required=False) or 0,
+        ))
+        result.made("paystub_lines")
+    await session.flush()

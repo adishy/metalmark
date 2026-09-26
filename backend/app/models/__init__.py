@@ -8,6 +8,7 @@ from app.models.identity import (  # noqa: F401
     Session,
     User,
 )
+from app.models.income import OwnerIncomeProfile, Paystub, PaystubLine  # noqa: F401
 from app.models.institution import InstitutionLogo  # noqa: F401
 from app.models.investments import (  # noqa: F401
     Holding,
@@ -49,6 +50,9 @@ __all__ = [
     "Category",
     "CategoryGroup",
     "Owner",
+    "OwnerIncomeProfile",
+    "Paystub",
+    "PaystubLine",
     "Rule",
     "Tag",
     "SyncJob",

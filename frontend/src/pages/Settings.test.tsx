@@ -10,7 +10,10 @@ import Settings from "@/pages/Settings";
 // owner-only gate) need stubs; the point of this file is task A1's rename
 // form, not the rest of the page.
 const h = vi.hoisted(() => ({
-  connections: [] as unknown[],
+  // A row shape wide enough to spread into ("{ ...h.connections[0] }" below);
+  // `unknown[]` would not typecheck there, and the mock never reads past these
+  // keys anyway.
+  connections: [] as Array<Record<string, unknown>>,
   update: vi.fn(),
 }));
 
