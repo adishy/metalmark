@@ -11,6 +11,7 @@ import {
 } from "@/api/portability";
 import {
   useAccounts,
+  useBudgetReport,
   useCategories,
   useCategoryGroups,
   useCategoryUsage,
@@ -53,6 +54,7 @@ import {
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import Dialog from "@/components/Dialog";
+import BudgetDialog from "@/components/BudgetDialog";
 import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
 import ColorPicker from "@/components/ColorPicker";
@@ -61,6 +63,7 @@ import { tokenHex } from "@/theme/chartTokens";
 import { Day, Instant } from "@/components/datetime";
 import ScrollTabs from "@/components/ScrollTabs";
 import type {
+  BudgetRow,
   Category,
   CategoryDeleteResult,
   CategoryGroup,
@@ -69,7 +72,8 @@ import type {
   OwnerReassignment,
 } from "@/api/types";
 import { categoryLabel } from "@/components/CategoryPicker";
-import { todayIso } from "@/lib/dates";
+import { formatMonth, todayIso } from "@/lib/dates";
+import { formatMoney } from "@/lib/format";
 import {
   Button,
   Checkbox,
@@ -568,6 +572,14 @@ function CategoriesSection() {
   const createGroup = useCreateCategoryGroup();
   const delGroup = useDeleteCategoryGroup();
   const createCat = useCreateCategory();
+  // The same report the Insights → Budgets tab draws (ADR-0058) — one endpoint,
+  // so the plan a row states here and the figure a reader compares against on
+  // that tab cannot disagree. This page is the *complete* list of categories,
+  // which is why it is the one that can plan a category with no spending yet.
+  const budgets = useBudgetReport();
+  const budgetCurrency = budgets.data?.base_currency ?? "USD";
+  const planOf = (categoryId: string): BudgetRow | null =>
+    budgets.data?.rows.find((r) => r.category_id === categoryId) ?? null;
 
   const [gName, setGName] = useState("");
   const [gType, setGType] = useState("expense");
@@ -753,6 +765,10 @@ function CategoriesSection() {
                   <CategoryRow
                     key={c.id}
                     category={c}
+                    type={g.type}
+                    plan={planOf(c.id)}
+                    period={budgets.data?.period_start ?? null}
+                    currency={budgetCurrency}
                     groups={(groups.data ?? []).filter((other) => other.type === g.type)}
                     // Same type, itself excluded: a category's type is its
                     // group's, so entries must land on the same side of cash
@@ -778,8 +794,10 @@ function CategoriesSection() {
 }
 
 /**
- * One category in the list: the emoji is edited *in* the row, everything else
- * lives one tap away in `EditCategoryDialog`.
+ * One category in the list: the emoji is edited *in* the row, the name and
+ * group live one tap away in `EditCategoryDialog`, and what the category is
+ * budgeted for this month is its own line under the row, opening
+ * `BudgetDialog` (ADR-0058).
  *
  * **The emoji is in the row on purpose.** It is the one field people change for
  * fun, and a dialog for one character is a long way round; saved on blur, like
@@ -792,14 +810,34 @@ function CategoriesSection() {
  * an inline Rename button beside Delete left the *name* — the one thing the list
  * is for — 51 px, which truncates "Paychecks". One Edit button costs less width
  * than the Delete button it replaces and the name reads whole again.
+ *
+ * The budget line is a *second line*, not a second button in the row, for the
+ * same arithmetic: it costs no width at all, and it is a statement about the
+ * category that happens to be pressable.
  */
 function CategoryRow({
   category,
+  type,
+  plan,
+  period,
+  currency,
   groups,
   siblings,
   onDeleted,
 }: {
   category: Category;
+  /** This category's type, which is its group's. Only an expense category can
+   *  carry a budget: `spending_by_category` counts money *out*, and the server
+   *  refuses a plan on an income or transfer category (ADR-0058). */
+  type: "income" | "expense" | "transfer";
+  /** This category's row in the period's budget report, or null when it has
+   *  neither a plan nor any spending. */
+  plan: BudgetRow | null;
+  /** The period the report is about, as the first day of the month — the
+   *  response's `period_start`, never a month worked out here. Null until the
+   *  report loads, and no plan line is drawn before then. */
+  period: string | null;
+  currency: string;
   /** Groups this category may move to: its own type only, never across. */
   groups: CategoryGroup[];
   /** Categories a delete could file its entries under, same type, minus itself. */
@@ -808,6 +846,8 @@ function CategoryRow({
 }) {
   const updateCat = useUpdateCategory();
   const [editing, setEditing] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const monthLabel = period ? formatMonth(period, "long") : null;
 
   return (
     <li className="px-3 py-2 text-sm">
@@ -848,6 +888,37 @@ function CategoryRow({
           Edit
         </Button>
       </div>
+
+      {/* The plan, on a line of its own under the row rather than in it. The row
+          is 296 px at 360 (§ the note above) and every pixel of it is spoken
+          for; this line is the answer to "what did I say we'd spend on this",
+          and a second line costs no width at all. It always names the month: a
+          budget without its period is a number nobody can act on.
+
+          It is a button, not a sentence, because this list is the only place a
+          plan can be written for a category with nothing spent on it yet — and
+          it opens the *same* dialog the Budgets tab opens, so the two screens
+          write through one component and read one response. The dialog owns the
+          amount; this row only says what is there.
+
+          Expense categories only: `spending_by_category` counts money out, and
+          the server refuses a plan on an income or transfer category. */}
+      {type === "expense" && monthLabel && (
+        <Button
+          variant="ghost"
+          // `ml-14` + `px-2` puts the text on the name's own left edge — 12 px of
+          // row padding, a 56 px emoji field and an 8 px gap — so the line reads
+          // as belonging to the category above it rather than to the row.
+          className="ml-14 px-2 py-1 text-xs font-normal text-fg-muted"
+          onClick={() => setPlanning(true)}
+          data-testid={`category-budget-${category.id}`}
+        >
+          {plan?.budget != null
+            ? `${formatMoney(plan.budget, currency)} budgeted for ${monthLabel}`
+            : `No budget for ${monthLabel}`}
+        </Button>
+      )}
+
       {updateCat.isError && (
         <p
           className="mt-1 text-xs text-negative"
@@ -856,6 +927,17 @@ function CategoryRow({
         >
           {(updateCat.error as Error).message}
         </p>
+      )}
+
+      {planning && period && monthLabel && (
+        <BudgetDialog
+          category={{ id: category.id, name: category.name }}
+          period={period}
+          monthLabel={monthLabel}
+          row={plan}
+          currency={currency}
+          onClose={() => setPlanning(false)}
+        />
       )}
 
       {editing && (
