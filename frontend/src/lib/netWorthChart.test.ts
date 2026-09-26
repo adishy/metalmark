@@ -5,6 +5,7 @@ import {
   brushWindow,
   changesPerPoint,
   coverageNotes,
+  measuredSpan,
   netWorthOption,
   startsHere,
   tooltipBody,
@@ -359,6 +360,74 @@ describe("changesPerPoint", () => {
       { date: "2026-01-31", net_worth: "0", missing: [checking("no_rate")] },
     ];
     expect(changesPerPoint(points)[1]).toEqual({ kind: "gap" });
+  });
+});
+
+describe("measuredSpan", () => {
+  /** The window opens before the household's history does: the first two points
+   *  count nothing at all, and are then carried forward from 2026-01-31. */
+  const YOUNGER: NetWorthSeries["points"] = [
+    { date: "2025-09-26", net_worth: "0.0000", missing: [checking("not_started")] },
+    { date: "2025-12-31", net_worth: "0.0000", missing: [checking("not_started")] },
+    { date: "2026-01-31", net_worth: "17372.2222", missing: [] },
+    { date: "2026-04-30", net_worth: "17372.2222", missing: [] },
+    { date: "2026-08-31", net_worth: "34352.2222", missing: [] },
+    { date: "2026-09-26", net_worth: "40329.2412", missing: [] },
+  ];
+  /** The newest account's first balance lands on the window's last point, so
+   *  the trailing interval is a start and the strip's last bar is earlier. */
+  const STARTS_AT_END: NetWorthSeries["points"] = [
+    { date: "2026-01-31", net_worth: "100.0000", missing: [checking("not_started")] },
+    { date: "2026-03-31", net_worth: "150.0000", missing: [checking("not_started")] },
+    { date: "2026-06-30", net_worth: "200.0000", missing: [] },
+  ];
+
+  it("takes the whole window when every interval in it is a movement", () => {
+    expect(measuredSpan(WHOLE, 0, 2)).toEqual([0, 2]);
+  });
+
+  it("starts where the window stops counting fewer accounts than it closes on", () => {
+    // The empty leading points are outside the span: a headline over the whole
+    // window would state a rise out of a total that counted nothing.
+    expect(measuredSpan(YOUNGER, 0, 5)).toEqual([2, 5]);
+  });
+
+  it("ends at the strip's last bar when the window's last point has just started counting one", () => {
+    expect(measuredSpan(STARTS_AT_END, 0, 2)).toEqual([0, 1]);
+  });
+
+  it("reports no span where the window draws no bar at all", () => {
+    const started: NetWorthSeries["points"] = [
+      { date: "2026-01-01", net_worth: "0.0000", missing: [checking("not_started")] },
+      { date: "2026-01-31", net_worth: "2200.0000", missing: [] },
+    ];
+    expect(measuredSpan(started, 0, 1)).toEqual([1, 1]);
+    expect(measuredSpan(UNEVEN, 0, 3)).toEqual([3, 3]);
+    // An empty series has no points to index, and no span.
+    expect(measuredSpan([], 0, -1)).toEqual([-1, -1]);
+  });
+
+  it("never reports a span outside the window on screen", () => {
+    // A brush that opens on 2025-12-31 cannot be widened by the span.
+    expect(measuredSpan(YOUNGER, 1, 5)).toEqual([2, 5]);
+    expect(measuredSpan(YOUNGER, 3, 5)).toEqual([3, 5]);
+  });
+
+  // The claim the headline makes, checked against the picture under it: the
+  // bars the strip draws between the span's two ends are what the one
+  // subtraction a headline performs adds up to.
+  it("spans exactly the bars the strip draws", () => {
+    for (const points of [WHOLE, UNEVEN, YOUNGER, STARTS_AT_END]) {
+      const [first, last] = measuredSpan(points, 0, points.length - 1);
+      const bars = changesPerPoint(points)
+        .slice(first + 1, last + 1)
+        .map((c) => (c?.kind === "value" ? c.value : null));
+      expect(bars.every((b) => b !== null)).toBe(true);
+      const sum = bars.reduce<number>((a, b) => a + (b ?? 0), 0);
+      const delta =
+        Number(points[last]?.net_worth ?? 0) - Number(points[first]?.net_worth ?? 0);
+      expect(Math.abs(sum - delta)).toBeLessThan(1e-9);
+    }
   });
 });
 

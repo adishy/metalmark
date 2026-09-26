@@ -390,6 +390,90 @@ describe("the net-worth window", () => {
     render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.queryByTestId("accounts-net-worth-coverage")).not.toBeInTheDocument();
   });
+
+  // The headline and the strip are one card, so they are one figure and one
+  // span. A window that opens before the household's history does used to state
+  // the difference between a total that counted nothing and one that counted
+  // everything — a "rise" the chart beneath it refuses to draw a bar for.
+  it("states the change over the span the strip draws, in that span's words", () => {
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2025-12-31",
+          net_worth: "0.0000",
+          missing: [{ account_id: "acct-1", name: "Checking", reason: "not_started" }],
+        },
+        { date: "2026-01-31", net_worth: "17372.2222", missing: [] },
+        { date: "2026-09-26", net_worth: "40329.2412", missing: [] },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    // Nothing is skipped over in the middle: every bar the strip draws between
+    // the two named days adds up to the figure in front of them.
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
+      `Up ${formatMoney("22957.0192", "USD")} from Jan 31 to Sep 26`,
+    );
+    // And the picture's own accessible name repeats the span, because a screen
+    // reader gets the sentence and not the bars.
+    expect(screen.getByTestId("accounts-net-worth-chart")).toHaveAccessibleName(
+      /from Jan 31 to Sep 26/,
+    );
+  });
+
+  it("stops the span where the strip's last bar is, when today's point starts counting", () => {
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2026-01-31",
+          net_worth: "100.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "not_started" }],
+        },
+        {
+          date: "2026-06-30",
+          net_worth: "150.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "not_started" }],
+        },
+        // Savings' first balance lands today: the interval into it is a start,
+        // so the strip draws no bar there and the headline cannot span it.
+        { date: "2026-09-26", net_worth: "1200.00", missing: [] },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    // $50 — the movement the chart can measure — and not $1,100, which is mostly
+    // an account appearing.
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
+      `Up ${formatMoney("50.00", "USD")} from Jan 31 to Jun 30`,
+    );
+  });
+
+  it("names the single day it has when no interval in the window is drawable", () => {
+    // Both points of the window are the two ends of one start: there is no span
+    // to state, and "$0.00 over the past 2 weeks" would be a claim the chart
+    // cannot make — the strip draws no bar in this window at all.
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2026-06-01",
+          net_worth: "40.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "not_started" }],
+        },
+        { date: "2026-09-01", net_worth: "100.00", missing: [] },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
+      `Up ${formatMoney("0.00", "USD")} on Sep 01`,
+    );
+    expect(screen.getByTestId("accounts-net-worth-coverage")).toHaveTextContent(
+      "Counted partway through: Savings from Sep 01.",
+    );
+  });
 });
 
 // A balance lands on its own date (session 04, audit #4): the edit dialog used to

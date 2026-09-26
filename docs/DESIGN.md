@@ -39,9 +39,9 @@ Seventeen tokens: the nine content roles, five support tokens
 (`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`), and three `-ink`
 variants for text on a tint (below the table). Contrast ratios
 below are computed against the surface each token is actually used on — `fg`,
-`fg-muted` and `border-strong` on all three levels, the role colours on the page and on
-a card, `border` where a divider is drawn (a card), `accent-fg` on `accent` — and the
-**worst case in each theme** is the number shown. Every figure here is measured with the
+`fg-muted`, `border-strong` and `focus` on all three levels, the role colours on the page
+and on a card, `border` where a divider is drawn (a card), `accent-fg` on `accent` — and
+the **worst case in each theme** is the number shown. Every figure here is measured with the
 WCAG 2.x relative-luminance formula rather than estimated, and every figure that a change
 moves is re-measured in the same commit — re-deriving one takes five lines of any language
 with `Math.pow`.
@@ -51,17 +51,17 @@ with `Math.pow`.
 | `surface` — page background | `#f0f4f8` | `#020617` | — (base) |
 | `surface-raised` — cards, rows, sheets | `#ffffff` | `#131b2b` | — (base) |
 | `surface-inset` — inputs, wells, chips | `#e8eef5` | `#1e293b` | — (base) |
-| `border` — dividers, decorative only | `#cbd5e1` | `#2e394b` | 1.48:1 light / 1.47:1 dark on a card (no requirement) |
+| `border` — dividers, decorative only | `#cbd5e1` | `#2e394b` | 1.48:1 on a card, both themes (no requirement) |
 | `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.07:1** light / **3.07:1** dark (needs 3:1) |
 | `fg` — primary text | `#0f172a` | `#f1f5f9` | **15.28:1** light / **13.35:1** dark (needs 4.5:1) |
 | `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.49:1** light / **5.71:1** dark (needs 4.5:1) |
-| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **4.95:1** light / **9.59:1** dark (needs 4.5:1) |
+| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **4.95:1** light / **9.25:1** dark (needs 4.5:1) |
 | `accent-fg` — label on `accent` fill | `#ffffff` | `#020617` | **5.47:1** light / **10.84:1** dark (needs 4.5:1) |
-| `positive` — income, gain | `#047857` | `#34d399` | **4.96:1** light / **9.29:1** dark (needs 4.5:1) |
-| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **5.85:1** light / **6.45:1** dark (needs 4.5:1) |
-| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.54:1** light / **10.69:1** dark (needs 4.5:1) |
+| `positive` — income, gain | `#047857` | `#34d399` | **4.96:1** light / **8.96:1** dark (needs 4.5:1) |
+| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **5.85:1** light / **6.23:1** dark (needs 4.5:1) |
+| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.54:1** light / **10.32:1** dark (needs 4.5:1) |
 | `danger` — destructive button fill | `#b91c1c` | `#b91c1c` | **6.47:1** with `#ffffff` label, both themes |
-| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **4.95:1** light / **10.84:1** dark (needs 3:1) |
+| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **4.69:1** light / **7.86:1** dark on a well (needs 3:1) |
 
 **Ink tokens — text on a tint.** A selected chip (`bg-accent/20`), a "needs review"
 badge (`bg-warning/20`) and an error pill (`bg-negative/20`) put the role colour on a
@@ -110,8 +110,8 @@ is the only place these three pairs are stated):
 | page → card | 1.05:1 → **1.11:1** | 1.13:1 → **1.17:1** |
 | card → well | 1.10:1 → **1.17:1** | 1.22:1 → **1.18:1** |
 | page → well | 1.05:1 → **1.06:1** | 1.38:1 → 1.38:1 |
-| border on a card | 1.23:1 → **1.48:1** | 1.22:1 → **1.47:1** |
-| border on a well | 1.13:1 → **1.22:1** | 1.00:1 → **1.26:1** |
+| border on a card | 1.23:1 → **1.48:1** | 1.22:1 → **1.48:1** |
+| border on a well | 1.13:1 → **1.27:1** | 1.00:1 → **1.26:1** |
 
 Light's two adjacent pairs both improve (1.05 → 1.11 and 1.10 → 1.17) and neither is
 bounded, so they could go further only by moving the page or the well past a content
@@ -122,7 +122,7 @@ steps trade off exactly, and dark's `card → well` sheds 0.04 to buy the weaker
 The two *ends* of the ramp are a different story: `page → well` is 1.06:1 in light and
 1.38:1 in dark, and light's cannot improve without one of the two bounds above breaking.
 A well sitting directly on the page — the active nav pill, an input outside a card — is
-identified by its `border-strong` outline (4.07:1 light against the well, 4.55:1 against
+identified by its `border-strong` outline (4.07:1 light against the well, 4.31:1 against
 the page), which is exactly the job §2.1 gives that token.
 
 ### 2.2 Wiring into Tailwind v3
@@ -253,12 +253,12 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --fg-muted: 148 163 184;       /* #94a3b8 */
   --accent: 45 212 191;          /* #2dd4bf */
   --accent-fg: 2 6 23;           /* #020617 */
-  --accent-ink: 45 212 191;      /* = accent; already 6.3:1 on its tint */
+  --accent-ink: 45 212 191;      /* = accent; already 6.04:1 on its tint */
   --positive: 52 211 153;        /* #34d399 */
   --negative: 248 113 113;       /* #f87171 */
   --negative-ink: 248 113 113;   /* = negative */
   --warning: 251 191 36;         /* #fbbf24 */
-  --warning-ink: 251 191 36;     /* = warning; 6.9:1 on its tint */
+  --warning-ink: 251 191 36;     /* = warning; 6.61:1 on its tint */
   --danger: 185 28 28;           /* #b91c1c — same fill in both themes */
   --focus: 45 212 191;           /* #2dd4bf */
 

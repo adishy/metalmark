@@ -102,5 +102,29 @@ for (const width of WIDTHS) {
         expect(box!.width).toBeGreaterThanOrEqual(56);
       }
     });
+
+    // The sweep above walks routes as they load, and the transaction filter
+    // panel does not load — it is behind a toggle (§5: on a phone the list is
+    // what the page is for). That made it the one surface this file could not
+    // see, and it is the densest thing on a phone: a row of pills, a four-field
+    // form, and now a sheet of seventy checkboxes behind one of them (#26).
+    // "Nothing scrolls sideways at 360" is not a claim about a hidden div.
+    test("the filter panel and its sheets stay inside the phone", async ({ page }) => {
+      await login(page);
+      await page.goto("/transactions");
+      await page.waitForLoadState("networkidle");
+
+      await page.getByTestId("txn-filters-toggle").click();
+      await expect(page.getByTestId("txn-filter-bar")).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(await sidewaysOffenders(page)).toEqual([]);
+
+      // The pill's panel is a bottom sheet on a phone, so it is inside the
+      // viewport by construction — unless the list inside it is wide.
+      await page.getByTestId("filter-categories").click();
+      await expect(page.getByTestId("filter-categories-sheet")).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(await sidewaysOffenders(page)).toEqual([]);
+    });
   });
 }

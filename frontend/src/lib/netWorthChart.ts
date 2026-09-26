@@ -28,8 +28,8 @@
 //   is not a movement of money. Those bars are not drawn at all, and the tooltip
 //   says which of the two happened rather than leaving a gap unexplained.
 import type { EChartsOption } from "echarts";
-import type { MissingAccount, MissingReason, NetWorthSeries } from "@/api/types";
-import { formatDay, isoDay } from "@/lib/dates";
+import type { Granularity, MissingAccount, MissingReason, NetWorthSeries } from "@/api/types";
+import { formatBucket, formatDay, isoDay } from "@/lib/dates";
 import { formatMoney, formatMoneyTick } from "@/lib/format";
 import {
   barEndRadius,
@@ -69,6 +69,55 @@ type Point = NetWorthSeries["points"][number];
 function dayTs(iso: string): number {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).getTime();
+}
+
+/** A day, in the milliseconds a time axis counts in. */
+const DAY_MS = 86_400_000;
+
+/**
+ * The narrowest gap the x axis may put two labels at, in ms, per bucket.
+ *
+ * The axis names *buckets*, so a label between two of them names a day the
+ * series has no point for. Left to its own interval search ECharts drew four of
+ * those on a one-day window — `04:00 08:00 12:00 …` — under a pointer chip that
+ * said `Sep 26`, and a bare `Sep` between two bare day numbers on a month.
+ *
+ * Each number is the shortest the calendar can make its bucket (a month is 28
+ * days, a quarter 91, a year 365), so the floor never lands finer than the
+ * bucket the axis is naming. ECharts reads it as exactly that — a floor — and
+ * goes on choosing the round values itself, which is what a tick should be.
+ */
+const BUCKET_MS: Record<Granularity, number> = {
+  day: DAY_MS,
+  week: 7 * DAY_MS,
+  month: 28 * DAY_MS,
+  quarter: 91 * DAY_MS,
+  year: 365 * DAY_MS,
+};
+
+/**
+ * What the x axis's labels say, and how close together they may sit.
+ *
+ * The vocabulary is §6.6's, and the entry point is `formatBucket` — the one
+ * function that decides what a granularity looks like on screen, and the one the
+ * cash-flow chart's axis already goes through. So this axis reads in the same
+ * words as the chip the pointer drags along it (`Sep 26`, `formatDay`), which is
+ * the whole complaint: an axis saying `04:00` while the chip beside it says
+ * `Sep 26` is two vocabularies on one chart.
+ *
+ * Which *word* is the window's resolved granularity's, which the server echoes
+ * back on the series and which is a fact about the data — not something to be
+ * inferred from a tick's own value, which is a second opinion about the window
+ * that would disagree exactly where one straddles a month.
+ */
+function xAxisLabels(data: NetWorthSeries | undefined) {
+  const granularity: Granularity = data?.granularity ?? "day";
+  return {
+    minInterval: BUCKET_MS[granularity],
+    // A time axis's tick value is a timestamp; `dayTs` built it from local
+    // components, so `isoDay` reads back the same day in every timezone.
+    formatter: (value: number) => formatBucket(isoDay(new Date(Number(value))), granularity),
+  };
 }
 
 /** Accounts fully counted at this point that had not started at the one before
@@ -129,6 +178,46 @@ export function changesPerPoint(points: Point[]): (ChangeNote | null)[] {
     }
     return { kind: "value", value: changeBetween(prev, p), since: prev.date };
   });
+}
+
+/**
+ * The span a headline may state, as the indices of the first and last point in
+ * it.
+ *
+ * A headline sits above this chart and states one figure, so it has to be a
+ * figure the chart below it draws — and the strip draws nothing across two
+ * points that do not count the same accounts (`changesPerPoint`). So the delta
+ * a headline may print is the change over a *run of intervals the strip does
+ * draw*: the latest such run in the window, which is the run ending at the
+ * window's own last point unless that point has just started counting an
+ * account. The two ends of a run count the same accounts, so one subtraction of
+ * them is a movement of money by this module's own definition, and it is what
+ * the bars between them add up to.
+ *
+ * Most windows are one run and this returns the window itself, which is why a
+ * headline keeps the window's own words there. Where a window opens on points
+ * that count fewer accounts — the usual shape when the household's history is
+ * younger than the window, ADR-0045 — the run is shorter than the window and
+ * the words have to name it: the alternative is a card whose headline claims a
+ * change the picture under it declines to draw.
+ *
+ * `[to, to]` is reported when no interval in the window is drawn at all: there
+ * is no span to state, and a caller must not invent one. `from`/`to` bound the
+ * search to the part of the series on screen, so a brushed window never reports
+ * a span outside the brush.
+ */
+export function measuredSpan(points: Point[], from: number, to: number): [number, number] {
+  const changes = changesPerPoint(points);
+  const drawn = (i: number) => changes[i]?.kind === "value";
+  for (let end = to; end > from; end--) {
+    if (!drawn(end)) continue;
+    // Inside a run every interval is drawn, so walking back from the end is
+    // what finds its first point.
+    let start = end;
+    while (start > from && drawn(start)) start -= 1;
+    return [start, end];
+  }
+  return [to, to];
 }
 
 /**
@@ -267,6 +356,24 @@ const STRIP_GAP = 12;
 const AXIS_BAND = 26;
 
 /**
+ * What the last x label needs to the right of the plot, in px — the wide layout
+ * only, and the second half of `VALUE_GUTTER`'s argument.
+ *
+ * A time axis centres each label on its tick, and the tick for the newest bucket
+ * sits within a few px of the plot's right edge. Half of a label therefore hangs
+ * outside the canvas, which clips it: the axis read `Sep 2` and lost the day.
+ * The phone never had this because a single grid keeps `containLabel`, and
+ * `containLabel` sizes the grid box around the labels — including, on the right,
+ * the last one's overhang. `VALUE_GUTTER` gives that up so the two grids agree
+ * about the left, so the right has to be reserved here instead.
+ *
+ * 24 px is half of the widest label this axis can be asked for, `Sep 25` — the
+ * `day` granularity's `formatBucket` — measured on the drawn canvas. The ticks
+ * that can be wider are the month ones, which are three letters.
+ */
+const X_LABEL_ROOM = 24;
+
+/**
  * The value axis's gutter, in px — **reserved, not measured**, and the only
  * place in this app that gives up `containLabel`.
  *
@@ -379,6 +486,10 @@ export function netWorthOption(
   // The gutter both grids share, or the measured one on a canvas with a single
   // grid. `left` is the only difference between the two layouts' x geometry.
   const gutter = wide ? VALUE_GUTTER : CANVAS_PAD;
+  // ...and the right edge, which needs the room the newest label hangs into on
+  // the layout that gave up `containLabel` (see `X_LABEL_ROOM`), and nothing
+  // more than the canvas's own margin on the layout that did not.
+  const right = wide ? CANVAS_PAD + X_LABEL_ROOM : CANVAS_PAD;
 
   /** The value axis: money, and as many rules as the plot can carry. */
   const valueAxis = {
@@ -389,6 +500,13 @@ export function netWorthOption(
       splitNumber: valueTicks(wide ? line : box),
     }),
   };
+
+  // The x axis's labels: §6.6's vocabulary, at the window's own granularity, and
+  // a floor under how close two of them may sit. `hideOverlap` is the phone's:
+  // a 310 px canvas cannot carry a label every day of a fortnight, and the drops
+  // are even because the interval is.
+  const x = xAxisLabels(data);
+  const xLabel = { ...chartAxis(t).axisLabel, formatter: x.formatter, hideOverlap: true };
 
   return {
     // Two grids are two x axes, and the pointer has to cross both or a reader
@@ -404,20 +522,20 @@ export function netWorthOption(
       ? [
           {
             left: gutter,
-            right: CANVAS_PAD,
+            right,
             top,
             height: line.height,
             containLabel: false,
           },
           {
             left: gutter,
-            right: CANVAS_PAD,
+            right,
             top: stripTop,
             height: STRIP_H,
             containLabel: false,
           },
         ]
-      : { top: 16, right: CANVAS_PAD, bottom: CANVAS_PAD, left: gutter, containLabel: true },
+      : { top: 16, right, bottom: CANVAS_PAD, left: gutter, containLabel: true },
     ...(band ? { dataZoom: rangeBrush(t, { top: 0, height: BRUSH_H }) } : {}),
     tooltip: chartTooltip(t, {
       formatter: (param: TooltipPoint) => {
@@ -438,6 +556,7 @@ export function netWorthOption(
             type: "time" as const,
             gridIndex: 0,
             ...chartAxis(t),
+            minInterval: x.minInterval,
             // The dates are stated once, under the strip: a second set of day
             // labels between the plot and the strip would be one axis drawn
             // twice. The pointer still crosses this grid, without its own chip.
@@ -449,13 +568,15 @@ export function netWorthOption(
             type: "time" as const,
             gridIndex: 1,
             ...chartAxis(t),
-            axisLabel: { ...chartAxis(t).axisLabel, hideOverlap: true },
+            minInterval: x.minInterval,
+            axisLabel: xLabel,
           },
         ]
       : {
           type: "time" as const,
           ...chartAxis(t),
-          axisLabel: { ...chartAxis(t).axisLabel, hideOverlap: true },
+          minInterval: x.minInterval,
+          axisLabel: xLabel,
         },
     // The ticks are money, and the axis says so: `$10k`, `$20k` — these read
     // `10,000`, `20,000` with no currency at all until this. The exact figure is

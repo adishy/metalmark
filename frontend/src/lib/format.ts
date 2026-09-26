@@ -173,6 +173,28 @@ export function formatMoney(amount: string | number, currency = "USD"): string {
 }
 
 /**
+ * A **transaction's** amount, with the sign §6.2 makes mandatory: `+$5,200.00`
+ * for money in, `−$38.20` for money out.
+ *
+ * `formatMoney` is the magnitude — right for a balance, a total or a tick, which
+ * a reader reads as an amount and not as a direction. A line item is not one of
+ * those: whether it moved money in or out is the whole of what the row says, and
+ * §6.2 measured that colour cannot carry it (the role pairs are 1.18:1–1.75:1
+ * apart, under the 3:1 a colour difference needs to count as one). So the glyph
+ * carries it, and it is added here — once — for every surface that shows a
+ * transaction's amount, so the ledger and the review queue cannot disagree about
+ * the same row.
+ *
+ * `+` is written rather than taken from `Intl`, for the reason `formatMoney`
+ * writes its own minus: a locale- and ICU-dependent glyph in a column of figures
+ * is a second vocabulary.
+ */
+export function formatMoneySigned(amount: string | number, currency = "USD"): string {
+  const n = typeof amount === "string" ? Number(amount) : amount;
+  return n > 0 ? `+${formatMoney(n, currency)}` : formatMoney(n, currency);
+}
+
+/**
  * The units a tick may be shortened to, largest first.
  *
  * `k` is there for the phone: an axis tick of `20 000` is six characters of

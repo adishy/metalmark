@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as echarts from "echarts";
-import type { AllocationRow } from "@/api/types";
+import type { AllocationGroup, AllocationRow } from "@/api/types";
 import {
   notDrawnSentence,
   tileColour,
@@ -29,8 +29,25 @@ const ROWS = [
   { key: "sec-short", label: "SHORT", value_base: "-1000.0000", percent: "-3.3333", holdings: 1, sources: [] },
 ] as unknown as AllocationRow[];
 
-/** The same shape under `group by account`, where the names are long. */
-const ACCOUNTS = [
+/**
+ * The same rows with the figures the server actually sends.
+ *
+ * `percent` is `value_base / total_base` (`services/investments.py`), so the six
+ * shares sum to 100 over all six rows and the short's is negative — and the five
+ * tiles sum to $29,990.00 while the allocation's total is $28,990.00. That gap is
+ * the whole point of the fixture: it is where a share of the allocation and a
+ * share of the ink stop being the same number.
+ */
+const CONSISTENT = [
+  { key: "cash", label: "Cash", value_base: "12000.0000", percent: "41.3936", holdings: 2, sources: [] },
+  { key: "sec-vti", label: "VTI", value_base: "9000.0000", percent: "31.0452", holdings: 1, sources: [] },
+  { key: "sec-bnd", label: "BND", value_base: "6000.0000", percent: "20.6968", holdings: 1, sources: [] },
+  { key: "sec-aapl", label: "AAPL", value_base: "2990.0000", percent: "10.3139", holdings: 1, sources: [] },
+  { key: "sec-dust", label: "DUST", value_base: "10.0000", percent: "0.0345", holdings: 1, sources: [] },
+  { key: "sec-short", label: "SHORT", value_base: "-1000.0000", percent: "-3.4495", holdings: 1, sources: [] },
+] as unknown as AllocationRow[];
+
+/** The same shape under `group by account`, where the names are long. */const ACCOUNTS = [
   { key: "acc-1", label: "Report Acct 1790445900682", value_base: "18000", percent: "60", holdings: 3, sources: [] },
   { key: "acc-2", label: "Report Acct 1790449427616", value_base: "9000", percent: "30", holdings: 2, sources: [] },
   { key: "acc-3", label: "Brokerage", value_base: "2900", percent: "9.67", holdings: 1, sources: [] },
@@ -40,11 +57,17 @@ const ACCOUNTS = [
 const PHONE = { width: 310, height: 300 };
 const WIDE = { width: 1104, height: 300 };
 
-const series = (rows: AllocationRow[], box: { width: number; height: number }) =>
-  (treemapOption(treemapData(rows), T, "USD", box).series as Record<string, unknown>[])[0];
+const series = (
+  rows: AllocationRow[],
+  box: { width: number; height: number },
+  groupBy: AllocationGroup = "security",
+) => (treemapOption(treemapData(rows, groupBy), T, "USD", box).series as Record<string, unknown>[])[0];
 
-const label = (rows: AllocationRow[], box: { width: number; height: number }) =>
-  series(rows, box).label as { color: string; formatter: (p: { name?: string }) => string };
+const label = (
+  rows: AllocationRow[],
+  box: { width: number; height: number },
+  groupBy: AllocationGroup = "security",
+) => series(rows, box, groupBy).label as { color: string; formatter: (p: { name?: string }) => string };
 
 /**
  * What ECharts actually drew, as SVG.
@@ -56,9 +79,13 @@ const label = (rows: AllocationRow[], box: { width: number; height: number }) =>
  * honour, and only the library can answer it — the same reason `donutChart.test`
  * renders the ring instead of trusting `label: {show: false}`.
  */
-const drawn = (rows: AllocationRow[], box: { width: number; height: number }) => {
+const drawn = (
+  rows: AllocationRow[],
+  box: { width: number; height: number },
+  groupBy: AllocationGroup = "security",
+) => {
   const chart = echarts.init(null as never, null, { renderer: "svg", ssr: true, ...box });
-  chart.setOption(treemapOption(treemapData(rows), T, "USD", box));
+  chart.setOption(treemapOption(treemapData(rows, groupBy), T, "USD", box));
   const svg = chart.renderToSVGString();
   chart.dispose();
   // One entry per drawn label, its lines in order. zrender draws each line of a
@@ -84,7 +111,7 @@ const drawn = (rows: AllocationRow[], box: { width: number; height: number }) =>
 
 describe("treemapData", () => {
   it("gives a tile to every row that has area to give, and keeps the rest", () => {
-    const data = treemapData(ROWS);
+    const data = treemapData(ROWS, "security");
     expect(data.tiles.map((r) => r.key)).toEqual(["cash", "sec-vti", "sec-bnd", "sec-aapl", "sec-dust"]);
     // Not dropped: a short position is a row the report keeps (ADR-0032), so it is
     // handed back for the sentence under the chart.
@@ -93,9 +120,68 @@ describe("treemapData", () => {
 
   it("treats a zero-valued row as having no area either", () => {
     const zero = [{ key: "z", label: "Zero", value_base: "0.0000", percent: "0", holdings: 1, sources: [] }];
-    const data = treemapData(zero as unknown as AllocationRow[]);
+    const data = treemapData(zero as unknown as AllocationRow[], "security");
     expect(data.tiles).toHaveLength(0);
     expect(data.skipped).toHaveLength(1);
+  });
+
+  it("names every row the way the list under the chart names it", () => {
+    // A `type` row arrives labelled with the wire token (`_add(h.security_type,
+    // h.security_type, …)` in `services/investments.py`) while the list and the
+    // detail sheet print it in words. One name per group per screen: the rows
+    // the treemap draws carry the same words, so a tile cannot read `mutual_fund`
+    // above a row reading "Mutual fund".
+    const TYPES = [
+      { key: "etf", label: "etf", value_base: "10000.00", percent: "81.0012", holdings: 2, sources: [] },
+      { key: "mutual_fund", label: "mutual_fund", value_base: "2345.67", percent: "18.9988", holdings: 1, sources: [] },
+      { key: "stock", label: "stock", value_base: "-1000.00", percent: "-8.1000", holdings: 1, sources: [] },
+    ] as unknown as AllocationRow[];
+    const data = treemapData(TYPES, "type");
+    expect(data.tiles.map((r) => r.label)).toEqual(["ETF", "Mutual fund"]);
+    // The row the picture cannot draw is named in words too — the sentence under
+    // it is prose, and `stock` is not a word.
+    expect(data.skipped.map((r) => r.label)).toEqual(["Stock"]);
+    // The other three groupings already carry the words a person uses, so a row
+    // is handed back untouched — the same object, not a copy with a new label.
+    const bySecurity = treemapData(TYPES, "security");
+    expect(bySecurity.tiles[0]).toBe(TYPES[0]);
+  });
+});
+
+describe("the treemap's words", () => {
+  /** One household's `type` rows, as the server sends them: tokens, not names. */
+  const TYPES = [
+    { key: "etf", label: "etf", value_base: "10000.00", percent: "81.0012", holdings: 2, sources: [] },
+    { key: "mutual_fund", label: "mutual_fund", value_base: "2345.67", percent: "18.9988", holdings: 1, sources: [] },
+  ] as unknown as AllocationRow[];
+
+  it("writes the tile's name and the tooltip's in the list's vocabulary", () => {
+    expect(label(TYPES, WIDE, "type").formatter({ name: "mutual_fund" })).toBe("Mutual fund\n19.0%");
+    expect(label(TYPES, PHONE, "type").formatter({ name: "etf" })).toBe("ETF");
+    const tooltip = treemapOption(treemapData(TYPES, "type"), T, "USD", WIDE).tooltip as {
+      formatter: (p: { name: string }) => string;
+    };
+    expect(tooltip.formatter({ name: "mutual_fund" })).toBe("Mutual fund: $2,345.67 (19.0%)");
+  });
+
+  it("names the largest group in the finding in the list's vocabulary", () => {
+    const finding = treemapFinding(
+      treemapData(TYPES, "type"),
+      "12345.67",
+      "type",
+      "Sep 20",
+      "USD",
+    );
+    expect(finding).toContain("ETF is the largest at $10,000.00 (81.0%)");
+    expect(finding).not.toContain("etf is the largest");
+  });
+
+  it("draws a type row's tile under the name the list prints", () => {
+    // The label rule is a claim about the drawn chart, so it is read off the SVG
+    // — the same reason `label.formatter` is not trusted for the share.
+    const { texts } = drawn(TYPES, WIDE, "type");
+    expect(texts).toContain("ETF");
+    expect(texts).not.toContain("etf");
   });
 });
 
@@ -160,41 +246,75 @@ describe("notDrawnSentence", () => {
   });
 
   it("names the rows it could not draw, with their figures", () => {
-    const sentence = notDrawnSentence(treemapData(ROWS).skipped, "USD")!;
+    const sentence = notDrawnSentence(treemapData(ROWS, "security").skipped, "USD")!;
     expect(sentence).toContain("this row is not drawn");
     expect(sentence).toContain("SHORT (−$1,000.00)");
     expect(sentence).toContain("in the list below");
   });
 
   it("says rows, plural, for more than one", () => {
-    const two = treemapData([
-      ...ROWS.slice(0, 1),
-      { key: "a", label: "Short A", value_base: "-5", percent: "0", holdings: 1, sources: [] },
-      { key: "b", label: "Short B", value_base: "-6", percent: "0", holdings: 1, sources: [] },
-    ] as unknown as AllocationRow[]).skipped;
+    const two = treemapData(
+      [
+        ...ROWS.slice(0, 1),
+        { key: "a", label: "Short A", value_base: "-5", percent: "0", holdings: 1, sources: [] },
+        { key: "b", label: "Short B", value_base: "-6", percent: "0", holdings: 1, sources: [] },
+      ] as unknown as AllocationRow[],
+      "security",
+    ).skipped;
     expect(notDrawnSentence(two, "USD")).toContain("these rows are not drawn");
   });
 });
 
 describe("treemapFinding", () => {
   it("states the total, the count, the largest by name, and what it left out", () => {
-    const finding = treemapFinding(treemapData(ROWS), "29290.0000", "security", "Sep 20", "USD");
+    const finding = treemapFinding(treemapData(ROWS, "security"), "29290.0000", "security", "Sep 20", "USD");
     expect(finding).toContain("Allocation by security, as of Sep 20");
-    // The figure is the allocation's own total, not a sum taken here.
-    expect(finding).toContain("$29,290.00 across 5 groups");
+    // The figure is the allocation's own total, not a sum taken here — and the
+    // count is the six rows that total is made of, of which five are drawn.
+    expect(finding).toContain("$29,290.00 across 6 groups, 5 of them drawn");
     expect(finding).toContain("Cash is the largest at $12,000.00 (40.0%)");
     expect(finding).toContain("SHORT (−$1,000.00)");
   });
 
+  it("counts the groups the total is made of, and says how many of them it drew", () => {
+    // Six rows and one total: five with area, and the short the picture cannot
+    // draw. A count of the tiles alone would be a sentence whose own figures do
+    // not add up to the total in front of them — the five tiles sum to $29,990
+    // while the allocation is $28,990 — so the count is the rows the total is
+    // made of, and the sentence says how much of that count is in the picture.
+    const finding = treemapFinding(treemapData(CONSISTENT, "security"), "28990.0000", "security", "Sep 20", "USD");
+    expect(finding).toContain("$28,990.00 across 6 groups, 5 of them drawn");
+    expect(finding).toContain("SHORT (−$1,000.00)");
+  });
+
+  it("says nothing about drawing when it drew every group it counted", () => {
+    const finding = treemapFinding(treemapData(ROWS.slice(0, 5), "security"), "29990.0000", "security", "Sep 20", "USD");
+    expect(finding).toContain("$29,990.00 across 5 groups.");
+    expect(finding).not.toContain("of them drawn");
+  });
+
+  it("prints each share against the allocation's total, not against the ink", () => {
+    // The tiles sum to $29,990.00, so Cash covers 40.0% of the drawn area and is
+    // 41.4% of the allocation. The printed share is the one a reader can check
+    // against the list under the chart, the detail sheet and the total beside
+    // them; the ink is a shape, and the row the picture cannot draw is named
+    // rather than folded into a denominator of its own.
+    expect(label(CONSISTENT, WIDE).formatter({ name: "cash" })).toBe("Cash\n41.4%");
+    const tooltip = treemapOption(treemapData(CONSISTENT, "security"), T, "USD", WIDE).tooltip as {
+      formatter: (p: { name: string }) => string;
+    };
+    expect(tooltip.formatter({ name: "cash" })).toBe("Cash: $12,000.00 (41.4%)");
+  });
+
   it("finds the largest rather than trusting the order it was handed", () => {
     const shuffled = [ROWS[2], ROWS[1], ROWS[0]] as unknown as AllocationRow[];
-    expect(treemapFinding(treemapData(shuffled), "27000", "security", "Sep 20", "USD")).toContain(
+    expect(treemapFinding(treemapData(shuffled, "security"), "27000", "security", "Sep 20", "USD")).toContain(
       "Cash is the largest",
     );
   });
 
   it("says so plainly when there is nothing to draw", () => {
-    expect(treemapFinding(treemapData([]), "0", "security", "Sep 20", "USD")).toBe(
+    expect(treemapFinding(treemapData([], "security"), "0", "security", "Sep 20", "USD")).toBe(
       "Allocation by security, as of Sep 20: nothing to draw.",
     );
   });
@@ -259,7 +379,7 @@ describe("treemapOption", () => {
   });
 
   it("prints money at full precision and the row's own share on the tooltip", () => {
-    const tooltip = treemapOption(treemapData(ROWS), T, "USD", WIDE).tooltip as {
+    const tooltip = treemapOption(treemapData(ROWS, "security"), T, "USD", WIDE).tooltip as {
       trigger: string;
       formatter: (p: { name: string }) => string;
     };

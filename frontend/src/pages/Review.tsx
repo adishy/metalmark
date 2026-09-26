@@ -61,7 +61,7 @@ import {
   useUpdateTransaction,
 } from "@/api/hooks";
 import type { Account, Category, Transaction } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoneySigned } from "@/lib/format";
 import { useIsDesktop } from "@/lib/media";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
@@ -599,8 +599,7 @@ function SwipeCard({
           Number(txn.amount) < 0 ? "text-fg" : "text-positive"
         }`}
       >
-        {Number(txn.amount) > 0 ? "+" : ""}
-        {formatMoney(txn.amount, txn.currency)}
+        {formatMoneySigned(txn.amount, txn.currency)}
       </p>
     </motion.div>
   );

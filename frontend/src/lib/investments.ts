@@ -7,7 +7,7 @@
 // the holdings list cannot phrase the same fact two ways.
 
 import { formatMoney } from "@/lib/format";
-import type { Money } from "@/api/types";
+import type { AllocationGroup, Money } from "@/api/types";
 
 // ---------------------------------------------------------------------------
 // Security types
@@ -36,6 +36,29 @@ const SECURITY_TYPE_LABELS: Record<string, string> = {
  */
 export function securityTypeLabel(type: string): string {
   return SECURITY_TYPE_LABELS[type] ?? type.replace(/_/g, " ");
+}
+
+/**
+ * How an allocation row reads. The server's `label` is right for three of the
+ * four groupings — a ticker, an account name, a currency code are already the
+ * words a person uses — but every `type` row labels itself with the wire token
+ * (`mutual_fund`), so those are named through the shared security-type
+ * vocabulary.
+ *
+ * "Every" has one exception, and it is the row that matters: the cash row
+ * ("Cash" or ADR-0021's narrower "Unaccounted cash") is the one `type` row the
+ * server names in prose (`services/investments.py`), and its comment says the
+ * name is the point — it must not read as an unnamed line. Renaming it on this
+ * side would also collide it with the real cash holdings it is not. So the rule
+ * is *rename a token, never rename a name*, which needs no list of exceptions.
+ *
+ * The allocation's list and its treemap both name their rows through this one
+ * function: a tile reading `mutual_fund` above a row reading "Mutual fund" is two
+ * names for one group on one screen.
+ */
+export function groupLabel(groupBy: AllocationGroup, key: string, label: string): string {
+  if (groupBy !== "type" || label !== key) return label;
+  return securityTypeLabel(key);
 }
 
 /**

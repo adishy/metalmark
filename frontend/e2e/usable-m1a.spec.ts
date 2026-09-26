@@ -63,10 +63,15 @@ test("edit a transaction and set an owner", async ({ page }) => {
   await expect(page.getByTestId("detail-owner")).toHaveValue(ownerName);
   await page.getByTestId("txn-detail-close").click();
 
-  await page.getByTestId("owner-filter").getByRole("button", { name: ownerName, exact: true }).click();
+  await page.getByTestId("filter-owner").click();
+  await page
+    .getByTestId("filter-owner-sheet")
+    .getByRole("option", { name: ownerName, exact: true })
+    .click();
   await expect(page.getByTestId("txn-list")).toContainText(edited);
-  await page.getByTestId("owner-filter-all").click();
-  await expect(page.getByTestId("owner-filter-all")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("filter-owner").click();
+  await page.getByTestId("filter-owner-option-all").click();
+  await expect(page.getByTestId("filter-owner")).toContainText("All owners");
 });
 
 test("split a transaction by amount", async ({ page }) => {

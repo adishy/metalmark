@@ -26,7 +26,7 @@ import { useAllocation } from "@/api/investments";
 import type { Allocation, AllocationGroup, AllocationRow } from "@/api/types";
 import { formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
-import { STALE_DAYS, excludedSentence, formatPercent, formatPrice, securityTypeLabel, trimDecimal } from "@/lib/investments";
+import { STALE_DAYS, excludedSentence, formatPercent, formatPrice, groupLabel, trimDecimal } from "@/lib/investments";
 import { notDrawnSentence, tileColour, treemapData, treemapFinding, treemapOption } from "@/lib/treemapChart";
 import AccountMark from "@/components/AccountMark";
 import Chart from "@/components/Chart";
@@ -113,23 +113,11 @@ function writeCashPref(value: boolean): void {
 }
 
 /**
- * How a group reads. The server's `label` is right for three of the four groups
- * — a ticker, an account name, a currency code are already the words a person
- * uses — but every `type` row labels itself with the wire token (`mutual_fund`),
- * so those are named through the shared security-type vocabulary.
- *
- * "Every" has one exception, and it is the row that matters: the cash row
- * ("Cash" or ADR-0021's narrower "Unaccounted cash") is the one `type` row the
- * server names in prose (`services/investments.py`), and its comment says the
- * name is the point — it must not read as an unnamed line. Renaming it on this
- * side would also collide it with the real cash holdings it is not. So the rule
- * is *rename a token, never rename a name*, which needs no list of exceptions.
+ * How a group reads — `mutual_fund` → "Mutual fund", a name left alone — lives
+ * in `lib/investments.ts` beside `securityTypeLabel`, because the treemap above
+ * this list names the same rows: `treemapData` calls the same function, so the
+ * tiles and the rows cannot drift into two vocabularies for one group.
  */
-function groupLabel(groupBy: AllocationGroup, key: string, label: string): string {
-  if (groupBy !== "type" || label !== key) return label;
-  return securityTypeLabel(key);
-}
-
 export default function Allocations() {
   const [groupBy, setGroupBy] = useState<AllocationGroup>("security");
   const [view, setView] = useState<AllocationView>("treemap");
@@ -163,15 +151,25 @@ export default function Allocations() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         {/* Phone: a pill that opens a sheet — four segments is exactly the case
             §5 calls out (a row of choices that would not comfortably fit at
             360px becomes a picker, not a scrolling strip). Desktop keeps the
             segmented control, unchanged from the card this replaced. The view
             switch follows it: the same two shapes, one row down on a phone,
             because AGENTS.md's rule is about the *control* ("view switches on a
-            phone are SheetSelect"), not about which switch it is. */}
-        <div className="flex flex-wrap items-center gap-2">
+            phone are SheetSelect"), not about which switch it is.
+
+            At `sm:` and up each control carries the name it is chosen by, in the
+            same small muted line `RangeControl` puts over its two groups and
+            with the same 8 `gap-x` between them: two tab strips whose
+            underlines run into each other were read as one control with seven
+            segments, four of which changed the *other* thing. The words are the
+            ones the phone's pills already print ("Group by", "View"), so both
+            widths call the control the same thing — and the tablist's own name
+            is one of them, so what a reader sees is what a screen reader
+            announces (§4.3/§4.4). */}
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
           <div className="sm:hidden">
             <SheetSelect
               label="Group by"
@@ -182,8 +180,9 @@ export default function Allocations() {
             />
           </div>
           <div className="hidden sm:block">
+            <p className="mb-2 text-xs font-medium text-fg-muted">Group by</p>
             <SegmentedControl
-              label="Group allocation by"
+              label="Group by"
               segments={GROUPS}
               value={groupBy}
               onChange={setGroupBy}
@@ -200,8 +199,9 @@ export default function Allocations() {
             />
           </div>
           <div className="hidden sm:block">
+            <p className="mb-2 text-xs font-medium text-fg-muted">View</p>
             <SegmentedControl
-              label="Show the allocation as"
+              label="View"
               segments={VIEWS}
               value={view}
               onChange={setView}
@@ -262,7 +262,7 @@ function AllocationBody({
   // Split once, at the top: the tiles, the rows that cannot be one, and the
   // swatch each tile is drawn in. The chart and the list are two renderings of
   // this one array, which is what keeps a row's colour and its figure agreeing.
-  const tiles = useMemo(() => treemapData(data.rows), [data.rows]);
+  const tiles = useMemo(() => treemapData(data.rows, groupBy), [data.rows, groupBy]);
   const swatch = useMemo(
     () => new Map(tiles.tiles.map((r, i) => [r.key, tileColour(t, i)])),
     [tiles, t],

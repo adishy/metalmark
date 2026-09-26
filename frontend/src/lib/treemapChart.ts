@@ -12,6 +12,18 @@
 //   in the list — which states its figure — and it is named in words under the
 //   chart (`notDrawnSentence`), because a row missing from a picture that claims
 //   to be the allocation must not go unmentioned.
+// * **One total, and it is the allocation's.** Every figure a reader sees — the
+//   sentence's total, the count beside it, the shares on the tiles, in the
+//   tooltip and in the sentence — describes the allocation's own `total_base`,
+//   the number the list's `Total` row prints and the one the server's `percent`
+//   is a share of (so the shares sum to 100 over every row, short included). The
+//   one thing that cannot include a short is the *area*: the tiles are laid out
+//   by value, so the ink spans the rows with area and a short is a share of a
+//   total larger than the ink. A treemap cannot both draw area as value and
+//   divide the canvas by a total it does not draw, so the picture says which of
+//   the groups it counted it drew (`treemapFinding`) and the row it could not is
+//   named underneath. What it must never do is print one total and measure
+//   against another.
 // * **A tile names itself only if the tile can hold the name.** ECharts truncates
 //   a treemap label to its own tile (`lineOverflow: "truncate"`, set in
 //   `TreemapView`), so an over-long label does not collide with its neighbour —
@@ -24,9 +36,9 @@
 //   colour-alone) is the same hue by construction, and a row that grows past its
 //   neighbour keeps the hue it had.
 import type { EChartsOption } from "echarts";
-import type { AllocationRow, Money } from "@/api/types";
+import type { AllocationGroup, AllocationRow, Money } from "@/api/types";
 import { formatMoney } from "@/lib/format";
-import { formatPercent } from "@/lib/investments";
+import { formatPercent, groupLabel } from "@/lib/investments";
 import {
   chartTooltip,
   emphasisTreemap,
@@ -42,10 +54,24 @@ export interface TreemapData {
   skipped: AllocationRow[];
 }
 
-export function treemapData(rows: AllocationRow[]): TreemapData {
+/**
+ * The split, with every row named the way the list under the chart names it.
+ *
+ * This is the one place the rows are rewritten, and it is not cosmetic: a tile
+ * draws its row's `label`, and for a `type` row that is the wire token — so the
+ * picture would say `mutual_fund` and `etf` over a list saying "Mutual fund" and
+ * "ETF", two names for one group on one screen, with the swatch colours joining
+ * them. `groupLabel` (the same function the list and the detail sheet use)
+ * renames a token and never a name, so the cash row keeps the server's prose.
+ */
+export function treemapData(rows: AllocationRow[], groupBy: AllocationGroup): TreemapData {
   const tiles: AllocationRow[] = [];
   const skipped: AllocationRow[] = [];
-  for (const row of rows) (Number(row.value_base) > 0 ? tiles : skipped).push(row);
+  for (const row of rows) {
+    const label = groupLabel(groupBy, row.key, row.label);
+    const named = label === row.label ? row : { ...row, label };
+    (Number(row.value_base) > 0 ? tiles : skipped).push(named);
+  }
   return { tiles, skipped };
 }
 
@@ -142,10 +168,12 @@ export function treemapOption(
   ccy: string,
   box: ChartBox,
 ): EChartsOption {
-  // Layout, not money: the shares below decide how much room a tile has, and no
-  // figure a reader sees is computed from them — the tooltip and the labels
-  // print the row's own `value_base` and `percent`.
-  const total = data.tiles.reduce((sum, r) => sum + Number(r.value_base), 0);
+  // Layout, not money — and deliberately the *drawn* total: the share below is
+  // how much of the canvas the tile covers, which is the room its label has, and
+  // a short is not part of the canvas. Nothing a reader sees is computed from it;
+  // the tooltip, the labels and the sentence all print the row's own
+  // `value_base` and `percent`, which are shares of the allocation's total.
+  const drawnTotal = data.tiles.reduce((sum, r) => sum + Number(r.value_base), 0);
   const wide = !phoneCanvas(box);
   const rowOf = (key: unknown) => data.tiles.find((r) => r.key === key);
   // One decision per tile, taken together with the box it is drawn on and read
@@ -158,7 +186,7 @@ export function treemapOption(
   const labels = new Map(
     data.tiles.map((r) => [
       r.key,
-      tileText(box, total === 0 ? 0 : Number(r.value_base) / total, r.label, formatPercent(r.percent), wide),
+      tileText(box, drawnTotal === 0 ? 0 : Number(r.value_base) / drawnTotal, r.label, formatPercent(r.percent), wide),
     ]),
   );
 
@@ -168,6 +196,9 @@ export function treemapOption(
       formatter: (p: TooltipPoint) => {
         const row = rowOf(p.name);
         if (!row) return "";
+        // Both figures are the row's own: `percent` is the server's share of the
+        // allocation's total — the same number the list under the chart prints
+        // for this row, and the same denominator as the sentence's total.
         return `${row.label}: ${formatMoney(row.value_base, ccy)} (${formatPercent(row.percent)})`;
       },
     }),
@@ -227,6 +258,16 @@ export function treemapOption(
  * biggest" is the one thing a treemap is asked. The rows the picture could not
  * draw are named at the end rather than left to the visual.
  *
+ * **The count counts the groups the total is made of** — every row, drawn or
+ * not — because that is what the total *is*: `total_base` is the sum of all of
+ * them, and the shares in the sentence and in the list are shares of it. The
+ * drawn tiles are fewer than that whenever a row has no area, so the sentence
+ * says how many of the groups it counted are drawn, and `notDrawnSentence`
+ * names the exception. Counting only the tiles instead would make "$29,290.00
+ * across 5 groups" a sentence whose own figures did not add up to it: the five
+ * tiles sum to more than the total, because the short they leave out is
+ * negative.
+ *
  * The total is passed in rather than summed here: it is the allocation's own
  * `total_base`, so the figure beside the chart and the figure in this sentence
  * are one number from one place, and no money is added up in the client.
@@ -246,10 +287,11 @@ export function treemapFinding(
   const top = data.tiles.reduce((a, b) =>
     Number(b.value_base) > Number(a.value_base) ? b : a,
   );
-  const n = data.tiles.length;
+  const n = data.tiles.length + data.skipped.length;
   const skipped = notDrawnSentence(data.skipped, ccy);
   return (
-    `${head}: ${formatMoney(total, ccy)} across ${n} ${n === 1 ? "group" : "groups"}. ` +
+    `${head}: ${formatMoney(total, ccy)} across ${n} ${n === 1 ? "group" : "groups"}` +
+    `${skipped ? `, ${data.tiles.length} of them drawn` : ""}. ` +
     `${top.label} is the largest at ${formatMoney(top.value_base, ccy)} ` +
     `(${formatPercent(top.percent)}).` +
     (skipped ? ` ${skipped}` : "")

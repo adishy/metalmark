@@ -6,21 +6,25 @@
 // can use, the way the mainstream apps do:
 //
 //   [🛒]  Merchant                        −$54.20
-//         Groceries · Everyday Checking        •
+//         Groceries · Everyday Checking   [Needs review]
 //
 // * The date moves out of the row into a **day header**, with the day's net, so
 //   it is said once per day instead of once per row.
 // * The **category** leads as its emoji in a disc, and is named again under the
 //   merchant with the account, so both stay readable without the columns.
-// * **Needs review** is a dot beside the amount, spelled out for a screen
-//   reader. The owner and tags are in the detail sheet, one tap away.
+// * **Needs review** is a badge in the meta line, next to the amount it is about
+//   — a word, tinted, with its own `aria-label` (§5). It was an 8 px amber dot
+//   beside the amount until §7.8 caught it: a status is a word, and a dot is
+//   neither a word nor an icon, and disappears entirely in greyscale or for a
+//   reader who cannot see amber. The owner and tags are in the detail sheet, one
+//   tap away.
 //
 // Income is green and signed "+"; spending is plain — an expense is a normal
 // event, not an alarm (DESIGN §6.2).
 import type { Account, Category, Transaction } from "@/api/types";
 import { UNCATEGORIZED_ICON } from "@/components/CategoryPicker";
 import { calendarDay, formatDay } from "@/lib/dates";
-import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
+import { formatMoneySigned, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 
 interface Day {
   day: string;
@@ -59,11 +63,6 @@ function dayLabel(day: string): string {
   return compact !== medium ? `${compact}, ${medium}` : `${formatDay(day, "weekday")}, ${medium}`;
 }
 
-function signed(amount: string, currency: string): string {
-  const n = Number(amount);
-  return n > 0 ? `+${formatMoney(amount, currency)}` : formatMoney(amount, currency);
-}
-
 export default function TxnPhoneList({
   items,
   categories,
@@ -83,7 +82,7 @@ export default function TxnPhoneList({
             <h2 className="text-sm font-semibold text-fg">{dayLabel(day)}</h2>
             {net !== null && (
               <span className={`text-sm tabular-nums ${net > 0 ? "text-positive" : "text-fg-muted"}`}>
-                {signed(fromMinorUnits(net, currency), currency)}
+                {formatMoneySigned(fromMinorUnits(net, currency), currency)}
               </span>
             )}
           </div>
@@ -111,30 +110,46 @@ export default function TxnPhoneList({
                       <span className="block truncate text-base font-medium text-fg">
                         {t.merchant || t.description || "(no description)"}
                       </span>
-                      <span className="block truncate text-sm text-fg-muted">
-                        {categoryText}
-                        {account && <span aria-hidden="true"> · </span>}
-                        {account && <span className="sr-only">, from </span>}
-                        {account?.name}
-                        {t.is_pending && " · Pending"}
+                      {/* The meta line, and the needs-review marker is *in* it: §5
+                          puts a row's markers here, as a text or icon badge with
+                          an `aria-label`, and the amber dot this replaces was
+                          neither — 8 px of colour beside the amount, which §7.8
+                          rules out outright ("needs review" is a word, not a dot)
+                          and which a greyscale screen or a reader who cannot see
+                          amber did not get at all.
+
+                          The badge is a sibling of the truncating text and never
+                          truncates itself: the account name gives way first, the
+                          same way the merchant gives way to the amount (§6.5). */}
+                      <span className="flex min-w-0 items-center gap-2 text-sm text-fg-muted">
+                        <span className="min-w-0 truncate">
+                          {categoryText}
+                          {account && <span aria-hidden="true"> · </span>}
+                          {account && <span className="sr-only">, from </span>}
+                          {account?.name}
+                          {t.is_pending && " · Pending"}
+                        </span>
+                        {t.review_status === "needs_review" && (
+                          // The same badge the row wears at `sm:` and up, and the
+                          // same one the account card wears for a stale balance:
+                          // the warning tint, the `-ink` token that is legible on
+                          // it (§2.1), and the words.
+                          <span
+                            className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning-ink"
+                            aria-label="Needs review"
+                            data-testid={`txn-card-review-${t.id}`}
+                          >
+                            Needs review
+                          </span>
+                        )}
                       </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      {t.review_status === "needs_review" && (
-                        <>
-                          <svg viewBox="0 0 8 8" aria-hidden="true" className="size-2 text-warning">
-                            <circle cx="4" cy="4" r="4" fill="currentColor" />
-                          </svg>
-                          <span className="sr-only">Needs review.</span>
-                        </>
-                      )}
-                      <span
-                        className={`text-base font-semibold tabular-nums ${
-                          income ? "text-positive" : "text-fg"
-                        }`}
-                      >
-                        {signed(t.amount, t.currency)}
-                      </span>
+                    <span
+                      className={`shrink-0 text-base font-semibold tabular-nums ${
+                        income ? "text-positive" : "text-fg"
+                      }`}
+                    >
+                      {formatMoneySigned(t.amount, t.currency)}
                     </span>
                   </button>
                 </li>

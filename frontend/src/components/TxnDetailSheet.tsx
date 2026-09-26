@@ -14,7 +14,7 @@ import {
 } from "@/api/hooks";
 import { useLinkTransfer, useTransfer, useTransferCandidates, useUnlinkTransfer } from "@/api/transfers";
 import type { Account, Category, Money, SplitIn, Tag, Transaction } from "@/api/types";
-import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
+import { formatMoney, formatMoneySigned, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
@@ -414,7 +414,7 @@ function TransferSection({
               {` · ${accountName(counterpart.account_id)}`}
             </p>
             <p className="mt-1 text-sm text-fg">
-              {formatMoney(counterpart.amount, counterpart.currency)}
+              {formatMoneySigned(counterpart.amount, counterpart.currency)}
             </p>
           </button>
         )}
@@ -489,7 +489,7 @@ function TransferSection({
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="min-w-0 truncate text-sm text-fg">{label(other)}</p>
                   <p className="shrink-0 text-sm text-fg">
-                    {formatMoney(other.amount, other.currency)}
+                    {formatMoneySigned(other.amount, other.currency)}
                   </p>
                 </div>
                 <p className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">

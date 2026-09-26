@@ -243,6 +243,69 @@ test("cash flow: the legend spotlights a series without erasing the rest", async
 });
 
 /**
+ * A net-worth series for the two tests below, covering the window they ask for.
+ *
+ * Both tests are about the *window* — the default fortnight, the brush, the
+ * remembered choice — and the demo household cannot be the fixture for that. A
+ * spec earlier in the same run leaves an account behind whose first balance is
+ * the day it was created (`desktop.spec.ts`, `insights.spec.ts`), so the last
+ * intervals of every window are ones the chart cannot draw: a change is only a
+ * change where both ends count the same accounts (ADR-0045), and the headline
+ * then names the span it drew — "from Sep 12 to Sep 24" — instead of the window
+ * it was asked for. That is the card behaving correctly and the test being about
+ * the wrong thing; the run order decides whether it is red, which makes it a
+ * test that reports the data it was handed. Pinning the series makes it about
+ * the window on every stack, in every order.
+ *
+ * One point a day, every point counting every account, ending where the request
+ * ends: the shape a fresh household has and the one the card was designed for.
+ * Values are decimal *strings*, as the API sends money (ADR-0005), and every one
+ * of them is a whole dollar so the fixture's own arithmetic is exact.
+ */
+function mockNetWorthSeries(url: string) {
+  const q = new URL(url).searchParams;
+  const end = q.get("end") ?? "";
+  const day = new Date(`${q.get("start") ?? end}T00:00:00Z`);
+  const last = new Date(`${end}T00:00:00Z`);
+  const dates: string[] = [];
+  for (; day <= last; day.setUTCDate(day.getUTCDate() + 1)) {
+    dates.push(day.toISOString().slice(0, 10));
+  }
+
+  // A steady climb, so there is a slope to hover and a figure for the headline.
+  const change = `${(dates.length - 1) * 10}.0000`;
+  return {
+    start: dates[0] ?? end,
+    end,
+    base_currency: "USD",
+    granularity: "day",
+    points: dates.map((date, i) => ({ date, net_worth: `${10_000 + i * 10}.0000`, missing: [] })),
+    delta_net_worth: change,
+    net_cash_flow: change,
+    currency_revaluation: "0.0000",
+    market_appreciation: "0.0000",
+    unexplained: "0.0000",
+    unexplained_by_account: [],
+    warnings: [],
+    attribution: "account",
+  };
+}
+
+/**
+ * Pin the card's series for the rest of the test.
+ *
+ * Registered before the first `/accounts` navigation, and it stays for later
+ * ones — a route applies to the page, so the reload in the second test gets the
+ * same series, which is what makes a remembered window read back over the same
+ * ground it was chosen on.
+ */
+async function pinNetWorth(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/reports/net-worth*", (route) =>
+    route.fulfill({ json: mockNetWorthSeries(route.request().url()) }),
+  );
+}
+
+/**
  * The range brush has to re-scope the whole card, not just the picture.
  *
  * The window lives inside the ECharts instance (a drag is the library's state,
@@ -256,6 +319,7 @@ test("cash flow: the legend spotlights a series without erasing the rest", async
 test("net worth: the range brush re-scopes the headline, and the range gives it back", async ({
   page,
 }) => {
+  await pinNetWorth(page);
   await page.goto("/accounts");
   const chart = page.getByTestId("accounts-net-worth-chart");
   await chart.scrollIntoViewIfNeeded();
@@ -345,6 +409,10 @@ test("net worth: the window is what the reader chose, and it is remembered", asy
     return (await tooltip.innerText()).split("\n")[0]!.trim();
   };
 
+  // The window is read off a series that starts where the window does, so the
+  // two assertions below are about which *request* the reader's choice makes and
+  // not about which accounts the household happens to hold.
+  await pinNetWorth(page);
   await page.goto("/accounts");
   await expect(chart).toBeVisible();
   await page.waitForTimeout(1600);

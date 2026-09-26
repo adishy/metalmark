@@ -142,6 +142,26 @@ describe("<Allocations />", () => {
     expect(screen.getByTestId("allocation-groupby-type")).toHaveAttribute("aria-selected", "true");
   });
 
+  it("names the treemap's groups in the words the list under it uses", async () => {
+    const user = userEvent.setup();
+    renderAllocations();
+
+    await user.click(screen.getByTestId("allocation-groupby-type"));
+
+    // The `type` rows arrive as wire tokens, and the list renames them. So does
+    // the picture: the chart's own name, the tile drawn over each row and the
+    // tooltip all say "Mutual fund" and "ETF", because a tile reading
+    // `mutual_fund` above a row reading "Mutual fund" is two names for one group.
+    const name = screen.getByTestId("allocation-treemap").getAttribute("aria-label") ?? "";
+    expect(name).toContain("ETF is the largest");
+    expect(name).not.toContain("etf is the largest");
+    // Found rather than trusted from the fixture, so the assertion above is
+    // "the picture says what the list says" and not "the picture says a string
+    // this test also wrote down".
+    expect(screen.getByTestId("allocation-row-etf")).toHaveTextContent("ETF");
+    expect(screen.getByTestId("allocation-row-mutual_fund")).toHaveTextContent("Mutual fund");
+  });
+
   it("says a total is short rather than saying there is nothing, when nothing could be valued", () => {
     h.allocation.mockImplementation(() =>
       query({
@@ -406,6 +426,44 @@ describe("<Allocations />", () => {
     // The row is still reported, and has no tile colour to be keyed to.
     expect(screen.getByTestId("allocation-row-sec-short")).toHaveTextContent("SHORT");
     expect(screen.queryByTestId("allocation-swatch-sec-short")).not.toBeInTheDocument();
+  });
+
+  it("measures its sentence against the total the list prints, tiles or no tiles", () => {
+    // A household with a short: three groups and, once the short's $1,000 is out
+    // of the total, $11,345.67. The tiles sum to $12,345.67 — a short has no
+    // area — so "the tiles' share" and "the allocation's share" are different
+    // numbers, and the sentence has to be built out of the one the list uses:
+    // the same total the `Total` row prints, and the same shares the rows print.
+    h.allocation.mockImplementation(() =>
+      query({
+        ...BY_SECURITY,
+        total_base: "11345.67",
+        rows: [
+          { key: "sec-vti", label: "VTI", value_base: "10000.00", percent: "88.1398", holdings: 2, sources: [] },
+          { key: "sec-bnd", label: "BND", value_base: "2345.67", percent: "20.6769", holdings: 1, sources: [] },
+          {
+            key: "sec-short", label: "SHORT", value_base: "-1000.00", percent: "-8.8167",
+            holdings: 1, sources: [],
+          },
+        ],
+      }),
+    );
+    renderAllocations();
+
+    const total = screen.getByTestId("allocation-total").textContent ?? "";
+    const vtiShare = screen.getByTestId("allocation-percent-sec-vti").textContent ?? "";
+    const name = screen.getByTestId("allocation-treemap").getAttribute("aria-label") ?? "";
+    // The finding's total is the list's total, character for character — one
+    // number from one place, so the two can never drift apart.
+    expect(total).toBe(formatMoney("11345.67", "USD"));
+    expect(name).toContain(total);
+    // Three groups in the allocation, two of them in the picture: the count is
+    // the rows the printed total is made of, and it says how many are drawn.
+    expect(name).toContain("across 3 groups, 2 of them drawn");
+    // The largest group's share is the share that group's row prints — 88.1% of
+    // the allocation, which is not the 81.0% of the tiles' area it covers.
+    expect(vtiShare).toBe("88.1%");
+    expect(name).toContain(`${formatMoney("10000.00", "USD")} (${vtiShare})`);
   });
 
   it("explains a treemap with nothing to draw, rather than leaving the view blank", () => {
