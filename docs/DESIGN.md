@@ -1623,11 +1623,14 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 #    correct code in the form `tooltip: chartTooltip(t)`. The script keys on the
 #    key *not* being followed by the matching builder, which needs a lookahead
 #    (`grep -P`, so not portable to the BSD grep this list is otherwise written
-#    for). The shell form is therefore the intent, and the script is the check:
+#    for). The shell form is therefore the intent, and the script is the check —
+#    the `emphasis` list below is the script's own alternation, so a new emphasis
+#    helper is added in both places, or the rule fires on the file that wrote it:
 #
 #      tooltip:      NOT followed by chartTooltip(
 #      axisPointer:  anywhere outside the module
 #      emphasis:     NOT followed by emphasisLine( | emphasisBar( | emphasisPie(
+#                    | emphasisSankey( | emphasisStrip( | emphasisTreemap(
 
 # 9. An ISO date as visible text. `2026-01-01` is a wire format, and the date
 #    vocabulary in lib/dates.ts is what a person reads; the ISO form belongs in
