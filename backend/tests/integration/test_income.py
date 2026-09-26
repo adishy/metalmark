@@ -5,7 +5,7 @@ the derived summary, RLS isolation, and cascade on owner delete.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -20,7 +20,7 @@ from app.schemas.income import (
     PaystubLineIn,
     PaystubPatch,
 )
-from app.services import income, owners
+from app.services import income, ledger, owners
 from app.services.errors import LedgerError
 
 pytestmark = pytest.mark.integration
@@ -244,6 +244,71 @@ async def test_summary_ytd_and_effective_tax_rate(household_factory):
         assert ytd["tax"] == D("400.00")
         # 400 tax / 2000 gross
         assert summary.effective_tax_rate == D("0.2000")
+
+
+class _LedgerClock(datetime):
+    """The ledger's clock, pinned to 00:30 UTC on New Year's Day."""
+
+    @classmethod
+    def now(cls, tz=None):
+        pinned = datetime(2026, 1, 1, 0, 30, tzinfo=UTC)
+        return pinned if tz is None else pinned.astimezone(tz)
+
+
+class _ServerLocalDay(date):
+    """The server's own calendar date at that same instant — still last year.
+
+    West of UTC, 00:30 on Jan 1 is 19:30 on Dec 31 by the server's clock, which is
+    what a local ``date.today()`` in ``income`` would read. Pinned rather than
+    derived from the host's zone, because CI runs UTC — where the two calendars
+    agree and the test could not fail — and this test exists to make them disagree.
+    """
+
+    @classmethod
+    def today(cls):
+        return date(2025, 12, 31)
+
+
+async def test_the_summary_year_is_the_ledgers_today_not_the_servers_local_one(
+    household_factory, monkeypatch
+):
+    """``compute_summary``'s default year comes from ``ledger.today()`` (UTC).
+
+    The instant pinned is the few hours every New Year's Eve when the two clocks a
+    careless implementation might read disagree: the ledger's UTC date has turned
+    the year over and the server's local date has not. Reading the local one costs
+    a household west of UTC a whole year of tax figures, once a year, only at the
+    boundary — the class of bug a test has to put the boundary in front of.
+    """
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        alex = await _owner(s, hh)
+        # One paystub each side of midnight UTC, with amounts that say which year
+        # the totals came from.
+        for pay_date, amount in (("2025-12-31", "111.00"), ("2026-01-02", "222.00")):
+            await income.create_paystub(
+                s, hh, alex.id,
+                PaystubCreate(
+                    pay_date=pay_date, gross=D(amount), net=D(amount),
+                    lines=[_line("earning", "Salary", amount)],
+                ),
+            )
+
+        monkeypatch.setattr(ledger, "datetime", _LedgerClock)
+        monkeypatch.setattr(income, "date", _ServerLocalDay)
+
+        # The clocks really do disagree: the ledger's today is in the new year, and
+        # the local date `income` would read if it made its own is in the old one.
+        assert ledger.today() == date(2026, 1, 1)
+        assert _ServerLocalDay.today() == date(2025, 12, 31)
+
+        # No `today` argument: this is the default under test.
+        summary = await income.compute_summary(s, alex.id, None)
+
+        # The new year's paystub, and only it — 333.00 would be both years' worth,
+        # 111.00 the wrong year's.
+        ytd = {row.kind: row.amount for row in summary.ytd}
+        assert ytd["earning"] == D("222.00")
 
 
 # ---- RLS and cascade --------------------------------------------------------

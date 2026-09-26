@@ -46,6 +46,7 @@ from app.schemas.agent import (
 )
 from app.schemas.rules import RuleActions, RuleConditions
 from app.services import rules as rules_service
+from app.services.ledger import today as ledger_today
 from app.services.rules import USER
 from app.settings import get_settings
 
@@ -486,7 +487,9 @@ PAGES: dict[str, tuple[str, list[tuple[str, object]]]] = {
 
 
 def page_window(start: date | None, end: date | None, owner_id: uuid.UUID | None) -> PageWindow:
-    end = end or date.today()
+    # A window with no end is "up to now", and now is the ledger's today: a debug
+    # view of a page should cover the same day the page itself would.
+    end = end or ledger_today()
     start = start or (end - timedelta(days=365))
     return PageWindow(start=start, end=end, owner_id=owner_id)
 

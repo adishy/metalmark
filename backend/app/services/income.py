@@ -27,6 +27,7 @@ from app.schemas.income import (
 from app.schemas.patch import is_set
 from app.services.errors import LedgerError
 from app.services.ledger import base_currency
+from app.services.ledger import today as ledger_today
 from app.services.ownership import require_owners
 
 #: Annual-equivalent multiplier per pay frequency — a monthly-equivalent
@@ -142,8 +143,13 @@ async def compute_summary(
 ) -> IncomeSummaryOut:
     """Annualized gross, this year's totals by line kind, and the effective
     tax rate — all derived at read time from the profile and the owner's
-    paystubs (ADR-0052 / ADR-0035's "read once" discipline)."""
-    year = (today or date.today()).year
+    paystubs (ADR-0052 / ADR-0035's "read once" discipline).
+
+    ``today`` is the caller's to supply (and the tests') — but its default is the
+    *ledger's* today, so "this year" here and the day a balance snapshot lands on
+    cannot be two different days.
+    """
+    year = (today or ledger_today()).year
     rows = (
         await session.execute(
             select(PaystubLine.kind, PaystubLine.amount, Paystub.gross)
