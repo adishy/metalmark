@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login } from "./helpers";
+import { addAccount, addTransaction, login, readRemaining } from "./helpers";
 
 // DESIGN.md §9.7's two viewports, and the §9.3 arrangements that exist only at
 // `lg:`.
@@ -596,3 +596,279 @@ test.describe("a long allocation scrolls inside its card, not down the page (#31
       .toBeGreaterThan(0);
   });
 });
+
+// ADR-0057. `/review` is §9's one recorded exception to "a page must not have two
+// JSX trees branching on viewport", and the price of an exception is the half of
+// the page nobody measures: `review.spec.ts` is pinned below `lg:` and covers the
+// deck, and this is the table. Both trees, both specs — the exception is only
+// affordable because of it.
+//
+// The queue is seeded here rather than assumed: the demo household has nothing
+// pending. It goes in through the ledger — one account, one uncategorized
+// transaction, the same route `review.spec.ts` seeds by — because the review
+// queue is not a fixture that can be posted directly.
+//
+// Every test below files the rows it made, through the page, so a run leaves the
+// queue as it found it: this spec runs before `review.spec.ts`, whose
+// `reviewTarget` drains a backlog to reach its own card, and an accumulating
+// queue would be this file's fault.
+
+/** Seed `merchants` as uncategorized transactions and land on `/review`. */
+async function seedReviewQueue(page: Page, merchants: string[]): Promise<void> {
+  const run = Date.now();
+  const accountName = `Table Acct ${run}`;
+  await login(page);
+  await addAccount(page, { name: accountName, balance: "100", currency: "USD" });
+  await page.getByTestId("nav-transactions").click();
+  for (const merchant of merchants) {
+    await addTransaction(page, { accountName, amount: "-7.77", merchant });
+  }
+  await page.getByTestId("nav-review").click();
+  await expect(page.getByTestId("review-rows")).toBeVisible();
+}
+
+/** The row showing `merchant`. Found by text, never by position: the queue is
+ *  shared and ordered, so a row another spec left pending can sit ahead of it. */
+function reviewRow(page: Page, merchant: string) {
+  return page
+    .getByTestId("review-rows")
+    .locator("li[data-row]")
+    .filter({ hasText: merchant })
+    .first();
+}
+
+/** Every row's id, in the order they are shown. */
+async function rowIds(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll("[data-testid=review-rows] li[data-row]")].map(
+      (r) => (r as HTMLElement).dataset.row ?? "",
+    ),
+  );
+}
+
+test.describe("the review queue at lg: is a triage table (ADR-0057)", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("a row is §9.4's row, under a real header, and the deck is not on the page", async ({
+    page,
+  }) => {
+    test.slow();
+
+    const merchant = `Table Row ${Date.now()}`;
+    await seedReviewQueue(page, [merchant]);
+    const row = reviewRow(page, merchant);
+    await expect(row).toBeVisible();
+
+    const geo = await page.evaluate(() => {
+      const rows = document.querySelector("[data-testid=review-rows]") as HTMLElement;
+      const r = rows.querySelector("li[data-row]") as HTMLElement;
+      const header = rows.firstElementChild as HTMLElement;
+      // The row's four value cells live in a `display: contents` wrapper, so the
+      // DOM's child count is smaller than the grid's item count. This reads the
+      // grid's items: a child that is `contents` contributes its own children.
+      const cells = (el: HTMLElement) =>
+        [...el.children].flatMap((c) =>
+          getComputedStyle(c).display === "contents" ? [...c.children] : [c],
+        ) as HTMLElement[];
+      const cell = (sel: string) => r.querySelector(sel) as HTMLElement;
+      const controls = [
+        '[data-testid^="review-open-"]',
+        '[data-testid^="review-category-"]',
+        '[data-testid^="review-ignore-"]',
+        '[data-testid^="review-approve-"]',
+      ].map((sel) => {
+        const box = cell(sel).getBoundingClientRect();
+        return { w: Math.round(box.width), h: Math.round(box.height) };
+      });
+      const money = cells(r).map((c) => getComputedStyle(c).textAlign);
+      const decide = getComputedStyle(r.lastElementChild as HTMLElement).justifyContent;
+      return {
+        deck: document.querySelectorAll("[data-testid=review-deck]").length,
+        cards: document.querySelectorAll("[data-testid=swipe-card]").length,
+        headerHidden: header.getAttribute("aria-hidden"),
+        headerText: header.textContent ?? "",
+        headerLefts: cells(header).map((c) => Math.round(c.getBoundingClientRect().left)),
+        rowLefts: cells(r).map((c) => Math.round(c.getBoundingClientRect().left)),
+        rowTemplate: getComputedStyle(r).gridTemplateColumns,
+        display: getComputedStyle(r).display,
+        minHeight: getComputedStyle(r).minHeight,
+        height: Math.round(r.getBoundingClientRect().height),
+        tabStops: rows.querySelectorAll('[tabindex="0"]').length,
+        controls,
+        money,
+        decide,
+        overflow:
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+
+    // One instrument at a time: at 1280 the deck is not mounted, so its window
+    // keydown is not either — it stands down structurally rather than by a guard.
+    expect(geo.deck, "the deck is still rendered at lg:").toBe(0);
+    expect(geo.cards, "a swipe card is still rendered at lg:").toBe(0);
+
+    // §9.4: "A real header row appears above the list, naming the columns." The
+    // sighted reader gets the names; `aria-hidden`, because a screen reader would
+    // otherwise hear them before every row's own values.
+    for (const name of ["Merchant", "Date", "Category", "Owner", "Amount"]) {
+      expect(geo.headerText, `the header must name ${name}`).toContain(name);
+    }
+    expect(geo.headerHidden).toBe("true");
+    // The header is the table's columns, so it is the same grid as a row *and its
+    // labels sit over the columns they name* — which is what makes it a header
+    // rather than a caption above a list of its own. Measured as column positions
+    // rather than as a class: `lg:grid-cols-*` that never compiled (§8 rule 5's
+    // failure mode) leaves the DOM exactly as written.
+    expect(geo.rowTemplate.split(" ").length, "the row is not seven columns").toBe(7);
+    expect(geo.rowLefts, "the header's labels do not line up with the row's cells").toEqual(
+      geo.headerLefts,
+    );
+    expect(geo.display).toBe("grid");
+
+    // §9.4's row height, and its floor: `min-h-12` is the desktop figure and 44
+    // is still the floor. The row measures 56 px because the four controls in it
+    // are each 44 — which is asserted here rather than left to `a11y.spec.ts`,
+    // whose sweep only sees rows when another spec has left some pending.
+    expect(geo.minHeight).toBe("48px");
+    expect(geo.height).toBeGreaterThanOrEqual(48);
+    for (const [i, control] of geo.controls.entries()) {
+      expect(control.h, `row control ${i} is under 44 px tall`).toBeGreaterThanOrEqual(44);
+      expect(control.w, `row control ${i} is under 44 px wide`).toBeGreaterThanOrEqual(44);
+    }
+
+    // One tab stop for the queue, not four per row (§4.14's roving model): a
+    // fifty-row queue is otherwise two hundred stops between the page and its
+    // end, which is not a keyboard route.
+    expect(geo.tabStops, "the queue must have exactly one tab stop").toBe(1);
+
+    // §6.1: a column of amounts lines up. The amount is the sixth column — the
+    // last of the value cells — and it is right-aligned, as is the column of
+    // actions beside it, the latter by `justify-content` because a flex row does
+    // not answer to `text-align`.
+    expect(geo.money[5], "the amount column is not right-aligned").toBe("right");
+    expect(geo.decide, "the actions column is not right-aligned").toBe("flex-end");
+
+    expect(geo.overflow, "the table pushes the page sideways").toBeLessThanOrEqual(0);
+
+    // Filing by mouse, which is also how this test gives the queue back: the row
+    // leaves, and the rows that were behind it are still there.
+    await reviewRow(page, merchant).getByTestId(/^review-approve-/).click();
+    await expect(reviewRow(page, merchant), "an approved row must leave").toHaveCount(0);
+    await expect(page.locator("[data-testid=review-rows] li[data-row]").first()).toBeVisible();
+  });
+
+  test("the keyboard works the queue, and says what it did", async ({ page }) => {
+    test.slow();
+
+    const first = `Table Keys A ${Date.now()}`;
+    const second = `Table Keys B ${Date.now()}`;
+    await seedReviewQueue(page, [first, second]);
+
+    const rows = page.locator("[data-testid=review-rows] li[data-row]");
+    await expect(rows.first()).toBeVisible();
+
+    // The queue's own rows, in order — the assertions below are about the
+    // relation between a row and its neighbour, and never about which merchant
+    // happens to be where.
+    const ids = await rowIds(page);
+    expect(ids.length, "the queue must hold the rows this test seeded").toBeGreaterThanOrEqual(2);
+
+    // Before anything is focused *in the list*: the deck's keys are `window`-level
+    // (`Review.tsx`), the table's are this list's own handler (§9.3, ADR-0057).
+    // Focus is still on the nav link the seed clicked — nowhere near a row — so
+    // ← / → / `e` must do nothing at all. The failure this rules out is a deck
+    // left mounted under the table, deciding cards behind it: the whole reason
+    // this page is two trees instead of one tree with `lg:hidden`.
+    const beforeStrayKeys = await readRemaining(page);
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("e");
+    await expect(page.getByTestId("txn-detail"), "`e` belongs to a row, not to the page").toHaveCount(0);
+    expect(await rowIds(page), "→ must not file a row it is not standing on").toEqual(ids);
+    expect(await readRemaining(page)).toBe(beforeStrayKeys);
+
+    // Stand on the second row, so ↑ and ↓ both have somewhere to go.
+    const standOn = ids[1];
+    const openOf = (id: string) => page.locator(`[data-testid="review-open-${id}"]`);
+    await openOf(standOn).focus();
+
+    // One tab stop, and it is the row the keyboard is on.
+    await expect(page.locator('[data-testid=review-rows] [tabindex="0"]')).toHaveCount(1);
+    await expect(openOf(standOn)).toHaveAttribute("tabindex", "0");
+
+    // ↓ to whatever comes next — or nowhere, when there is no next row: a queue
+    // has a bottom, and wrapping to the top is how someone files a row they never
+    // saw.
+    const below = ids[2];
+    await page.keyboard.press("ArrowDown");
+    await expect(openOf(below ?? standOn)).toBeFocused();
+
+    // ↑ back, then ↑ again to the first row, and once more with nowhere to go.
+    await page.keyboard.press("ArrowUp");
+    await expect(openOf(standOn)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(openOf(ids[0])).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(openOf(ids[0])).toBeFocused();
+
+    // Now a decision, on a row this test knows by name. Where focus lands is
+    // worked out from the order as it was *before*: the row that takes the
+    // vacated place is the one after it, or the new last row when it was last.
+    const idOfSecond = (await reviewRow(page, second).getAttribute("data-row")) ?? "";
+    const expected = ids[ids.indexOf(idOfSecond) + 1] ?? ids[ids.indexOf(idOfSecond) - 1];
+    const before = await readRemaining(page);
+    await reviewRow(page, second).locator('[data-testid^="review-open-"]').focus();
+    await page.keyboard.press("ArrowRight");
+
+    await expect(reviewRow(page, second), "→ must file the row").toHaveCount(0);
+    // Three things say what happened, because there is no throw to carry it: the
+    // count, focus, and a line naming the row.
+    expect(await readRemaining(page)).toBe(before - 1);
+    if (expected) await expect(openOf(expected)).toBeFocused();
+    await expect(page.getByTestId("review-last")).toHaveText(`${second} reviewed.`);
+
+    // And ← ignores the row it is on. This one is seeded for the purpose and is
+    // the last row left behind.
+    await reviewRow(page, first).locator('[data-testid^="review-open-"]').focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(reviewRow(page, first), "← must file the row").toHaveCount(0);
+    await expect(page.getByTestId("review-last")).toHaveText(`${first} ignored.`);
+  });
+
+  test("a category is assigned from the row, and the row keeps its place", async ({ page }) => {
+    test.slow();
+
+    const merchant = `Table Pick ${Date.now()}`;
+    await seedReviewQueue(page, [merchant]);
+    const before = await readRemaining(page);
+
+    const row = reviewRow(page, merchant);
+    await row.locator('[data-testid^="review-open-"]').focus();
+    await page.keyboard.press("c");
+
+    const picker = page.getByTestId("review-category-picker");
+    await expect(picker).toBeVisible();
+    await picker.getByTestId("review-category-picker-search").fill("Groceries");
+    await picker.getByRole("button", { name: /Groceries/ }).first().click();
+
+    // Filing a category is not deciding the transaction (§4.17, and the same on
+    // both instruments): the row is still here, still asking, and the queue is no
+    // shorter. It now answers the question the picker was opened to change.
+    await expect(row.locator('[data-testid^="review-category-"]')).toContainText("Groceries");
+    expect(await readRemaining(page)).toBe(before);
+
+    // The detail opens over the rows as a dialog, never beside them as a pane:
+    // §9.3's pane is the Transactions shape, and there is no second column here.
+    await row.locator('[data-testid^="review-open-"]').click();
+    const detail = page.getByTestId("txn-detail");
+    await expect(detail).toBeVisible();
+    await expect(detail).toHaveAttribute("role", "dialog");
+    await page.getByTestId("txn-detail-close").click();
+    await expect(detail).toHaveCount(0);
+    await expect(row, "opening a row must not decide it").toBeVisible();
+
+    // Give the queue back, through the page, as the other tests do.
+    await reviewRow(page, merchant).getByTestId(/^review-approve-/).click();
+    await expect(reviewRow(page, merchant)).toHaveCount(0);
+  });
+});
+

@@ -1105,6 +1105,11 @@ The card is the question ("is this one right?"), the throw is the answer, and th
 has to say both. `/review` has exactly one job, so the card is the only content on the
 page and everything around it is about the card.
 
+**This section is the phone's instrument.** Everything in it holds below `lg:`; at `lg:`
+the queue is the triage table of §9.3 (ADR-0057), and the rules that survive the crossing —
+what a decision is not, what opening a card may not do, reduced motion, the arrow keys —
+hold there too, restated where they land.
+
 - **A deck has depth.** Two cards sit behind the live one — inset 8 px and 16 px per
   side, pushed down by the same amount — so their bottom edges show as two steps of a
   stack. They are empty rounded rectangles on purpose: a stack shows you the *edges* of
@@ -1126,8 +1131,9 @@ page and everything around it is about the card.
 - **The sheet opens over the deck, never beside it.** At `lg:` a transaction detail is
   normally a pane with the list beside it (§9.3/§9.6), and Review has no second column —
   one card, centred. So Review tells the sheet which presentation to use rather than
-  letting the width choose, and at 1280 the difference is visible: `role="dialog"` over the
-  deck, not `role="region"` in it.
+  letting the width choose. Below `lg:` that is unobservable, because a phone is always
+  given the overlay; the table at `lg:` is where it shows, and it is pinned there —
+  `role="dialog"` over the rows, not `role="region"` beside them.
 - **Arrow keys belong to the sheet while it is open.** A ← in the amount box is a caret
   move. Without the gate it would file the card the sheet is showing, behind the sheet,
   where nothing on screen says it happened.
@@ -1150,11 +1156,15 @@ page and everything around it is about the card.
 - **The next card does not arrive until the throw lands.** A card appearing behind one
   mid-throw spoils the throw, which is the only thing saying where the last decision
   went.
-- **Keyboard**: ← / → are the same two decisions and `e` opens the card, for the desktop
-  review pass. All three are window-level, and all three stand down while the sheet is
-  open or a field has focus.
+- **Keyboard**: ← / → are the same two decisions and `e` opens the card, wherever there is
+  a keyboard — a phone with one attached is still a phone. All three are window-level, and
+  all three stand down while the sheet is open or a field has focus. At `lg:` the same three
+  keys work, but they are the table's own handler on the list rather than a window listener
+  (§9.3): a window listener that is still mounted under a different instrument is a key
+  pressed on one page doing something on another.
   **Reduced motion** (§2.8): no throw, no rotation, no badge fade — the card leaves the
-  deck immediately, and the deck is faster for it, never slower.
+  deck immediately, and the deck is faster for it, never slower. (The table has no motion to
+  reduce: a row leaving a list is a layout change, not an animation.)
 
 ---
 
@@ -1614,13 +1624,29 @@ that already works at 360 px, never a second layout. **A page must not have two 
 branching on viewport**; that is how the two drift and the untested one rots. If a rule
 cannot be expressed as a class variant, it is not a desktop rule.
 
+**One exception: Review** (ADR-0057). `/review` is the deck of §4.17 below `lg:` and a
+triage table at `lg:`, and they are two trees rather than one tree with variants, for the
+reason the rule exists: two instruments can be one tree only if the *differences* can be
+written as classes, and here they cannot. The deck's decision is a gesture — a card thrown
+off the screen — and its keys are on `window`; a single tree would have to keep both the
+card and the rows in the DOM and hide one with `lg:hidden`, which leaves the hidden deck's
+window keydown live under the table, swallowing ← and → while the table is what is on
+screen. That is not a layout detail, it is two instruments fighting for one keyboard.
+
+So the rule keeps its force by making the exception expensive to copy: **both trees are
+covered**, `review.spec.ts` pinned below `lg:` for the deck and the table's own tests in
+`desktop.spec.ts`, plus unit tests that mount each. "The untested one rots" is answered by
+testing both, not by hoping. A second page that wants this must bring the same, and a
+page that hides one of its trees with a variant is not this exception at all — it is the
+drift the rule names, wearing the costume of compliance.
+
 ### 9.1 Content width
 
 One global width is the bug. Width follows what the content *is*:
 
 | Content | Max width | Why |
 |---|---|---|
-| Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
+| Ledger lists, the Review table, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get — and a queue is a ledger of decisions |
 | Insights, Accounts | `max-w-6xl` (1152) | Accounts' balances are a two-up card grid; the Insights reports are charts, which read this wide and no wider |
 | Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
 
@@ -1681,13 +1707,29 @@ Five shapes, and they are the whole of it:
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first
   column (`lg:w-56`), the active panel in the second. §4.14's roving tabindex and arrow
   keys are unchanged; only the axis changes, and `aria-orientation` goes with it.
-- **Review — a deck, and it stays small.** One card at a time, capped at `max-w-2xl` and
-  centred. This is the one page whose desktop shape is *not* wider: a decision card is
-  read at a glance, and the room would only push the merchant and the amount further
-  apart — which is exactly what the 864 px card this replaced did (§4.17). What the
-  desktop gets instead of width is the keyboard, ← / →. The transaction detail opens
-  **over** the deck as a slide-over (§9.6), never as a pane: a pane is the second column
-  of the Transactions shape, and there is no second column here to put it in.
+- **Review — a deck on a phone, a triage table at `lg:`.** §9's one recorded exception
+  (ADR-0057), and the only page here whose two widths are two trees instead of two variants.
+  Below `lg:` nothing changes: the deck of §4.17, one card, `max-w-2xl`, centred, thrown to
+  decide. At `lg:` the page is the queue itself — one row per pending transaction in §9.4's
+  vocabulary, under a real header row, inside `max-w-7xl` — because the job at 1280 px is a
+  *backlog*: get through fifty of them in order without waiting on an animation, and see at a
+  glance how many are left. It stays `max-w-7xl` and does not narrow: the row is the ledger's
+  six columns plus the two verdicts, and they need the room for the same reason the ledger's
+  do.
+  The keys are the deck's own — ← ignore, → reviewed, `c` category, `e` open — with ↑/↓ added
+  for the row, so the muscle memory crosses the breakpoint instead of being relearned. Three
+  things answer a decision, because there is no throw to carry it: the count, a status line
+  naming the row that was filed, and **focus landing on the row that took its place**. One
+  tab stop for the whole queue, not four per row (§4.14's roving model): a fifty-row queue is
+  otherwise two hundred stops, which is not a keyboard route to the fiftieth row. The keys
+  are printed above the table — §9.5 runs both ways, and a keyboard route nobody can find is
+  a keyboard route nobody uses.
+  The category is assigned by the same pill and the same `CategoryPicker` as the deck's, not
+  by a `<select>` per row: one way to assign a category in the app, and the row keeps its
+  place while it happens (§4.17's "a decision is not something to make by accident while
+  editing one" holds on both instruments). The transaction detail opens **over** the table as
+  a slide-over (§9.6) — still never a pane, now for the plainer reason that the list *is* the
+  page and a section beside it would be paying width it does not have.
 
 ### 9.4 The list row at `lg:`
 

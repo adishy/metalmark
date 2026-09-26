@@ -149,3 +149,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0050](0050-a-stalled-bank-is-shown-not-silent.md) | A stalled bank is shown, not silent | Accepted |
 | [0051](0051-sync-lands-the-banks-holdings.md) | Sync lands the bank's holdings as positions | Accepted |
 | [0052](0052-owner-income-and-paystubs.md) | Owner income profile and paystubs, as lines that keep a kind | Accepted |
+| [0057](0057-review-is-a-deck-on-a-phone-and-a-table-at-lg.md) | Review is a deck on a phone and a triage table at `lg:` — §9's one recorded exception | Accepted |
