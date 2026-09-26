@@ -20,7 +20,7 @@
 import type { Account, Category, Transaction } from "@/api/types";
 import { UNCATEGORIZED_ICON } from "@/components/CategoryPicker";
 import { calendarDay, formatDay } from "@/lib/dates";
-import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
+import { formatMoneySigned, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 
 interface Day {
   day: string;
@@ -59,11 +59,6 @@ function dayLabel(day: string): string {
   return compact !== medium ? `${compact}, ${medium}` : `${formatDay(day, "weekday")}, ${medium}`;
 }
 
-function signed(amount: string, currency: string): string {
-  const n = Number(amount);
-  return n > 0 ? `+${formatMoney(amount, currency)}` : formatMoney(amount, currency);
-}
-
 export default function TxnPhoneList({
   items,
   categories,
@@ -83,7 +78,7 @@ export default function TxnPhoneList({
             <h2 className="text-sm font-semibold text-fg">{dayLabel(day)}</h2>
             {net !== null && (
               <span className={`text-sm tabular-nums ${net > 0 ? "text-positive" : "text-fg-muted"}`}>
-                {signed(fromMinorUnits(net, currency), currency)}
+                {formatMoneySigned(fromMinorUnits(net, currency), currency)}
               </span>
             )}
           </div>
@@ -133,7 +128,7 @@ export default function TxnPhoneList({
                           income ? "text-positive" : "text-fg"
                         }`}
                       >
-                        {signed(t.amount, t.currency)}
+                      {formatMoneySigned(t.amount, t.currency)}
                       </span>
                     </span>
                   </button>

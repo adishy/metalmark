@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   formatMoney,
+  formatMoneySigned,
   formatMoneyTick,
   formatDuration,
   fromMinorUnits,
@@ -46,8 +47,8 @@ describe("formatMoney", () => {
   });
 
   it("does not put a sign on positive amounts", () => {
-    // A bare `$12.00` is a balance or a total; `+` is only added where the
-    // call site knows the value is income (§6.2).
+    // A bare `$12.00` is a balance or a total; `+` is for the line items, and
+    // it comes from `formatMoneySigned` below (§6.2).
     expect(norm(formatMoney("12", "USD"))).toBe("$12.00");
   });
 
@@ -61,6 +62,23 @@ describe("formatMoney", () => {
     const out = norm(formatMoney("5", "NOTREAL"));
     expect(out).toContain("5.00");
     expect(out).toContain("NOTREAL");
+  });
+});
+
+describe("formatMoneySigned", () => {
+  // §6.2's mandatory glyph, in one place: a line item says which way the money
+  // went, and says it as a `+` rather than as a colour.
+  it("signs income with a written plus", () => {
+    expect(norm(formatMoneySigned("5200", "USD"))).toBe("+$5,200.00");
+  });
+
+  it("leaves an expense to formatMoney's own U+2212", () => {
+    // The one way to get this wrong twice is to add the minus here as well.
+    expect(norm(formatMoneySigned("-38.20", "USD"))).toBe("−$38.20");
+  });
+
+  it("treats a zero as neither: no `+$0.00` in the ledger", () => {
+    expect(norm(formatMoneySigned("0", "USD"))).toBe("$0.00");
   });
 });
 

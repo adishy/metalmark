@@ -11,7 +11,7 @@ import {
   type TxnFilter,
 } from "@/api/hooks";
 import type { Account, Category, Owner, Transaction, TransactionCreate } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoneySigned } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
@@ -543,13 +543,20 @@ export default function Transactions() {
                   </div>
 
                   {/* shrink-0 and text-right: the merchant gives way, the number
-                      never does (§6.5). */}
+                      never does (§6.5).
+
+                      `formatMoneySigned`, so the row states the direction of the
+                      money the way the phone card beside it does: a `+` on income
+                      and `formatMoney`'s own `−` on an expense (§6.2 — colour
+                      alone is 1.18:1 apart and cannot carry it). The two views of
+                      one ledger disagreeing about the same row was this line's
+                      bug. */}
                   <span
                     className={`shrink-0 text-right text-base font-semibold tabular-nums lg:col-start-6 lg:row-start-1 ${
                       Number(t.amount) < 0 ? "text-fg" : "text-positive"
                     }`}
                   >
-                    {formatMoney(t.amount, t.currency)}
+                    {formatMoneySigned(t.amount, t.currency)}
                   </span>
                   </button>
 

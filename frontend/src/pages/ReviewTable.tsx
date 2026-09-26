@@ -24,7 +24,7 @@ import {
   useUpdateTransaction,
 } from "@/api/hooks";
 import type { Account, Transaction } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoneySigned } from "@/lib/format";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
@@ -410,13 +410,15 @@ export default function ReviewTable() {
                   </span>
 
                   {/* The number never gives way (§6.5), and a column of them has
-                      to line up. */}
+                      to line up — signed, like the deck's card and the ledger's
+                      row: a triage row that says `$5,200.00` where the card says
+                      `+$5,200.00` is two answers to one question (§6.2). */}
                   <span
                     className={`text-right text-base font-semibold tabular-nums ${
                       Number(t.amount) < 0 ? "text-fg" : "text-positive"
                     }`}
                   >
-                    {formatMoney(t.amount, t.currency)}
+                    {formatMoneySigned(t.amount, t.currency)}
                   </span>
                 </div>
 
