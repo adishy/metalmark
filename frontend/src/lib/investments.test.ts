@@ -4,6 +4,7 @@ import {
   excludedSentence,
   formatPercent,
   formatPrice,
+  groupLabel,
   isCash,
   isZeroDecimal,
   sameQuantity,
@@ -23,6 +24,23 @@ describe("securityTypeLabel", () => {
     // A type added to the API later must still read as words: the alternative is
     // `pe_fund` sitting in the middle of a money row.
     expect(securityTypeLabel("pe_fund")).toBe("pe fund");
+  });
+});
+
+describe("groupLabel", () => {
+  it("renames a type row, and only a type row", () => {
+    expect(groupLabel("type", "mutual_fund", "mutual_fund")).toBe("Mutual fund");
+    // A ticker, an account name and a currency code are already words.
+    expect(groupLabel("security", "VTI", "VTI")).toBe("VTI");
+    expect(groupLabel("account", "Brokerage", "Brokerage")).toBe("Brokerage");
+    expect(groupLabel("currency", "EUR", "EUR")).toBe("EUR");
+  });
+
+  it("never renames a name (ADR-0021's cash row)", () => {
+    // The one `type` row the server labels in prose: "Unaccounted cash" is the
+    // point of the ADR, and renaming it would collide it with real cash.
+    expect(groupLabel("type", "cash", "Unaccounted cash")).toBe("Unaccounted cash");
+    expect(groupLabel("type", "cash", "Cash")).toBe("Cash");
   });
 });
 

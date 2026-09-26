@@ -26,7 +26,7 @@ import { useAllocation } from "@/api/investments";
 import type { Allocation, AllocationGroup, AllocationRow } from "@/api/types";
 import { formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
-import { STALE_DAYS, excludedSentence, formatPercent, formatPrice, securityTypeLabel, trimDecimal } from "@/lib/investments";
+import { STALE_DAYS, excludedSentence, formatPercent, formatPrice, groupLabel, trimDecimal } from "@/lib/investments";
 import { notDrawnSentence, tileColour, treemapData, treemapFinding, treemapOption } from "@/lib/treemapChart";
 import AccountMark from "@/components/AccountMark";
 import Chart from "@/components/Chart";
@@ -113,23 +113,11 @@ function writeCashPref(value: boolean): void {
 }
 
 /**
- * How a group reads. The server's `label` is right for three of the four groups
- * — a ticker, an account name, a currency code are already the words a person
- * uses — but every `type` row labels itself with the wire token (`mutual_fund`),
- * so those are named through the shared security-type vocabulary.
- *
- * "Every" has one exception, and it is the row that matters: the cash row
- * ("Cash" or ADR-0021's narrower "Unaccounted cash") is the one `type` row the
- * server names in prose (`services/investments.py`), and its comment says the
- * name is the point — it must not read as an unnamed line. Renaming it on this
- * side would also collide it with the real cash holdings it is not. So the rule
- * is *rename a token, never rename a name*, which needs no list of exceptions.
+ * How a group reads — `mutual_fund` → "Mutual fund", a name left alone — lives
+ * in `lib/investments.ts` beside `securityTypeLabel`, because the treemap above
+ * this list names the same rows: `treemapData` calls the same function, so the
+ * tiles and the rows cannot drift into two vocabularies for one group.
  */
-function groupLabel(groupBy: AllocationGroup, key: string, label: string): string {
-  if (groupBy !== "type" || label !== key) return label;
-  return securityTypeLabel(key);
-}
-
 export default function Allocations() {
   const [groupBy, setGroupBy] = useState<AllocationGroup>("security");
   const [view, setView] = useState<AllocationView>("treemap");
@@ -262,7 +250,7 @@ function AllocationBody({
   // Split once, at the top: the tiles, the rows that cannot be one, and the
   // swatch each tile is drawn in. The chart and the list are two renderings of
   // this one array, which is what keeps a row's colour and its figure agreeing.
-  const tiles = useMemo(() => treemapData(data.rows), [data.rows]);
+  const tiles = useMemo(() => treemapData(data.rows, groupBy), [data.rows, groupBy]);
   const swatch = useMemo(
     () => new Map(tiles.tiles.map((r, i) => [r.key, tileColour(t, i)])),
     [tiles, t],

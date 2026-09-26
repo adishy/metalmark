@@ -36,9 +36,9 @@
 //   colour-alone) is the same hue by construction, and a row that grows past its
 //   neighbour keeps the hue it had.
 import type { EChartsOption } from "echarts";
-import type { AllocationRow, Money } from "@/api/types";
+import type { AllocationGroup, AllocationRow, Money } from "@/api/types";
 import { formatMoney } from "@/lib/format";
-import { formatPercent } from "@/lib/investments";
+import { formatPercent, groupLabel } from "@/lib/investments";
 import {
   chartTooltip,
   emphasisTreemap,
@@ -54,10 +54,24 @@ export interface TreemapData {
   skipped: AllocationRow[];
 }
 
-export function treemapData(rows: AllocationRow[]): TreemapData {
+/**
+ * The split, with every row named the way the list under the chart names it.
+ *
+ * This is the one place the rows are rewritten, and it is not cosmetic: a tile
+ * draws its row's `label`, and for a `type` row that is the wire token — so the
+ * picture would say `mutual_fund` and `etf` over a list saying "Mutual fund" and
+ * "ETF", two names for one group on one screen, with the swatch colours joining
+ * them. `groupLabel` (the same function the list and the detail sheet use)
+ * renames a token and never a name, so the cash row keeps the server's prose.
+ */
+export function treemapData(rows: AllocationRow[], groupBy: AllocationGroup): TreemapData {
   const tiles: AllocationRow[] = [];
   const skipped: AllocationRow[] = [];
-  for (const row of rows) (Number(row.value_base) > 0 ? tiles : skipped).push(row);
+  for (const row of rows) {
+    const label = groupLabel(groupBy, row.key, row.label);
+    const named = label === row.label ? row : { ...row, label };
+    (Number(row.value_base) > 0 ? tiles : skipped).push(named);
+  }
   return { tiles, skipped };
 }
 

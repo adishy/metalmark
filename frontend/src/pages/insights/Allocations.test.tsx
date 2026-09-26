@@ -142,6 +142,26 @@ describe("<Allocations />", () => {
     expect(screen.getByTestId("allocation-groupby-type")).toHaveAttribute("aria-selected", "true");
   });
 
+  it("names the treemap's groups in the words the list under it uses", async () => {
+    const user = userEvent.setup();
+    renderAllocations();
+
+    await user.click(screen.getByTestId("allocation-groupby-type"));
+
+    // The `type` rows arrive as wire tokens, and the list renames them. So does
+    // the picture: the chart's own name, the tile drawn over each row and the
+    // tooltip all say "Mutual fund" and "ETF", because a tile reading
+    // `mutual_fund` above a row reading "Mutual fund" is two names for one group.
+    const name = screen.getByTestId("allocation-treemap").getAttribute("aria-label") ?? "";
+    expect(name).toContain("ETF is the largest");
+    expect(name).not.toContain("etf is the largest");
+    // Found rather than trusted from the fixture, so the assertion above is
+    // "the picture says what the list says" and not "the picture says a string
+    // this test also wrote down".
+    expect(screen.getByTestId("allocation-row-etf")).toHaveTextContent("ETF");
+    expect(screen.getByTestId("allocation-row-mutual_fund")).toHaveTextContent("Mutual fund");
+  });
+
   it("says a total is short rather than saying there is nothing, when nothing could be valued", () => {
     h.allocation.mockImplementation(() =>
       query({
