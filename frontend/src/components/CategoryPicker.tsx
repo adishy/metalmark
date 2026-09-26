@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import type { Category, CategoryGroup } from "@/api/types";
 import Dialog from "@/components/Dialog";
 import { Input } from "@/components/form";
+import { useIsPhone } from "@/lib/media";
 
 /** "🛒 Groceries" — the one way a category is written wherever it is shown. */
 export function categoryLabel(c: Pick<Category, "name" | "icon"> | undefined | null): string {
@@ -40,6 +41,7 @@ export default function CategoryPicker({
 }) {
   const [query, setQuery] = useState("");
   const direction = Number(amount) > 0 ? "income" : "expense";
+  const isPhone = useIsPhone();
 
   const sections = useMemo(() => {
     const q = query.trim().toLocaleLowerCase();
@@ -85,7 +87,20 @@ export default function CategoryPicker({
 
   return (
     <Dialog open={open} onClose={onClose} title="Choose a category" testid={testid}>
-      <div className="space-y-3">
+      {/* On a phone this is a bottom sheet (Dialog.tsx), and the sheet's
+          height otherwise follows its content: with the list `max-h-96` and
+          no floor, typing a query that leaves one match shrank the whole
+          sheet to fit it, so the row the user was about to tap moved out
+          from under their thumb. A fixed height here — search pinned at the
+          top, the list as the one flexible child — means filtering changes
+          what's *in* the list, never how tall the sheet is. The desktop
+          presentation is a centred modal that doesn't have this problem (it
+          re-centres rather than moving a tap target under a finger), so it
+          keeps the old intrinsic-height layout. */}
+      <div
+        className={isPhone ? "flex h-[min(70dvh,36rem)] flex-col space-y-3" : "space-y-3"}
+        data-testid={`${testid}-body`}
+      >
         <Input
           type="search"
           aria-label="Search categories"
@@ -93,9 +108,16 @@ export default function CategoryPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoComplete="off"
+          className="shrink-0"
           data-testid={`${testid}-search`}
         />
-        <div className="max-h-96 space-y-4 overflow-y-auto">
+        <div
+          className={
+            isPhone
+              ? "flex-1 min-h-0 space-y-4 overflow-y-auto"
+              : "max-h-96 space-y-4 overflow-y-auto"
+          }
+        >
           {!query && (
             <button
               type="button"
@@ -126,8 +148,14 @@ export default function CategoryPicker({
             </details>
           )}
           {nothing && (
-            <p className="px-3 py-6 text-center text-sm text-fg-muted">
-              No category called “{query}”. Add one in Settings → Categories.
+            <p
+              className={
+                isPhone
+                  ? "flex h-full items-center justify-center px-3 text-center text-sm text-fg-muted"
+                  : "px-3 py-6 text-center text-sm text-fg-muted"
+              }
+            >
+              No categories match “{query}”. Add one in Settings → Categories.
             </p>
           )}
         </div>
