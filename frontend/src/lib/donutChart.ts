@@ -12,8 +12,11 @@
 //   not a label. The ring keeps its shape and its colours; the names are in the
 //   legend, in the tap tooltip, and in the list of categories and totals printed
 //   under the chart, which is the donut's own text equivalent (§2.9). Measured on
-//   the demo household at 390 and 360 px: every one of those channels names all six
-//   categories, while the leader labels named three and a fragment.
+//   the demo household at 390 and 360 px: the `<ul>` names all six categories with
+//   their amounts at once, the aria-label states the total and the largest, and the
+//   legend — which pages on a phone, `1/3` at 390 px and `1/4` at 360, its arrows
+//   taking a tap — names them across its pages. The three labels they replaced
+//   named three of the six, and a fragment.
 // * **The wide layout is untouched.** At 1104 px all six labels are drawn whole
 //   ("Groceries" … "Uncategorized") and the legend is a single page, so nothing
 //   there needed changing.
