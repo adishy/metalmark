@@ -52,3 +52,12 @@ htmlcov/
 .coverage
 playwright-report/
 test-results/
+
+# Agent scratch. The agent *definitions* are tracked and shared (`.claude/agents/`);
+# what is not is a session's working directory — port overlays, logs, screenshots,
+# a plan — and the worktrees themselves, which are checkouts of branches that exist
+# in git anyway. Ignoring them is not tidiness: an untracked `.claude/` shows up in
+# `git status` in every worktree, and the one thing that must never happen is
+# `git add .claude/` sweeping a session's scratch into a commit.
+.claude/worktrees/
+.claude/session*/
