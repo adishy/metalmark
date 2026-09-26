@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { Account, Category } from "@/api/types";
 import type { CsvCommitResult, CsvPreview, OfxCommitResult, OfxPreview } from "@/api/import";
 import ImportDialog from "@/components/ImportDialog";
+import { openPicker, pickOption } from "@/test/pickers";
 
 // The dialog owns its four calls, so stub them rather than standing up an
 // AuthProvider, a QueryClient and a fetch mock for a component test. The mocked
@@ -97,7 +98,8 @@ describe("<ImportDialog />", () => {
     expect(screen.getByLabelText("Amount")).toHaveValue("amount");
     expect(screen.getByLabelText("Description")).toHaveValue("description");
     // The destination is a decision the importer must not make for the user.
-    expect(screen.getByTestId("import-account")).toHaveValue("acct-1");
+    // A picker shows the label it was given, not the id behind it.
+    expect(screen.getByTestId("import-account")).toHaveValue("Checking");
   });
 
   it("sends the mapping as the user left it, not as it was suggested", async () => {
@@ -108,9 +110,13 @@ describe("<ImportDialog />", () => {
     await pick();
 
     // A column the headers got wrong: ignore the bank's description entirely.
+    // (The mapping fields are a closed vocabulary of column meanings, so they
+    // are still native selects; the two pickers below are record lists.)
     await user.selectOptions(screen.getByLabelText("Description"), "");
-    await user.selectOptions(screen.getByTestId("import-account"), "acct-2");
-    await user.selectOptions(screen.getByTestId("import-default-category"), "cat-1");
+    await openPicker(user, "import-account");
+    await pickOption(user, "Card");
+    await openPicker(user, "import-default-category");
+    await pickOption(user, "Dining");
     await user.click(screen.getByTestId("import-dayfirst"));
     await user.click(screen.getByTestId("import-commit"));
 
@@ -207,7 +213,7 @@ describe("<ImportDialog />", () => {
     expect(h.preview).not.toHaveBeenCalled();
     expect(h.ofxPreview).toHaveBeenCalledWith(OFX_FILE, expect.anything());
     // The destination is still the human's decision.
-    expect(screen.getByTestId("import-account")).toHaveValue("acct-1");
+    expect(screen.getByTestId("import-account")).toHaveValue("Checking");
   });
 
   it("imports an OFX file into the chosen account without a mapping", async () => {
@@ -216,8 +222,10 @@ describe("<ImportDialog />", () => {
       <ImportDialog onClose={vi.fn()} accounts={ACCOUNTS} categories={CATEGORIES} />,
     );
     await pick(OFX_FILE);
-    await user.selectOptions(screen.getByTestId("import-account"), "acct-2");
-    await user.selectOptions(screen.getByTestId("import-default-category"), "cat-1");
+    await openPicker(user, "import-account");
+    await pickOption(user, "Card");
+    await openPicker(user, "import-default-category");
+    await pickOption(user, "Dining");
     await user.click(screen.getByTestId("import-commit"));
 
     expect(h.ofxCommit).toHaveBeenCalledWith(

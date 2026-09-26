@@ -814,6 +814,21 @@ export interface CategoryUpdate {
   sort?: number;
 }
 
+/** What is filed under one category — the rows a delete would move. */
+export interface CategoryUsage {
+  /**
+   * Filed directly under it. A split parent's own category is null — its legs
+   * carry the category — so neither number includes the other.
+   */
+  transactions: number;
+  splits: number;
+}
+
+export interface CategoryDeleteResult {
+  reassigned_transactions: number;
+  reassigned_splits: number;
+}
+
 export interface AutoCategorizeResult {
   examined: number;
   categorized: number;

@@ -9,13 +9,25 @@
 import { useCallback, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import Chart from "@/components/Chart";
+import ColorPicker from "@/components/ColorPicker";
 import Dialog from "@/components/Dialog";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Button, Checkbox, Field, Input, Select, Spinner, Textarea, useFieldId } from "@/components/form";
+import {
+  Button,
+  Checkbox,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  Textarea,
+  useFieldId,
+  type ComboboxOption,
+} from "@/components/form";
 import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
-import { token, useChartTokens } from "@/theme/chartTokens";
+import { token, tokenHex, useChartTokens } from "@/theme/chartTokens";
 import {
   barEndRadius,
   chartArea,
@@ -127,6 +139,23 @@ const DEMO_OWNERS: Owner[] = [
   { id: "o3", name: "Shared", kind: "shared", sort: 99 },
 ];
 
+/** A list long enough that the native picker stops being the right control. */
+const DEMO_CATEGORIES: ComboboxOption[] = [
+  { value: "", label: "Uncategorized" },
+  { value: "c1", label: "🛒 Groceries" },
+  { value: "c2", label: "🍽 Dining out" },
+  { value: "c3", label: "☕ Coffee" },
+  { value: "c4", label: "🚆 Transit" },
+  { value: "c5", label: "⛽ Fuel" },
+  { value: "c6", label: "💊 Pharmacy" },
+  { value: "c7", label: "✈️ Travel" },
+  { value: "c8", label: "🏠 Rent" },
+  { value: "c9", label: "🔌 Utilities" },
+  { value: "c10", label: "🎬 Streaming" },
+  { value: "c11", label: "🎁 Gifts" },
+  { value: "c12", label: "💵 Paycheck" },
+];
+
 /** The reference clock the elapsed-time gallery is pinned to. */
 const DEMO_NOW = new Date("2026-09-20T12:00:00Z");
 
@@ -208,6 +237,12 @@ export default function DesignSystem() {
   const [chips, setChips] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
   const [checks, setChecks] = useState({ a: true, b: false });
+  const [picked, setPicked] = useState("");
+  const [pickedErr, setPickedErr] = useState("");
+  // Seeded from a token, never from a literal: this file is one of the three
+  // design-lint §8.5 reads for hardcoded hex, and a demo value is exactly the
+  // kind of "just this once" that would make the rule meaningless.
+  const [swatch, setSwatch] = useState(() => tokenHex("chart-5") ?? "");
   const ids = {
     text: useFieldId("ds-text"),
     money: useFieldId("ds-money"),
@@ -216,6 +251,8 @@ export default function DesignSystem() {
     req: useFieldId("ds-req"),
     sel: useFieldId("ds-sel"),
     area: useFieldId("ds-area"),
+    pick: useFieldId("ds-pick"),
+    pickErr: useFieldId("ds-pick-err"),
   };
 
   const lineOption = useCallback(
@@ -447,6 +484,44 @@ export default function DesignSystem() {
         </div>
       </Section>
 
+      <Section
+        title="Searchable pickers"
+        note="A record list (a category, an account, an owner) is a Combobox above 640px: type to narrow, arrows and Enter to pick. On a phone it hands the job back to the platform's own picker rather than drawing a list of its own."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Category" htmlFor={ids.pick} hint="Type to narrow: “cof” finds ☕ Coffee.">
+            <Combobox
+              id={ids.pick}
+              listLabel="Category"
+              value={picked}
+              onChange={setPicked}
+              options={DEMO_CATEGORIES}
+              data-testid="ds-combobox"
+            />
+          </Field>
+          <Field
+            label="With an error"
+            htmlFor={ids.pickErr}
+            error="Pick a category for this row."
+          >
+            <Combobox
+              id={ids.pickErr}
+              listLabel="Category"
+              value={pickedErr}
+              onChange={setPickedErr}
+              options={DEMO_CATEGORIES}
+              data-testid="ds-combobox-error"
+            />
+          </Field>
+        </div>
+        <p className="text-xs text-fg-muted">
+          A closed vocabulary — review status, group type, sync interval — stays a native{" "}
+          <code>Select</code>: the component writes the options out, there is nothing to search, and
+          the platform draws the picker. The rule is where the list comes from, not how long it is.
+          §4.4.
+        </p>
+      </Section>
+
       <Section title="Checkboxes" note="The label is the target — a native box is ~13px, the row is 44px.">
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
           <Checkbox
@@ -475,6 +550,27 @@ export default function DesignSystem() {
         <p className="text-xs text-fg-muted">
           A tag or badge always carries its text. The <code>categories.color</code> column is for
           charts and icons, never the only rendering of a category.
+        </p>
+      </Section>
+
+      <Section
+        title="Colour picker"
+        note="The ten swatches are the chart tokens, read at runtime — a swatch is the colour this theme's charts are drawn in. What a pick *stores* is a value, not a token, so the last control keeps any colour reachable."
+      >
+        <ColorPicker
+          label="Colour"
+          value={swatch}
+          onChange={setSwatch}
+          testid="ds-color"
+        />
+        <p className="text-xs text-fg-muted">
+          Each swatch is the <code>type="radio"</code> itself, restyled rather than replaced, so the
+          arrow keys, the checked state and the announced name (“Teal, 1 of 11”) come from the
+          platform rather than from here. The selection is marked by an outline <em>outside</em> the
+          swatch: a tick drawn on top of it would have to be white or black, and this palette holds
+          both pale amber and near-black teal. The value is also written out under the strip — a
+          ring says “one of these” to a sighted user and nothing at all to anyone else, and a
+          category’s colour is never the only rendering of it (§4.5).
         </p>
       </Section>
 

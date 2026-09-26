@@ -112,11 +112,13 @@ test.describe("target size (SC 2.5.8)", () => {
       failures.push(...(await undersized(page)).map((b) => `${view}  ${b}`));
     };
 
-    // /review is included, but the seeded ledger has nothing in needs_review,
-    // so what gets measured here is the empty state — the swipe deck's two
-    // buttons are only reached by review.spec.ts, which seeds its own queue.
-    // Acceptable because both carry an explicit `min-h-11`; it would not be if
-    // they were styled any other way.
+    // /review is included, but what it measures depends on whether anything is in
+    // the queue: with an empty one — the seeded ledger's state — this is the empty
+    // state, and with rows in it this sweep walks a row's controls, which is what
+    // it is here for. Neither is a measurement to rely on, so the floor is also
+    // asserted directly, on a queue the spec seeds itself: `desktop.spec.ts`
+    // measures the table's four row controls at `lg:` (ADR-0057) and
+    // `review.spec.ts` the deck's on the way through.
     for (const path of ROUTES) {
       await page.goto(path);
       await expect(page.locator("main")).toBeVisible();
@@ -164,6 +166,17 @@ test.describe("target size (SC 2.5.8)", () => {
     await page.getByTestId("import-csv").click();
     await expect(page.getByTestId("import-cancel")).toBeVisible();
     await measure("/transactions (import dialog)");
+
+    // The filter panel is the third overlay on this route and the one a person
+    // opens most (#26: every category filter now lives behind a pill). Its rows
+    // are §4.14 checkbox rows, so what this measures is the label — the target —
+    // rather than the 20px box. An overlay nobody opens is an overlay nobody has
+    // measured, which is how the detail sheet's tag chips went out at 26px.
+    await page.goto("/transactions");
+    await expect(page.getByTestId("txn-filter-bar")).toBeVisible();
+    await page.getByTestId("filter-categories").click();
+    await expect(page.getByTestId("filter-categories-done")).toBeVisible();
+    await measure("/transactions (filter panel)");
 
     // The Insights window is the same gap one level down. The route sweep above
     // measures the range and granularity chips, but the custom range's two date

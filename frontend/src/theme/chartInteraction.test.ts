@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import * as echarts from "echarts";
-import { BAR_RADIUS, barEndRadius, chartAxis, valueTicks, zeroRule } from "@/theme/chartInteraction";
+import {
+  BAR_RADIUS,
+  barEndRadius,
+  brushEvents,
+  chartAxis,
+  DIM,
+  emphasisStrip,
+  emphasisTreemap,
+  linkedPointer,
+  pointerLineOnly,
+  rangeBrush,
+  valueTicks,
+  zeroRule,
+  zoomWindow,
+} from "@/theme/chartInteraction";
+import { token } from "@/theme/chartTokens";
 import type { ChartTokens } from "@/theme/chartTokens";
 
 const T = {
@@ -8,6 +23,92 @@ const T = {
   fg: "#666666", accent: "#777777", positive: "#888888", negative: "#999999", warning: "#aaaaaa",
   series: [],
 } as unknown as ChartTokens;
+
+describe("rangeBrush", () => {
+  const brush = rangeBrush(T, { top: 0, height: 20 });
+
+  it("is a slider across both grids, not a drag on the plot", () => {
+    expect(brush.type).toBe("slider");
+    expect(brush.top).toBe(0);
+    expect(brush.height).toBe(20);
+    // A chart with a strip under its line has two x axes, and a brush that moved
+    // only the first would slide the line's days while the bars stayed put.
+    expect(brush.xAxisIndex).toEqual([0, 1]);
+    // `inside` would make a drag across the plot zoom instead of reading a point,
+    // which is the gesture tap-to-tooltip is built on.
+    expect(brush.type).not.toBe("inside");
+  });
+
+  it("tints the window from the accent, and states its own readout nowhere", () => {
+    expect(brush.fillerColor).toBe(token("accent", 0.16));
+    expect(brush.backgroundColor).toBe("transparent");
+    expect(brush.borderColor).toBe(T.border);
+    // The window is named by the axis under the strip, in days; the handle's own
+    // readout would print a raw epoch over the thing being dragged.
+    expect(brush.showDetail).toBe(false);
+    expect(brush.brushSelect).toBe(false);
+  });
+});
+
+describe("the pointer across two grids", () => {
+  it("links every x axis so the crosshair crosses the strip", () => {
+    expect(linkedPointer().axisPointer.link).toEqual([{ xAxisIndex: "all" }]);
+  });
+
+  it("keeps the chip off the grid whose dates are stated below it", () => {
+    expect(pointerLineOnly().axisPointer.label).toEqual({ show: false });
+  });
+});
+
+describe("zoomWindow", () => {
+  it("reads the slider's own payload: two percentages", () => {
+    expect(zoomWindow({ type: "dataZoom", start: 12, end: 88 })).toEqual([12, 88]);
+  });
+
+  it("reads a batch, and gives up rather than guessing", () => {
+    expect(zoomWindow({ batch: [{ start: 0, end: 50 }] })).toEqual([0, 50]);
+    expect(zoomWindow([{ start: 25, end: 75 }])).toEqual([25, 75]);
+    for (const nothing of [null, undefined, {}, { start: 10 }, { start: "10", end: 20 }, 7, []]) {
+      expect(zoomWindow(nothing)).toBeNull();
+    }
+  });
+
+  // The event *name* is part of the module's vocabulary for the same reason the
+  // tooltip's keys are: two charts must not listen for two spellings of it.
+  it("hands the handler the window, under the name ECharts sends", () => {
+    const seen: ([number, number] | null)[] = [];
+    const map = brushEvents((window) => seen.push(window));
+    expect(Object.keys(map)).toEqual(["dataZoom"]);
+    map.dataZoom({ start: 10, end: 60 });
+    expect(seen).toEqual([[10, 60]]);
+  });
+});
+
+describe("emphasisStrip", () => {
+  it("has no highlight of its own, and still dims under a spotlight", () => {
+    // Its bars are coloured by their own sign, and the bar helper states one
+    // colour for a whole series: highlighting a rise with it would repaint the
+    // rise as a fall.
+    expect(emphasisStrip().disabled).toBe(true);
+    expect(emphasisStrip().blur.itemStyle.opacity).toBe(DIM);
+  });
+});
+
+describe("emphasisTreemap", () => {
+  it("spotlights one tile of the single series, dimming the tiles and their captions", () => {
+    expect(emphasisTreemap()).toEqual({
+      // `self`, not `series`: a treemap is one series whose tiles are data
+      // items, so `series` has no sibling to blur — the same reason the pie's
+      // is `self`.
+      focus: "self",
+      blur: {
+        itemStyle: { opacity: DIM },
+        // A caption at full ink on a dimmed tile reads as a labelling bug.
+        label: { opacity: DIM },
+      },
+    });
+  });
+});
 
 describe("barEndRadius", () => {
   it("rounds the end the value is at, in CSS corner order", () => {

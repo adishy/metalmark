@@ -14,13 +14,22 @@ import {
 } from "@/api/hooks";
 import { useLinkTransfer, useTransfer, useTransferCandidates, useUnlinkTransfer } from "@/api/transfers";
 import type { Account, Category, Money, SplitIn, Tag, Transaction } from "@/api/types";
-import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
+import { formatMoney, formatMoneySigned, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import { useIsDesktop } from "@/lib/media";
-import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
+import {
+  Button,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  useFieldId,
+  validAmount,
+} from "@/components/form";
 
 interface TxnDetailSheetProps {
   txn: Transaction;
@@ -179,12 +188,17 @@ function TxnDetailForm({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category" htmlFor={ids.category}>
-            <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="detail-category">
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-              ))}
-            </Select>
+            <Combobox
+              id={ids.category}
+              listLabel="Category"
+              value={categoryId}
+              onChange={setCategoryId}
+              options={[
+                { value: "", label: categoryLabel(null) },
+                ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+              ]}
+              data-testid="detail-category"
+            />
           </Field>
           <OwnerSelect
             value={owner}
@@ -400,7 +414,7 @@ function TransferSection({
               {` · ${accountName(counterpart.account_id)}`}
             </p>
             <p className="mt-1 text-sm text-fg">
-              {formatMoney(counterpart.amount, counterpart.currency)}
+              {formatMoneySigned(counterpart.amount, counterpart.currency)}
             </p>
           </button>
         )}
@@ -475,7 +489,7 @@ function TransferSection({
                 <div className="flex items-baseline justify-between gap-2">
                   <p className="min-w-0 truncate text-sm text-fg">{label(other)}</p>
                   <p className="shrink-0 text-sm text-fg">
-                    {formatMoney(other.amount, other.currency)}
+                    {formatMoneySigned(other.amount, other.currency)}
                   </p>
                 </div>
                 <p className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">

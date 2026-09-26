@@ -30,9 +30,19 @@ import {
   type OfxCommitResult,
   type OfxPreview,
 } from "@/api/import";
+import { categoryLabel } from "@/components/CategoryPicker";
 import Dialog from "@/components/Dialog";
 import { Day } from "@/components/datetime";
-import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId } from "@/components/form";
+import {
+  Button,
+  Checkbox,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  useFieldId,
+} from "@/components/form";
 
 interface ImportDialogProps {
   onClose: () => void;
@@ -305,18 +315,14 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
       {step === "review" && ofx && (
         <div className="space-y-4">
           <Field label="Import into" htmlFor={ids.account} required>
-            <Select
+            <Combobox
               id={ids.account}
+              listLabel="Import into"
               value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
+              onChange={setAccountId}
+              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
               data-testid="import-account"
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
+            />
           </Field>
 
           <div
@@ -366,19 +372,17 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
             htmlFor={ids.defaultCategory}
             hint="Where an uncategorised row lands. Everything else is left for your rules."
           >
-            <Select
+            <Combobox
               id={ids.defaultCategory}
+              listLabel="Default category"
               value={defaultCategoryId}
-              onChange={(e) => setDefaultCategoryId(e.target.value)}
+              onChange={setDefaultCategoryId}
+              options={[
+                { value: "", label: categoryLabel(null) },
+                ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+              ]}
               data-testid="import-default-category"
-            >
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
+            />
           </Field>
         </div>
       )}
@@ -386,18 +390,14 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
       {step === "map" && csv && (
         <div className="space-y-4">
           <Field label="Import into" htmlFor={ids.account} required>
-            <Select
+            <Combobox
               id={ids.account}
+              listLabel="Import into"
               value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
+              onChange={setAccountId}
+              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
               data-testid="import-account"
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
+            />
           </Field>
 
           <div>
@@ -485,19 +485,17 @@ export default function ImportDialog({ onClose, accounts, categories }: ImportDi
               htmlFor={ids.defaultCategory}
               hint="Where a category name the household does not have lands."
             >
-              <Select
+              <Combobox
                 id={ids.defaultCategory}
+                listLabel="Default category"
                 value={defaultCategoryId}
-                onChange={(e) => setDefaultCategoryId(e.target.value)}
+                onChange={setDefaultCategoryId}
+                options={[
+                  { value: "", label: categoryLabel(null) },
+                  ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+                ]}
                 data-testid="import-default-category"
-              >
-                <option value="">Uncategorized</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              />
             </Field>
             <Checkbox
               id={ids.dayfirst}

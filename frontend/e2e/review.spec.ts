@@ -1,6 +1,22 @@
 import { test, expect, type Page } from "@playwright/test";
 import { addAccount, addTransaction, login, readRemaining, reviewTarget } from "./helpers";
 
+// The deck's own spec, and every test in it runs below `lg:` — because above `lg:`
+// there is no deck to test. `/review` is §9's one recorded exception to "a page
+// must not have two JSX trees branching on viewport" (ADR-0057): the deck of
+// §4.17 is the phone's instrument and the triage table at `lg:` is the desktop's,
+// and the table's half of this suite is in `desktop.spec.ts`.
+//
+// This file is therefore the *proof* that the phone's Review is unchanged, and it
+// is pinned rather than left to the default 1280: an unpinned spec here would
+// quietly stop testing the deck the day the table landed, and pass.
+//
+// 768 is a phone-shaped window, not a phone: it is below `lg:` (so the deck is
+// what renders) and above `sm:` (so the header nav the seeding helpers click is
+// visible). §5's actual phone widths, and what the deck does at them, are
+// `mobile.spec.ts` and the two §4.17 geometry tests below.
+test.use({ viewport: { width: 768, height: 1024 } });
+
 // Poll until the given merchant is no longer the visible review card (either the
 // deck advanced to a different card or the queue emptied).
 async function cardCleared(page: Page, merchant: string): Promise<void> {
@@ -170,9 +186,15 @@ test("review: editing a card from the deck files nothing (§4.17)", async ({ pag
   // read off the option rather than hard-coded: the demo ledger's categories are
   // seed data, and a spec that names one is a spec that breaks when the seed
   // changes for reasons that have nothing to do with this page.
+  //
+  // The picker is a `Combobox`, so "the second option" is the second row of the
+  // open listbox and picking it is a click on that row — a `<select>`'s options
+  // do not exist as elements until a browser draws them.
   const select = page.getByTestId("detail-category");
-  const label = await select.locator("option").nth(1).textContent();
-  await select.selectOption({ index: 1 });
+  await select.click();
+  const rows = page.getByRole("option");
+  const label = await rows.nth(1).textContent();
+  await rows.nth(1).click();
   await page.getByTestId("txn-detail-save").click();
   await expect(page.getByTestId("txn-detail")).toHaveCount(0);
 
@@ -206,20 +228,44 @@ test("review: the keyboard does not decide the card under the open sheet", async
   await cardCleared(page, merchant);
 });
 
-test.describe("the detail opens over the deck (§9.3)", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test("at lg: it is a slide-over, because Review has no second column", async ({ page }) => {
-    const merchant = `Deck Pane ${Date.now()}`;
+// The other side of the breakpoint, and the reason this file's pin is a claim
+// rather than a convenience: widen the same window and the deck is not there.
+//
+// The queue is seeded through the deck at 768 — the helpers click the header nav,
+// which exists at every width this file uses — and then the window is widened to
+// `lg:`, where `Review` mounts the table instead. Both trees in one test is the
+// cheapest possible statement of the switch, and it is the assertion a page with
+// one tree could not have.
+test.describe("at lg: the page is the table, not the deck (ADR-0057)", () => {
+  test("widening the window replaces the deck with the rows, over which the detail is a dialog", async ({
+    page,
+  }) => {
+    const merchant = `Table Pane ${Date.now()}`;
     await queueUncategorized(page, merchant);
 
-    await page.getByTestId("review-edit").click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.getByTestId("review-rows")).toBeVisible();
+    await expect(page.getByTestId("review-deck")).toHaveCount(0);
+
+    const row = page
+      .getByTestId("review-rows")
+      .locator("li[data-row]")
+      .filter({ hasText: merchant })
+      .first();
+    await expect(row, "the seeded row must be in the table").toBeVisible();
+    // By testid, not `getByRole("button", { name: merchant })`: every control in
+    // the row names its transaction in its own label ("Ignore Table Pane …",
+    // "Mark … reviewed"), which is what a screen reader should hear and what
+    // makes the name alone ambiguous. The open button is the one that leads
+    // somewhere —
+    await row.locator('[data-testid^="review-open-"]').click();
+
     const detail = page.getByTestId("txn-detail");
     await expect(detail).toBeVisible();
     // A pane is `role=region` and sits in the page beside its list; the overlay
-    // is `role=dialog` and covers it. §9.3 gives Review one centred column, so
-    // there is no second column for a pane to be in — and at 1280 the width
-    // alone would have chosen the pane.
+    // is `role=dialog` and covers it. Review still has no second column to put a
+    // pane in — the list *is* the page at `lg:` — so at 1280 the width that would
+    // have chosen a pane on the ledger still chooses the overlay here.
     await expect(detail).toHaveAttribute("role", "dialog");
   });
 });

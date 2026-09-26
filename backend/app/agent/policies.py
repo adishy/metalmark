@@ -187,6 +187,11 @@ register(
     logo_updated_at=K,
 )
 register(le.BalanceOut, balance_date=K, balance=K, currency=Currency())
+# How many rows are filed under a category. Counts of rows an agent can already
+# read one by one, so they name nothing: a category's own name is a Label on
+# `CategoryOut`, and the number beside it is what `/transactions?category_id=…`
+# would return with pagination removed.
+register(le.CategoryUsageOut, transactions=K, splits=K)
 register(le.TagOut, id=K, name=Label("Tag"), color=Color())
 register(
     le.FxRateOut,

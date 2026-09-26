@@ -38,35 +38,48 @@ Scope: the `frontend/` React app. Not the API, not the finance rules.
 Seventeen tokens: the nine content roles, five support tokens
 (`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`), and three `-ink`
 variants for text on a tint (below the table). Contrast ratios
-below are computed against the surface each token is actually used on, and the
-**worst case in each theme** is the number shown.
+below are computed against the surface each token is actually used on — `fg`,
+`fg-muted`, `border-strong` and `focus` on all three levels, the role colours on the page
+and on a card, `border` where a divider is drawn (a card), `accent-fg` on `accent` — and
+the **worst case in each theme** is the number shown. Every figure here is measured with the
+WCAG 2.x relative-luminance formula rather than estimated, and every figure that a change
+moves is re-measured in the same commit — re-deriving one takes five lines of any language
+with `Math.pow`.
 
 | Role | Light | Dark | Verified contrast (worst case) |
 |---|---|---|---|
-| `surface` — page background | `#f8fafc` | `#020617` | — (base) |
-| `surface-raised` — cards, rows, sheets | `#ffffff` | `#0f172a` | — (base) |
-| `surface-inset` — inputs, wells, chips | `#f1f5f9` | `#1e293b` | — (base) |
-| `border` — dividers, decorative only | `#e2e8f0` | `#1e293b` | 1.23:1 light / 1.13:1 dark (no requirement) |
-| `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.34:1** light / **3.07:1** dark (needs 3:1) |
-| `fg` — primary text | `#0f172a` | `#f1f5f9` | **16.30:1** light / **13.35:1** dark (needs 4.5:1) |
-| `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.92:1** light / **5.71:1** dark (needs 4.5:1) |
-| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **5.23:1** light / **9.59:1** dark (needs 4.5:1) |
+| `surface` — page background | `#f0f4f8` | `#020617` | — (base) |
+| `surface-raised` — cards, rows, sheets | `#ffffff` | `#131b2b` | — (base) |
+| `surface-inset` — inputs, wells, chips | `#e8eef5` | `#1e293b` | — (base) |
+| `border` — dividers, decorative only | `#cbd5e1` | `#2e394b` | 1.48:1 on a card, both themes (no requirement) |
+| `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.07:1** light / **3.07:1** dark (needs 3:1) |
+| `fg` — primary text | `#0f172a` | `#f1f5f9` | **15.28:1** light / **13.35:1** dark (needs 4.5:1) |
+| `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.49:1** light / **5.71:1** dark (needs 4.5:1) |
+| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **4.95:1** light / **9.25:1** dark (needs 4.5:1) |
 | `accent-fg` — label on `accent` fill | `#ffffff` | `#020617` | **5.47:1** light / **10.84:1** dark (needs 4.5:1) |
-| `positive` — income, gain | `#047857` | `#34d399` | **5.24:1** light / **9.29:1** dark (needs 4.5:1) |
-| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **6.18:1** light / **6.45:1** dark (needs 4.5:1) |
-| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.80:1** light / **10.69:1** dark (needs 4.5:1) |
+| `positive` — income, gain | `#047857` | `#34d399` | **4.96:1** light / **8.96:1** dark (needs 4.5:1) |
+| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **5.85:1** light / **6.23:1** dark (needs 4.5:1) |
+| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.54:1** light / **10.32:1** dark (needs 4.5:1) |
 | `danger` — destructive button fill | `#b91c1c` | `#b91c1c` | **6.47:1** with `#ffffff` label, both themes |
-| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **5.23:1** light / **9.59:1** dark (needs 3:1) |
+| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **4.69:1** light / **7.86:1** dark on a well (needs 3:1) |
 
 **Ink tokens — text on a tint.** A selected chip (`bg-accent/20`), a "needs review"
 badge (`bg-warning/20`) and an error pill (`bg-negative/20`) put the role colour on a
-20 % wash of itself, and in light mode that fails 4.5:1 — measured 3.96:1 (accent),
-3.80:1 (warning), 4.4:1 (negative, on the page). Each role has an **`-ink`** token for
-exactly this: one step darker in light mode (teal-800 5.9:1, amber-800 5.8:1, red-800
-6.4:1), and equal to the role in dark mode, where it already clears 6.3:1. Rule: **text
-on a `bg-{role}/N` tint is `text-{role}-ink`**, never `text-{role}`.
+20 % wash of itself, and in light mode that fails 4.5:1 — measured on the page 3.77:1
+(accent), 3.47:1 (warning) and 4.17:1 (negative), and on a well 3.59 / 3.31 / 3.97. The
+one pairing that clears the floor is the negative pill on a card, at 4.57:1, which is not
+margin to build on. Each role has an **`-ink`** token for exactly this: one step darker in
+light mode (teal-800 5.23:1, amber-800 4.91:1, red-800 5.36:1 on the page; 4.98 / 4.67 /
+5.09 on a well), and equal to the role in dark mode, where a card gives 6.04:1 (accent),
+6.61:1 (warning) and 4.61:1 (negative). Rule: **text on a `bg-{role}/N` tint is
+`text-{role}-ink`**, never `text-{role}`.
 
-Three rules that follow from the table and are not negotiable:
+`negative-ink` on `bg-negative/20` over a *dark well* is 3.93:1 — a known gap that
+predates this table, unchanged by it, and not fixed here because no call site puts those
+two together (every `bg-negative/20` pill sits on a card or the page). Closing it means
+changing `negative` itself — a content role — so it is left alone deliberately.
+
+Four rules that follow from the table and are not negotiable:
 
 - **`fg-muted` is the floor.** There is no third, lighter text colour. The current
   `text-slate-500` on `bg-slate-900` is 3.75:1 and fails WCAG 1.4.3; deleting that
@@ -77,6 +90,40 @@ Three rules that follow from the table and are not negotiable:
   choice but computes to 2.56:1 and fails.
 - **`danger` is theme-independent.** `#b91c1c` works on both surfaces, so a
   destructive button is the same red in every theme and never has to be re-reasoned.
+- **The three surfaces are a ramp with a ceiling in each theme, and a content role sets
+  it.** In light, the page cannot go darker than `#f0f4f8`: `warning` (`#b45309`, the
+  weakest content role, 5.02:1 on white) is used *on the page* (`NoticePermission`), so a
+  darker page drops it under 4.5:1 — and the well cannot go darker than `#e8eef5`, because the
+  two translucent wells that carry warning text measure 4.58:1 at `bg-surface-inset/60`
+  over a card and 4.72:1 at `/40`. In dark, `border-strong` at 3.07:1 on the well is the
+  ceiling for the well; with `page → inset` therefore fixed at 1.38:1, the two adjacent
+  steps trade off exactly against each other, so they are equalised at 1.17:1 rather than
+  the 1.13/1.22 split they replaced. `border` is the one role in the ramp with no
+  requirement on it, and in dark it needed the room: the well was painted in the *same
+  value* as the border, so a border drawn on a well was invisible (1.00:1).
+
+The ramp, measured (this is what "more contrast between the three levels" means, and it
+is the only place these three pairs are stated):
+
+| Adjacent step | Light | Dark |
+|---|---|---|
+| page → card | 1.05:1 → **1.11:1** | 1.13:1 → **1.17:1** |
+| card → well | 1.10:1 → **1.17:1** | 1.22:1 → **1.18:1** |
+| page → well | 1.05:1 → **1.06:1** | 1.38:1 → 1.38:1 |
+| border on a card | 1.23:1 → **1.48:1** | 1.22:1 → **1.48:1** |
+| border on a well | 1.13:1 → **1.27:1** | 1.00:1 → **1.26:1** |
+
+Light's two adjacent pairs both improve (1.05 → 1.11 and 1.10 → 1.17) and neither is
+bounded, so they could go further only by moving the page or the well past a content
+role. Dark's weakest adjacent pair rises from 1.13:1 to 1.17:1, which is the most the
+ceiling allows: the well is already at the value `border-strong` permits, so the two
+steps trade off exactly, and dark's `card → well` sheds 0.04 to buy the weaker step up.
+
+The two *ends* of the ramp are a different story: `page → well` is 1.06:1 in light and
+1.38:1 in dark, and light's cannot improve without one of the two bounds above breaking.
+A well sitting directly on the page — the active nav pill, an input outside a card — is
+identified by its `border-strong` outline (4.07:1 light against the well, 4.31:1 against
+the page), which is exactly the job §2.1 gives that token.
 
 ### 2.2 Wiring into Tailwind v3
 
@@ -168,10 +215,10 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
 /* Light is the default; .dark on <html> overrides it. Every value is
    "R G B" so Tailwind's /opacity modifier works. */
 :root {
-  --surface: 248 250 252;        /* #f8fafc */
-  --surface-raised: 255 255 255; /* #ffffff */
-  --surface-inset: 241 245 249;  /* #f1f5f9 */
-  --border: 226 232 240;         /* #e2e8f0 */
+  --surface: 240 244 248;        /* #f0f4f8 — the page */
+  --surface-raised: 255 255 255; /* #ffffff — cards */
+  --surface-inset: 232 238 245;  /* #e8eef5 — wells */
+  --border: 203 213 225;         /* #cbd5e1 — slate-300 */
   --border-strong: 100 116 139;  /* #64748b */
   --fg: 15 23 42;                /* #0f172a */
   --fg-muted: 71 85 105;         /* #475569 */
@@ -187,7 +234,8 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --focus: 15 118 110;           /* #0f766e */
 
   /* Categorical series, ordered so neighbouring slices differ in lightness.
-     All >= 5.02:1 on light surface (WCAG 1.4.11 needs 3:1). */
+     Worst series: 5.02:1 on a card, 4.54:1 on the page, 4.30:1 on a well
+     (WCAG 1.4.11 needs 3:1). */
   --chart-1: 15 118 110;   --chart-2: 3 105 161;
   --chart-3: 79 70 229;    --chart-4: 190 24 93;
   --chart-5: 180 83 9;     --chart-6: 4 120 87;
@@ -196,25 +244,26 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
 }
 
 .dark {
-  --surface: 2 6 23;             /* #020617 */
-  --surface-raised: 15 23 42;    /* #0f172a */
-  --surface-inset: 30 41 59;     /* #1e293b */
-  --border: 30 41 59;            /* #1e293b */
+  --surface: 2 6 23;             /* #020617 — slate-950 */
+  --surface-raised: 19 27 43;    /* #131b2b — slate-900 lifted one step */
+  --surface-inset: 30 41 59;     /* #1e293b — at the border-strong ceiling */
+  --border: 46 57 75;            /* #2e394b — slate-800 toward slate-700 */
   --border-strong: 100 116 139;  /* #64748b */
   --fg: 241 245 249;             /* #f1f5f9 */
   --fg-muted: 148 163 184;       /* #94a3b8 */
   --accent: 45 212 191;          /* #2dd4bf */
   --accent-fg: 2 6 23;           /* #020617 */
-  --accent-ink: 45 212 191;      /* = accent; already 6.3:1 on its tint */
+  --accent-ink: 45 212 191;      /* = accent; already 6.04:1 on its tint */
   --positive: 52 211 153;        /* #34d399 */
   --negative: 248 113 113;       /* #f87171 */
   --negative-ink: 248 113 113;   /* = negative */
   --warning: 251 191 36;         /* #fbbf24 */
-  --warning-ink: 251 191 36;     /* = warning; 6.9:1 on its tint */
+  --warning-ink: 251 191 36;     /* = warning; 6.61:1 on its tint */
   --danger: 185 28 28;           /* #b91c1c — same fill in both themes */
   --focus: 45 212 191;           /* #2dd4bf */
 
-  /* Same ten hues, lifted for a dark surface. All >= 6.76:1. */
+  /* Same ten hues, lifted for a dark surface. Worst series: 6.76:1 on the
+     page, 5.77:1 on a card, 4.90:1 on a well. */
   --chart-1: 20 184 166;   --chart-2: 56 189 248;
   --chart-3: 129 140 248;  --chart-4: 244 114 182;
   --chart-5: 251 191 36;   --chart-6: 52 211 153;
@@ -410,7 +459,7 @@ The mapping, per chart:
 | `axisLabel.color`, `legend.textStyle.color` | `fg-muted` |
 | `tooltip.backgroundColor` / `borderColor` | `surface-raised` / `border` |
 | `tooltip.textStyle.color` | `fg` |
-| `pie.itemStyle.borderColor` | `surface-raised` (currently `#0f172a`) |
+| `pie.itemStyle.borderColor` | `surface-raised` (currently `#131b2b` dark) |
 | series colours | `chart-1` … `chart-10` in order |
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
@@ -500,7 +549,7 @@ Seven further chart rules:
 
 §2.9 covers what a chart is painted with; this covers what it does when pointed at.
 Every option is assembled from `src/theme/chartInteraction.ts` — **no page writes a
-`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the seven charts cannot
+`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the charts cannot
 drift apart. §8 rule 8 enforces that.
 
 **Hovering never removes ink.** The rule exists because it was broken: the net-worth
@@ -608,9 +657,10 @@ default, and it is what a user with JS disabled or still loading gets. The scrip
 job is to *remove* it when the resolution is light, and `classList.toggle` does that in
 one line. Remove it and the no-JS state becomes light-on-a-dark-app instead.
 
-**Mobile browser chrome.** The static `<meta name="theme-color" content="#0f172a">`
-must be updated from JS on theme change (`#f8fafc` light, `#020617` dark) or the
-phone's toolbar stays dark over a light page.
+**Mobile browser chrome.** The static `<meta name="theme-color" content="#f0f4f8">` in
+`index.html` is the pre-JS value and mirrors the light `--surface`; JS must update it on
+theme change (`#f0f4f8` light, `#020617` dark — `THEME_COLOR` in `theme.ts`) or the
+phone's toolbar stays dark over a light page. `e2e/visual.spec.ts` asserts both.
 
 **The React side** is one tiny module, `src/theme/theme.ts`:
 
@@ -633,7 +683,7 @@ export function apply(pref: Theme) {
   try { localStorage.setItem(KEY, pref); } catch {}
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", dark ? "#020617" : "#f8fafc");
+    ?.setAttribute("content", dark ? "#020617" : "#f0f4f8");
 }
 ```
 
@@ -758,16 +808,35 @@ Checkboxes are covered separately in §4.14.
 
 ### 4.4 Selects and pickers
 
-- **Native `<select>` under ~15 options.** It gets the platform's own accessible
-  picker on mobile for free and costs nothing to maintain. Most of this app's lists
-  (owners, account types, currencies) qualify.
-- **A searchable `<select>`-like control only above ~15 options.** The category list
-  is the one that will grow past that.
+The question is not how many options a list has but **where the list comes from**. A
+list the component writes out itself is a `<select>`; a list the household fills with
+its own rows is a `Combobox`.
+
+- **Native `<select>` for a closed vocabulary, and for a list the app itself bounds.**
+  Review status, category-group type, sync interval, account type, token expiry, the
+  CSV import's column meanings: the component writes the options out, there is nothing
+  in them to search, and the platform draws the popup, the keyboard model and the
+  screen-reader semantics for free.
+- **`Combobox` (`components/form.tsx`) for a list of records that grows with the
+  household** — categories, owners, accounts, category groups, a rule's category and
+  owner. It is a text input with a listbox under it: typing narrows the list, and the
+  value, the search and the keyboard all live in the one control. A `<select>` over a
+  list that grows with the data is a list nobody can search.
+- **A `Combobox` renders the native `<select>` below `sm:`**, deliberately: the platform
+  picker is the right control for a thumb, a screen reader and the device's own zoom,
+  and a popover that hijacks it is a downgrade. The switch is by behaviour
+  (`useIsPhone`), never by a `sm:` class — a phone must not get the custom popup, and a
+  desktop must not get the OS list. Where a long list still needs a phone answer, that
+  answer is a **sheet with a search field** — the category picker below — not a taller
+  popup.
 - A custom picker must implement the APG combobox/listbox pattern in full:
   `role="combobox"` + `aria-expanded` + `aria-controls` on the input,
   `role="listbox"`/`role="option"` + `aria-selected` on the list, arrow keys to move,
   Enter to commit, Escape to dismiss, `aria-activedescendant` kept on the highlighted
-  option. Home/End jump to the ends. Type-ahead filters.
+  option, Home/End jump to the ends, Tab leaves without committing. Type-ahead filters.
+  `aria-activedescendant` only works while focus stays on the input, so the popup's rows
+  are not focusable and the popup prevents `mousedown` — a picker that moves focus into
+  its own list has already broken the pattern it claims to implement.
 - **The category picker specifically** (see §4.5 for the "New category" affordance):
   on phones, a bottom sheet containing a search field, a "Recently used" group of up
   to 5, then the grouped list. Never a modal `<select>` clone with no search.
@@ -1110,6 +1179,11 @@ The card is the question ("is this one right?"), the throw is the answer, and th
 has to say both. `/review` has exactly one job, so the card is the only content on the
 page and everything around it is about the card.
 
+**This section is the phone's instrument.** Everything in it holds below `lg:`; at `lg:`
+the queue is the triage table of §9.3 (ADR-0057), and the rules that survive the crossing —
+what a decision is not, what opening a card may not do, reduced motion, the arrow keys —
+hold there too, restated where they land.
+
 - **A deck has depth.** Two cards sit behind the live one — inset 8 px and 16 px per
   side, pushed down by the same amount — so their bottom edges show as two steps of a
   stack. They are empty rounded rectangles on purpose: a stack shows you the *edges* of
@@ -1131,8 +1205,9 @@ page and everything around it is about the card.
 - **The sheet opens over the deck, never beside it.** At `lg:` a transaction detail is
   normally a pane with the list beside it (§9.3/§9.6), and Review has no second column —
   one card, centred. So Review tells the sheet which presentation to use rather than
-  letting the width choose, and at 1280 the difference is visible: `role="dialog"` over the
-  deck, not `role="region"` in it.
+  letting the width choose. Below `lg:` that is unobservable, because a phone is always
+  given the overlay; the table at `lg:` is where it shows, and it is pinned there —
+  `role="dialog"` over the rows, not `role="region"` beside them.
 - **Arrow keys belong to the sheet while it is open.** A ← in the amount box is a caret
   move. Without the gate it would file the card the sheet is showing, behind the sheet,
   where nothing on screen says it happened.
@@ -1155,11 +1230,15 @@ page and everything around it is about the card.
 - **The next card does not arrive until the throw lands.** A card appearing behind one
   mid-throw spoils the throw, which is the only thing saying where the last decision
   went.
-- **Keyboard**: ← / → are the same two decisions and `e` opens the card, for the desktop
-  review pass. All three are window-level, and all three stand down while the sheet is
-  open or a field has focus.
+- **Keyboard**: ← / → are the same two decisions and `e` opens the card, wherever there is
+  a keyboard — a phone with one attached is still a phone. All three are window-level, and
+  all three stand down while the sheet is open or a field has focus. At `lg:` the same three
+  keys work, but they are the table's own handler on the list rather than a window listener
+  (§9.3): a window listener that is still mounted under a different instrument is a key
+  pressed on one page doing something on another.
   **Reduced motion** (§2.8): no throw, no rotation, no badge fade — the card leaves the
-  deck immediately, and the deck is faster for it, never slower.
+  deck immediately, and the deck is faster for it, never slower. (The table has no motion to
+  reduce: a row leaving a list is a layout change, not an animation.)
 
 ---
 
@@ -1185,9 +1264,11 @@ element past the edge or any container that scrolls sideways. Date inputs carry
 `min-width: 0` in `index.css`, because iOS gives them an intrinsic width wider than a
 phone column.
 
-**Dropdowns.** The native `<select>` keeps its platform picker (it is the right one
-on a phone) but not its platform arrow: `Select` draws the app's chevron. A filter or
-view switch on a phone is a `SheetSelect`, not a `<select>`.
+**Dropdowns.** `Select` keeps the native `<select>` but not its platform arrow: it draws
+the app's chevron. A record picker (`Combobox`, §4.4) is the native `<select>` on a
+phone anyway — that is what it renders below `sm:` — so the two agree about what a phone
+gets. A filter or view switch that is page chrome rather than a form field is a
+`SheetSelect`, not a `<select>`.
 
 **The bottom bar is 64 px tall** and each destination is the whole fifth of it; the
 active one's icon sits in a pill, so it is a shape change and never colour alone.
@@ -1541,17 +1622,20 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 # 8. Hand-written chart interaction. Every tooltip, axis pointer and emphasis
 #    comes from theme/chartInteraction.ts (§2.10), which is the only file
 #    allowed to name those keys — that is what makes hover behave identically
-#    on all seven charts instead of being remembered per chart.
+#    on every chart instead of being remembered per chart.
 #
 #    Not a bare grep, for the same reason rule 6 is not: `tooltip:` appears on
 #    correct code in the form `tooltip: chartTooltip(t)`. The script keys on the
 #    key *not* being followed by the matching builder, which needs a lookahead
 #    (`grep -P`, so not portable to the BSD grep this list is otherwise written
-#    for). The shell form is therefore the intent, and the script is the check:
+#    for). The shell form is therefore the intent, and the script is the check —
+#    the `emphasis` list below is the script's own alternation, so a new emphasis
+#    helper is added in both places, or the rule fires on the file that wrote it:
 #
 #      tooltip:      NOT followed by chartTooltip(
 #      axisPointer:  anywhere outside the module
 #      emphasis:     NOT followed by emphasisLine( | emphasisBar( | emphasisPie(
+#                    | emphasisSankey( | emphasisStrip( | emphasisTreemap(
 
 # 9. An ISO date as visible text. `2026-01-01` is a wire format, and the date
 #    vocabulary in lib/dates.ts is what a person reads; the ISO form belongs in
@@ -1578,8 +1662,9 @@ Settings card.
 - DevTools → Rendering → *Emulate CSS `prefers-color-scheme`* — flip both ways with no
   reload; the page must not flash on load (hard-reload with cache disabled to test the
   blocking script).
-- DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check
-  `text-fg-muted` on `surface-inset`, which is the tightest pair we allow.
+- DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check the
+  two tightest pairs: `text-warning` on the page (4.54:1 light, the floor the palette is
+  built from) and `text-fg-muted` on `surface-inset` (6.49:1 light, 5.71:1 dark).
 - Lighthouse → Accessibility ≥95 on `/login`, `/accounts`, `/transactions`,
   `/insights/overview`, `/settings`. Note the score is a floor, not the goal: it does not test
   target size or live regions.
@@ -1619,14 +1704,30 @@ that already works at 360 px, never a second layout. **A page must not have two 
 branching on viewport**; that is how the two drift and the untested one rots. If a rule
 cannot be expressed as a class variant, it is not a desktop rule.
 
+**One exception: Review** (ADR-0057). `/review` is the deck of §4.17 below `lg:` and a
+triage table at `lg:`, and they are two trees rather than one tree with variants, for the
+reason the rule exists: two instruments can be one tree only if the *differences* can be
+written as classes, and here they cannot. The deck's decision is a gesture — a card thrown
+off the screen — and its keys are on `window`; a single tree would have to keep both the
+card and the rows in the DOM and hide one with `lg:hidden`, which leaves the hidden deck's
+window keydown live under the table, swallowing ← and → while the table is what is on
+screen. That is not a layout detail, it is two instruments fighting for one keyboard.
+
+So the rule keeps its force by making the exception expensive to copy: **both trees are
+covered**, `review.spec.ts` pinned below `lg:` for the deck and the table's own tests in
+`desktop.spec.ts`, plus unit tests that mount each. "The untested one rots" is answered by
+testing both, not by hoping. A second page that wants this must bring the same, and a
+page that hides one of its trees with a variant is not this exception at all — it is the
+drift the rule names, wearing the costume of compliance.
+
 ### 9.1 Content width
 
 One global width is the bug. Width follows what the content *is*:
 
 | Content | Max width | Why |
 |---|---|---|
-| Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
-| Insights, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
+| Ledger lists, the Review table, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get — and a queue is a ledger of decisions |
+| Insights, Accounts | `max-w-6xl` (1152) | Accounts' balances are a two-up card grid; the Insights reports are charts, which read this wide and no wider |
 | Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
 
 The shell sets the **widest** case and pages narrow themselves; a page that needs less
@@ -1658,22 +1759,57 @@ Five shapes, and they are the whole of it:
   with the detail panel in the second column, shown when a row is selected and a quiet
   empty state otherwise. This is the single biggest win: the phone's row → sheet → back
   loop becomes one click with no navigation.
-- **Insights (Overview) — two-up.** KPI row spans both columns; the charts pair two per
-  row above `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their
-  meaning when squeezed. The tab strip above it is `ScrollTabs` (§5), not part of this
-  shape.
+- **Insights (Overview) — one card per row, each claiming both columns.** It said
+  "the charts pair two per row above `lg:`" until issue #33: the net-worth card is a
+  headline, the four-term identity behind it, a chart and the report's caveats, so its
+  height follows the household's *account* count — ≈750 px in the demo household, ≈900 px
+  with twenty accounts — beside a 356 px cash-flow chart. A grid row is as tall as its
+  tallest cell, so the pairing left a blank column of that difference, and no cap closes
+  it: the chart is the last thing in the card, so any cap short enough to matter scrolls
+  the figure's own evidence out of sight. **Two cards whose heights are set by unrelated
+  content do not share a row.** The Sankey (§2.9) is full-width for the reason it always
+  was — flow diagrams lose their meaning when squeezed — and so is the spending
+  breakdown, whose legend is a list of categories with totals. The tab strip above is
+  `ScrollTabs` (§5), not part of this shape.
+  Its second tab, **Allocations, is a ranking in one card, bounded at `lg:`.** A ranking
+  has no natural end — the demo household's one cash row is 125 px, a forty-security
+  portfolio was measured at 2,212 px inside a 2,515 px page — and, unlike the pair above,
+  it has no second container that would have to agree with it, so the answer is not to
+  restructure but to bound: past `SCROLL_AFTER` rows the list scrolls inside the card
+  (`lg:max-h-96 lg:overflow-y-auto`) as §4.7's region — `role="region"`, `tabIndex={0}`,
+  a label naming the grouping and the row count — with the total, the excluded counts and
+  the price age below it staying on screen. Nothing is dropped: every row is in the DOM.
+  Below `lg:` there is no cap, because a page that scrolls is what a phone has and a
+  nested scroll region at 390 px is a trap (§5); a list short enough to fit gets no region
+  at all, since a focusable box that cannot scroll is a tab stop that does nothing.
 - **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
   their internal layout and simply stop being full-width.
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first
   column (`lg:w-56`), the active panel in the second. §4.14's roving tabindex and arrow
   keys are unchanged; only the axis changes, and `aria-orientation` goes with it.
-- **Review — a deck, and it stays small.** One card at a time, capped at `max-w-2xl` and
-  centred. This is the one page whose desktop shape is *not* wider: a decision card is
-  read at a glance, and the room would only push the merchant and the amount further
-  apart — which is exactly what the 864 px card this replaced did (§4.17). What the
-  desktop gets instead of width is the keyboard, ← / →. The transaction detail opens
-  **over** the deck as a slide-over (§9.6), never as a pane: a pane is the second column
-  of the Transactions shape, and there is no second column here to put it in.
+- **Review — a deck on a phone, a triage table at `lg:`.** §9's one recorded exception
+  (ADR-0057), and the only page here whose two widths are two trees instead of two variants.
+  Below `lg:` nothing changes: the deck of §4.17, one card, `max-w-2xl`, centred, thrown to
+  decide. At `lg:` the page is the queue itself — one row per pending transaction in §9.4's
+  vocabulary, under a real header row, inside `max-w-7xl` — because the job at 1280 px is a
+  *backlog*: get through fifty of them in order without waiting on an animation, and see at a
+  glance how many are left. It stays `max-w-7xl` and does not narrow: the row is the ledger's
+  six columns plus the two verdicts, and they need the room for the same reason the ledger's
+  do.
+  The keys are the deck's own — ← ignore, → reviewed, `c` category, `e` open — with ↑/↓ added
+  for the row, so the muscle memory crosses the breakpoint instead of being relearned. Three
+  things answer a decision, because there is no throw to carry it: the count, a status line
+  naming the row that was filed, and **focus landing on the row that took its place**. One
+  tab stop for the whole queue, not four per row (§4.14's roving model): a fifty-row queue is
+  otherwise two hundred stops, which is not a keyboard route to the fiftieth row. The keys
+  are printed above the table — §9.5 runs both ways, and a keyboard route nobody can find is
+  a keyboard route nobody uses.
+  The category is assigned by the same pill and the same `CategoryPicker` as the deck's, not
+  by a `<select>` per row: one way to assign a category in the app, and the row keeps its
+  place while it happens (§4.17's "a decision is not something to make by accident while
+  editing one" holds on both instruments). The transaction detail opens **over** the table as
+  a slide-over (§9.6) — still never a pane, now for the plainer reason that the list *is* the
+  page and a section beside it would be paying width it does not have.
 
 ### 9.4 The list row at `lg:`
 

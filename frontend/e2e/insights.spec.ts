@@ -198,6 +198,87 @@ test("allocations counts bank cash when asked and names its sources on tap", asy
   await expect(page.getByTestId("allocation-detail-close")).toBeVisible();
 });
 
+// The treemap view (issue #34) is one more thing a component test cannot see:
+// jsdom has no canvas, so the component test asserts the wrapper's accessible
+// name and nothing behind it. This is the only place that proves the tiles are
+// actually drawn from the API's rows, that the picture's colour key lines up with
+// the swatch beside a row, and that the view switch takes the picture away
+// without taking the figures with it.
+//
+// The tooltip is the part of a chart that is DOM rather than canvas, which is
+// what makes a tile's *content* readable here at all (the same shape as the
+// cash-flow tooltip test below) — and it is where a reader gets the exact figure
+// an area can only approximate.
+test("allocations draws the treemap, keys the rows to it, and yields to the list", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto("/insights/allocations");
+  await expect(page.getByTestId("allocation-row-cash")).toBeVisible();
+
+  const chart = page.getByTestId("allocation-treemap");
+  await expect(chart.locator("canvas")).toBeVisible();
+
+  // The chart's accessible name is its finding — the total, how many groups it is
+  // spread across, and the largest by name (§2.9: canvas is invisible, so this is
+  // all a screen reader is told about the picture).
+  const name = (await chart.getAttribute("aria-label")) ?? "";
+  expect(name).toMatch(/^Allocation by security, as of [A-Z][a-z]{2} \d{2}: /);
+  expect(name).toMatch(/\$[\d,]+\.\d{2} across \d+ group/);
+  expect(name).toContain("is the largest at $");
+
+  // A tile's tooltip: money in the report's currency and the row's own share.
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("allocation-treemap has no bounding box");
+  const tooltip = chart.locator(".mm-chart-tooltip");
+  await expect
+    .poll(
+      async () => {
+        // Off the chart and back: the tooltip has to re-open for the tile the
+        // pointer is over, not stand from the last one.
+        await page.mouse.move(4, 4);
+        await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+        return (await tooltip.innerText().catch(() => "")).trim();
+      },
+      { timeout: 15_000, message: "the treemap tooltip never opened" },
+    )
+    .toMatch(/^Cash: \$[\d,]+\.\d{2} \(\d+\.\d%\)$/);
+
+  // The swatch beside a row is the colour its own tile is painted in — the same
+  // palette slot, not merely a colour — which is what makes the list a key to
+  // the picture rather than a second list of numbers.
+  const firstSwatch = page.locator('[data-testid^="allocation-swatch-"]').first();
+  await expect(firstSwatch).toBeVisible();
+  const [painted, slot] = await Promise.all([
+    firstSwatch.evaluate((el) => getComputedStyle(el).backgroundColor),
+    page.evaluate(() => {
+      const [r, g, b] = getComputedStyle(document.documentElement)
+        .getPropertyValue("--chart-1")
+        .trim()
+        .split(/\s+/)
+        .map(Number);
+      return `rgb(${r}, ${g}, ${b})`;
+    }),
+  ]);
+  expect(painted).toBe(slot);
+
+  // The switch decides whether the picture is drawn, and nothing else: the
+  // picture and its swatches go, every row and the total stay.
+  const total = await page.getByTestId("allocation-total").innerText();
+  await page.getByTestId("allocation-view-list").click();
+  await expect(page.getByTestId("allocation-view-list")).toHaveAttribute("aria-selected", "true");
+  await expect(chart).toHaveCount(0);
+  await expect(page.getByTestId("allocation-swatch-cash")).toHaveCount(0);
+  await expect(page.getByTestId("allocation-total")).toHaveText(total);
+  await expect(page.getByTestId("allocation-row-cash")).toBeVisible();
+
+  // And back: the same picture, drawn again for the same rows.
+  await page.getByTestId("allocation-view-treemap").click();
+  await expect(chart.locator("canvas")).toBeVisible();
+  await expect(page.locator('[data-testid^="allocation-swatch-"]').first()).toBeVisible();
+});
+
 // A chart's tooltip is the one part of it that is DOM rather than canvas, which makes
 // it the only part of a chart's *content* this suite can read — and it is where a
 // reader gets the exact figures an axis can only abbreviate (§6.5). It used to hand

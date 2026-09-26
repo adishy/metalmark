@@ -62,6 +62,17 @@ export const chartTokens = () => ({
   label: token("fg-muted"),
   /** Card and tooltip background — charts sit on raised surfaces. */
   surface: token("surface-raised"),
+  /**
+   * Text drawn **on** a series fill — a treemap tile's name.
+   *
+   * The surface is the right colour for it by construction rather than by taste:
+   * the series slots are picked against the surface (the 600s clear 3:1 on white
+   * in light mode, the 400s carry on slate in dark), so whatever the card is
+   * behind a chart is also what reads on top of a filled mark. `fg-muted` — the
+   * axis and legend colour — is the one thing a tile's label cannot be, since it
+   * sits on the fill rather than beside it.
+   */
+  fillInk: token("surface-raised"),
   border: token("border"),
   /** Tooltip body text. */
   fg: token("fg"),
@@ -73,6 +84,35 @@ export const chartTokens = () => ({
 });
 
 export type ChartTokens = ReturnType<typeof chartTokens>;
+
+/**
+ * The same token as an `#rrggbb` string, or `null` where it is not defined.
+ *
+ * `token()` is for ECharts, which takes a live colour string and never stores
+ * one. This is for the colour picker, whose value has to be *written down*:
+ * `categories.color` and `tags.color` hold a hex, and the swatch you clicked
+ * has to still be there after a reload and a theme flip. So the palette is
+ * still index.css — a swatch is a custom property read at the moment it is
+ * clicked — but what it hands back is a value the API accepts.
+ *
+ * Deliberately not strict the way `token()` is. `tokenHex` has a caller that
+ * can do without it (a picker with no palette still has the custom control),
+ * and it is also read during the first render, where throwing would take the
+ * whole page down over a missing style; `token()`'s throw is there to catch a
+ * typo that would otherwise paint the wrong theme silently.
+ */
+export function tokenHex(name: string): string | null {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(`--${name}`)
+    .trim();
+  const parts = raw.split(/\s+/).map(Number);
+  // `"".split(/\s+/)` is `[""]`, which is one part, not three — the empty case
+  // falls out of the length check rather than needing its own.
+  if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return null;
+  }
+  return `#${parts.map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}
 
 /**
  * Read the tokens for the current theme.

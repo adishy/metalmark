@@ -1,3 +1,27 @@
+// `/review`. Below `lg:` it is the swipe deck in this file (§4.17); at `lg:` it
+// is the triage table in `ReviewTable.tsx` (§9.3, ADR-0057). One instrument or
+// the other is mounted — never both, and never a deck pretending to be a table —
+// which is §9's one recorded exception to "a page must not have two JSX trees
+// branching on viewport", recorded there with its reason and with both trees
+// pinned by specs.
+//
+// The two are not two layouts of one thing. A deck is a *thumb*: one question at
+// a time, answered by throwing it, and it is the right shape when the queue is
+// short and the phone is what you have. A table is a *keyboard*: the whole
+// backlog in front of you, ↑/↓ down it, ←/→ to file — and the right shape when
+// the queue is fifty rows and the desk is what you have. Neither is a class
+// variant of the other, which is exactly why one is a tree and the other is
+// another tree.
+//
+// What the two do share is what the page *says* — the count, and the three
+// states a queue can be in before there is anything to review — and that lives
+// in `ReviewQueue.tsx` so the two cannot drift apart.
+
+export default function Review() {
+  const desktop = useIsDesktop();
+  return desktop ? <ReviewTable /> : <ReviewDeck />;
+}
+
 // Swipe review deck: right = reviewed, left = ignore/flag, up = open the
 // transaction (ARCHITECTURE §"Transaction review"). framer-motion drag with
 // optimistic advance; desktop keyboard (← / → to decide, `e` to open).
@@ -37,13 +61,15 @@ import {
   useUpdateTransaction,
 } from "@/api/hooks";
 import type { Account, Category, Transaction } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoneySigned } from "@/lib/format";
+import { useIsDesktop } from "@/lib/media";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
-import { Button } from "@/components/form";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import { ChevronDownIcon } from "@/components/icons";
 import CategoryPicker, { UNCATEGORIZED_ICON, categoryLabel } from "@/components/CategoryPicker";
+import ReviewTable from "@/pages/ReviewTable";
+import { ReviewQueueBody, ReviewRemaining } from "@/pages/ReviewQueue";
 
 /** How long a decided card stays in the DOM, flying to the side. Long enough to
  *  read as a throw, short enough that a fast reviewer is never waiting on it.
@@ -62,7 +88,7 @@ const FLICK_V = 650;
 const LIFT_PX = 140;
 const LIFT_TRIGGER = 80;
 
-export default function Review() {
+function ReviewDeck() {
   const queue = useTransactions({ review_status: "needs_review" });
   const categories = useCategories();
   const groups = useCategoryGroups();
@@ -232,178 +258,142 @@ export default function Review() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Review</h1>
-        {/* The queue count changes on every decision, and nothing moves focus to
-            it — the whole string is the status, not the numeral in it (§7.6). */}
-        <span
-          role="status"
-          aria-atomic="true"
-          className="text-sm text-fg-muted"
-          data-testid="review-remaining"
-        >
-          {/* Deliberately empty while loading or errored. "All done" is a claim
-              about the household's data and we do not yet know it is true —
-              announcing it, then correcting it, is worse than saying nothing.
-              The alert below carries the error. */}
-          {queue.isPending || queue.isError
-            ? ""
-            : remaining > 0
-              ? `${remaining} to review`
-              : "All done"}
-        </span>
+        {/* The count, and the three states below it, are shared with the table —
+            same sentence, same testids, one implementation (`ReviewQueue.tsx`). */}
+        <ReviewRemaining queue={queue} remaining={remaining} />
       </div>
 
-      {/* Three distinct states, never conflated (§4.10/§4.11). Before this, a
-          failed fetch and a slow one both rendered "Nothing to review. 🎉" —
-          which tells the user their queue is clear when in fact it never
-          loaded. */}
-      {queue.isError ? (
-        <div
-          className="rounded-card bg-surface-raised px-4 py-10 text-center"
-          data-testid="review-error"
-        >
-          <p role="alert" className="text-sm text-negative">
-            <span aria-hidden="true">⚠ </span>Couldn&rsquo;t load your review queue.
-          </p>
-          <p className="mt-1 text-sm text-fg-muted">
-            {queue.error instanceof Error ? queue.error.message : "The request failed."}
-          </p>
-          <Button variant="secondary" className="mt-3" onClick={() => queue.refetch()}>
-            Try again
-          </Button>
-        </div>
-      ) : queue.isPending ? (
-        <p
-          className="rounded-card bg-surface-raised px-4 py-10 text-center text-sm text-fg-muted"
-          data-testid="review-loading"
-        >
-          Loading your review queue…
-        </p>
-      ) : !current ? (
-        <p
-          className="rounded-card bg-surface-raised px-4 py-10 text-center text-sm text-fg-muted"
-          data-testid="review-empty"
-        >
-          Nothing to review. 🎉
-        </p>
-      ) : (
-        <>
-          {/* `h-72` (288 px) is measured, not chosen: at 360 px with a merchant
-              long enough to wrap three times the card's content comes to 190 px,
-              and at 320 px (§8 rule 9's floor) four lines make it ~218. With
-              `p-6` that leaves 240 px of box, so the worst realistic card fits
-              with slack and none of it is clipped. Nothing here wraps at `lg:`,
-              so the same height is what the card keeps — a deck that grew with
-              the window would just be the same card with a longer shadow. */}
-          <div className="relative h-[clamp(18rem,50vh,28rem)]" data-testid="review-deck">
-            {/* The stack (§4.17): two cards behind the live one, inset and
-                pushed down so their bottom edges show. Empty on purpose — see
-                the note at the top of the file.
+      {/* Three distinct states, never conflated (§4.10/§4.11) — see
+          `ReviewQueueBody`.
 
-                Painted in reverse order so the nearest card is last and lands
-                directly under the live one; the live card is `absolute inset-0`
-                and covers all but those edges. `-bottom-4` reaches 16 px into
-                the `space-y-6` below, which is where the room for it is. */}
-            <div
-              aria-hidden="true"
-              className="absolute inset-x-4 top-4 -bottom-4 rounded-card border border-border bg-surface-raised"
-            />
-            <div
-              aria-hidden="true"
-              className="absolute inset-x-2 top-2 -bottom-2 rounded-card border border-border bg-surface-raised shadow-sm"
-            />
+          `current ?` is not belt and braces. A child element is *built* by the
+          render that passes it, before any of these branches are read, so the
+          card's own JSX below would run its `current.id` / `current.account_id`
+          on a loading or empty queue — a white page, not an empty state. The
+          guard is what keeps "there is no card" from being evaluated as "there
+          is a card". */}
+      <ReviewQueueBody queue={queue} isEmpty={!current}>
+        {current ? (
+          <>
+            {/* `h-72` (288 px) is measured, not chosen: at 360 px with a merchant
+                long enough to wrap three times the card's content comes to 190 px,
+                and at 320 px (§8 rule 9's floor) four lines make it ~218. With
+                `p-6` that leaves 240 px of box, so the worst realistic card fits
+                with slack and none of it is clipped. Nothing here wraps at `lg:`,
+                so the same height is what the card keeps — a deck that grew with
+                the window would just be the same card with a longer shadow. */}
+            <div className="relative h-[clamp(18rem,50vh,28rem)]" data-testid="review-deck">
+              {/* The stack (§4.17): two cards behind the live one, inset and
+                  pushed down so their bottom edges show. Empty on purpose — see
+                  the note at the top of the file.
 
-            <SwipeCard
-              // Keyed on the id so a new card is a new element: the motion value
-              // that carries the drag belongs to the card, and reusing the node
-              // would hand the next transaction the last one's position.
-              key={current.id}
-              txn={current}
-              account={accountFor.get(current.account_id)}
-              categoryName={currentCategory ? catById.get(currentCategory)?.name : undefined}
-              categoryIcon={currentCategory ? (catById.get(currentCategory)?.icon ?? undefined) : undefined}
-              onDecide={(keep) => decide(current, keep)}
-              onEdit={openEditor}
-              // Which way it is on its way out, if it is. Only ever set on the
-              // card the deck is actually drawing — see `current` above.
-              fly={leaving ? (leaving.right ? "right" : "left") : null}
-            />
-          </div>
+                  Painted in reverse order so the nearest card is last and lands
+                  directly under the live one; the live card is `absolute inset-0`
+                  and covers all but those edges. `-bottom-4` reaches 16 px into
+                  the `space-y-6` below, which is where the room for it is. */}
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-4 top-4 -bottom-4 rounded-card border border-border bg-surface-raised"
+              />
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-2 top-2 -bottom-2 rounded-card border border-border bg-surface-raised shadow-sm"
+              />
 
-          {/* In flow, not `absolute -bottom-14` as they were. The old buttons
-              were positioned outside the deck's own box, so the box reserved no
-              space for them and the distance to the card grew with the card;
-              worse, they were the primary tap target on the phone and nothing in
-              the layout knew they existed. `min-h-11` on both, because these are
-              the primary phone interaction and `py-2 text-sm` alone computed to
-              36 px (§4.1, §5). */}
-          {/* The category, one tap from the deck: the most common reason to
-              stop on a card is that it is filed wrong, and opening the whole
-              sheet for that was the long way round. Above the verdicts, so the
-              order on screen is the order of the job — file it, then decide. */}
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => setPicking(true)}
-              disabled={leaving !== null}
-              className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-border-strong bg-surface-raised px-4 text-base hover:bg-surface-inset"
-              aria-haspopup="dialog"
-              data-testid="review-category"
-            >
-              {currentCategory && catName.get(currentCategory) ? (
-                <span className="truncate">{catName.get(currentCategory)}</span>
-              ) : (
-                <span className="truncate text-fg-muted">
-                  <span aria-hidden="true">{UNCATEGORIZED_ICON} </span>Choose a category
-                </span>
-              )}
-              {/* A caret, not the word "Change": the pill already reads as
-                  something to tap, and the word looked like a second label. */}
-              <ChevronDownIcon className="size-4 shrink-0 text-fg-muted" />
-              <span className="sr-only">Change category</span>
-            </button>
-          </div>
-          {setCategory.isError && (
-            <p className="text-center text-sm text-negative" role="alert" data-testid="review-category-error">
-              Couldn&rsquo;t save the category: {(setCategory.error as Error).message}
-            </p>
-          )}
+              <SwipeCard
+                // Keyed on the id so a new card is a new element: the motion value
+                // that carries the drag belongs to the card, and reusing the node
+                // would hand the next transaction the last one's position.
+                key={current.id}
+                txn={current}
+                account={accountFor.get(current.account_id)}
+                categoryName={currentCategory ? catById.get(currentCategory)?.name : undefined}
+                categoryIcon={currentCategory ? (catById.get(currentCategory)?.icon ?? undefined) : undefined}
+                onDecide={(keep) => decide(current, keep)}
+                onEdit={openEditor}
+                // Which way it is on its way out, if it is. Only ever set on the
+                // card the deck is actually drawing — see `current` above.
+                fly={leaving ? (leaving.right ? "right" : "left") : null}
+              />
+            </div>
 
-          <div className="flex flex-wrap justify-center gap-2 sm:gap-4">
-            <button
-              onClick={() => decide(current, false)}
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-surface-inset px-4 text-sm text-negative sm:px-6"
-              data-testid="review-reject"
-            >
-              ← Ignore
-            </button>
-            {/* Between the two decisions and styled as neither: it is the way
-                *out* of the row, not a third answer to it. Outline rather than
-                a fill, because a filled third button would be read as a third
-                verdict — and the two verdicts are the two directions. */}
-            <button
-              onClick={openEditor}
-              className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-strong px-4 text-sm text-fg-muted sm:px-5"
-              data-testid="review-edit"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => decide(current, true)}
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-4 text-sm font-medium text-accent-fg sm:px-6"
-              data-testid="review-approve"
-            >
-              Reviewed →
-            </button>
-          </div>
-        </>
-      )}
+            {/* In flow, not `absolute -bottom-14` as they were. The old buttons
+                were positioned outside the deck's own box, so the box reserved no
+                space for them and the distance to the card grew with the card;
+                worse, they were the primary tap target on the phone and nothing in
+                the layout knew they existed. `min-h-11` on both, because these are
+                the primary phone interaction and `py-2 text-sm` alone computed to
+                36 px (§4.1, §5). */}
+            {/* The category, one tap from the deck: the most common reason to
+                stop on a card is that it is filed wrong, and opening the whole
+                sheet for that was the long way round. Above the verdicts, so the
+                order on screen is the order of the job — file it, then decide. */}
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setPicking(true)}
+                disabled={leaving !== null}
+                className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-border-strong bg-surface-raised px-4 text-base hover:bg-surface-inset"
+                aria-haspopup="dialog"
+                data-testid="review-category"
+              >
+                {currentCategory && catName.get(currentCategory) ? (
+                  <span className="truncate">{catName.get(currentCategory)}</span>
+                ) : (
+                  <span className="truncate text-fg-muted">
+                    <span aria-hidden="true">{UNCATEGORIZED_ICON} </span>Choose a category
+                  </span>
+                )}
+                {/* A caret, not the word "Change": the pill already reads as
+                    something to tap, and the word looked like a second label. */}
+                <ChevronDownIcon className="size-4 shrink-0 text-fg-muted" />
+                <span className="sr-only">Change category</span>
+              </button>
+            </div>
+            {setCategory.isError && (
+              <p className="text-center text-sm text-negative" role="alert" data-testid="review-category-error">
+                Couldn&rsquo;t save the category: {(setCategory.error as Error).message}
+              </p>
+            )}
+
+            <div className="flex flex-wrap justify-center gap-2 sm:gap-4">
+              <button
+                onClick={() => decide(current, false)}
+                className="inline-flex min-h-11 items-center justify-center rounded-full bg-surface-inset px-4 text-sm text-negative sm:px-6"
+                data-testid="review-reject"
+              >
+                ← Ignore
+              </button>
+              {/* Between the two decisions and styled as neither: it is the way
+                  *out* of the row, not a third answer to it. Outline rather than
+                  a fill, because a filled third button would be read as a third
+                  verdict — and the two verdicts are the two directions. */}
+              <button
+                onClick={openEditor}
+                className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-strong px-4 text-sm text-fg-muted sm:px-5"
+                data-testid="review-edit"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => decide(current, true)}
+                className="inline-flex min-h-11 items-center justify-center rounded-full bg-accent px-4 text-sm font-medium text-accent-fg sm:px-6"
+                data-testid="review-approve"
+              >
+                Reviewed →
+              </button>
+            </div>
+          </>
+        ) : null}
+      </ReviewQueueBody>
 
       {/* Outside the deck's own branch, because the sheet is about a card that
           may no longer be the head of the queue: deciding one, or a refetch that
           drops it, must not close a form the user is still typing in.
 
           `presentation="overlay"` and not the pane — §9.3's Review shape is one
-          centred card, and a pane needs a second column to sit in. */}
+          centred column, and a pane needs a second column to sit in. The table
+          at `lg:` does the same, for the same reason. */}
       {current && (
         <CategoryPicker
           open={picking}
@@ -609,8 +599,7 @@ function SwipeCard({
           Number(txn.amount) < 0 ? "text-fg" : "text-positive"
         }`}
       >
-        {Number(txn.amount) > 0 ? "+" : ""}
-        {formatMoney(txn.amount, txn.currency)}
+        {formatMoneySigned(txn.amount, txn.currency)}
       </p>
     </motion.div>
   );

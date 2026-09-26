@@ -10,7 +10,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +27,7 @@ from app.models import (
     InvestmentTransaction,
     Tag,
     Transaction,
+    TransactionSplit,
 )
 from app.schemas.ledger import AccountCreate, AccountUpdate, CategoryUpdate, is_asset_for
 from app.schemas.patch import is_set
@@ -458,14 +459,19 @@ async def list_tags(session: AsyncSession) -> list[Tag]:
 
 async def update_category(session: AsyncSession, category_id: uuid.UUID,
                           data: CategoryUpdate) -> Category:
-    """Rename, re-emoji, recolour or move a category. Only the fields sent change."""
+    """Rename, re-emoji, recolour or move a category. Only the fields sent change.
+
+    A move is only ever within one type: a category's own type *is* its group's,
+    and every report reads it, so crossing income/expense/transfer would change
+    what the same rows mean without changing a row.
+    """
     obj = (
         await session.execute(select(Category).where(Category.id == category_id))
     ).scalar_one_or_none()
     if obj is None:
         raise LedgerError("Category not found", 404)
     fields = data.model_dump(exclude_unset=True)
-    if "group_id" in fields:
+    if "group_id" in fields and fields["group_id"] != obj.group_id:
         grp = (
             await session.execute(
                 select(CategoryGroup).where(CategoryGroup.id == fields["group_id"])
@@ -473,20 +479,135 @@ async def update_category(session: AsyncSession, category_id: uuid.UUID,
         ).scalar_one_or_none()
         if grp is None:
             raise LedgerError("Category group not found", 404)
+        # A category's type *is* its group's, and the type is what every report
+        # reads (ARCHITECTURE §2): an expense category that moved to an income
+        # group would keep its rows and flip which side of cash flow they count
+        # on, with nothing in the ledger having changed. Moving between two
+        # groups of the *same* type is a re-file and is allowed.
+        #
+        # The group is non-nullable and CASCADE-bound, so the category's current
+        # group cannot have gone missing behind it; `session.get` therefore
+        # returns a row, and a None here would be a bug rather than a state.
+        current = await session.get(CategoryGroup, obj.group_id)
+        if current is not None and current.type != grp.type:
+            raise LedgerError(
+                f"A category cannot move from a {current.type} group to a "
+                f"{grp.type} one: its group's type is what the reports read.",
+                422,
+            )
     for name, value in fields.items():
         setattr(obj, name, value)
     await session.flush()
     return obj
 
 
-async def delete_category(session: AsyncSession, category_id: uuid.UUID) -> None:
+async def delete_category(session: AsyncSession, category_id: uuid.UUID, *,
+                          reassign_to: uuid.UUID | None = None) -> dict[str, int]:
+    """Move everything filed under ``category_id``, then delete it.
+
+    ``reassign_to`` names the category those rows move to, and ``None`` — the
+    default — means they move to **Uncategorized**. That is not a row to look up
+    but the *absence* of a category (``category_id IS NULL``) everywhere the
+    reports look, so "reassign to Uncategorized" is an UPDATE to NULL and never
+    a second spelling of the same state. A household that creates its own
+    category named "Uncategorized" is a different thing entirely, and reassigning
+    *to* it moves the rows into that row.
+
+    Returns the per-table counts, in the shape ``delete_owner`` uses, because the
+    UI says what moved after saying what would.
+
+    **The rows are moved explicitly rather than by leaning on the foreign key.**
+    Both columns are declared ``ON DELETE SET NULL``, but a database whose
+    ``0001`` ran while the constraint was written differently keeps that
+    constraint — no migration alters it — so the FK's behaviour is whatever the
+    database was built with. The UPDATE is the same on every one of them, and its
+    rowcount is the number the confirmation promised.
+    """
     obj = (
         await session.execute(select(Category).where(Category.id == category_id))
     ).scalar_one_or_none()
     if obj is None:
         raise LedgerError("Category not found", 404)
+
+    if reassign_to is not None:
+        if reassign_to == obj.id:
+            raise LedgerError("Cannot reassign to the category being deleted", 400)
+        target = (
+            await session.execute(select(Category).where(Category.id == reassign_to))
+        ).scalar_one_or_none()
+        if target is None:
+            raise LedgerError("Replacement category not found", 404)
+        # The same rule a move obeys, for the same reason: a category's type *is*
+        # its group's and every report reads it, so moving these rows across
+        # income/expense/transfer would change what they mean in the reports
+        # without changing a row. Somewhere to put them that keeps them meaning
+        # what they meant is the whole point of the prompt.
+        current = await session.get(CategoryGroup, obj.group_id)
+        moved = await session.get(CategoryGroup, target.group_id)
+        if current is not None and moved is not None and current.type != moved.type:
+            raise LedgerError(
+                f"A {current.type} category's entries cannot move to a "
+                f"{moved.type} one: its group's type is what the reports read.",
+                422,
+            )
+
+    counts = {
+        "reassigned_transactions": await _reassign_category(
+            session, Transaction, obj.id, reassign_to
+        ),
+        "reassigned_splits": await _reassign_category(
+            session, TransactionSplit, obj.id, reassign_to
+        ),
+    }
     await session.delete(obj)
     await session.flush()
+    return counts
+
+
+async def category_usage(session: AsyncSession, category_id: uuid.UUID) -> dict[str, int]:
+    """How many rows are filed under a category: what a delete would move.
+
+    Both tables, because a category can be carried by a transaction or by one leg
+    of a split, and a reader asked to confirm a delete needs the number of rows
+    that will change — not the number of transactions that happen to hold it.
+    """
+    obj = (
+        await session.execute(select(Category).where(Category.id == category_id))
+    ).scalar_one_or_none()
+    if obj is None:
+        raise LedgerError("Category not found", 404)
+    return {
+        "transactions": await _filed_under(session, Transaction, obj.id),
+        "splits": await _filed_under(session, TransactionSplit, obj.id),
+    }
+
+
+async def _filed_under(session: AsyncSession, model, category_id: uuid.UUID) -> int:
+    # RLS already scopes this to the household; `func.count()` rather than
+    # `len(rows)` because the answer is one number either way and only one of
+    # them loads the ledger to get it.
+    return (
+        await session.execute(
+            select(func.count()).select_from(model).where(model.category_id == category_id)
+        )
+    ).scalar_one()
+
+
+async def _reassign_category(session: AsyncSession, model,
+                             from_id: uuid.UUID, to_id: uuid.UUID | None) -> int:
+    """Move every row filed under one category to another, or to none at all.
+
+    ``synchronize_session=False``: the rows are not loaded and nothing after this
+    reads the identity map — the category is deleted next, and the sessions that
+    read transactions afterwards re-query.
+    """
+    result = await session.execute(
+        update(model)
+        .where(model.category_id == from_id)
+        .values(category_id=to_id)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
 
 
 async def delete_category_group(session: AsyncSession, group_id: uuid.UUID) -> None:

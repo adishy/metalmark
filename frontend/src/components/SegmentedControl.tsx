@@ -40,7 +40,7 @@ export default function SegmentedControl<T extends string>({
   testid,
   className,
 }: {
-  /** The group's accessible name — "Settings sections", "Group allocation by". */
+  /** The group's accessible name — "Settings sections", "Group by". */
   label: string;
   segments: readonly Segment<T>[];
   value: T;

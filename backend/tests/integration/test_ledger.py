@@ -17,12 +17,15 @@ from app.db import scoped_session
 from app.models import (
     Account,
     BalanceSnapshot,
+    Category,
     CategoryGroup,
     InvestmentTransaction,
     Owner,
     Tag,
+    Transaction,
+    TransactionSplit,
 )
-from app.schemas.ledger import AccountCreate, AccountUpdate
+from app.schemas.ledger import AccountCreate, AccountUpdate, CategoryUpdate
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, periods, reports
 from app.services import transactions as txns
@@ -883,3 +886,257 @@ async def test_explicit_null_tag_ids_clears_the_tags(household_factory):
         # explicit null: cleared
         await txns.update_transaction(s, hh, txn.id, TransactionUpdate(tag_ids=None))
         assert (await txns._tag_ids_for(s, [txn.id])) == {}
+
+
+async def test_a_category_can_be_renamed_in_place(household_factory):
+    """The whole of the rename path: one field, one row, nothing else touched."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Grocerys")
+        renamed = await ledger.update_category(s, cat.id, CategoryUpdate(name="Groceries"))
+    assert renamed.name == "Groceries"
+    assert (renamed.icon, renamed.color, renamed.group_id) == (cat.icon, cat.color, cat.group_id)
+
+
+async def test_a_category_can_move_between_groups_of_the_same_type(household_factory):
+    """A re-file is not a retype. Moving between two ``expense`` groups keeps
+    every report reading the rows the way it read them before."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Groceries")
+        other = await ledger.create_category_group(s, hh, "Everyday", "expense", 10)
+        moved = await ledger.update_category(s, cat.id, CategoryUpdate(group_id=other.id))
+    assert moved.group_id == other.id
+
+
+async def test_a_category_cannot_move_to_a_group_of_another_type(household_factory):
+    """A category's type *is* its group's, and every report reads the type.
+
+    Nothing in the ledger changes when the group does, so moving an expense
+    category into an income group left the same rows meaning the opposite thing:
+    the money kept its amount and its account and changed which side of cash flow
+    it counted on. A rename popover that offered every group could do that by
+    accident, so the service refuses it rather than trusting the caller not to.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Groceries")
+        income = await ledger.create_category_group(s, hh, "Income", "income", 0)
+        with pytest.raises(LedgerError) as exc:
+            await ledger.update_category(s, cat.id, CategoryUpdate(group_id=income.id))
+        assert exc.value.status == 422
+        # Refused, not half-applied.
+        assert cat.group_id != income.id
+
+        # Sending the group it already has is not a move, and stays allowed.
+        same = await ledger.update_category(s, cat.id, CategoryUpdate(group_id=cat.group_id))
+        assert same.group_id == cat.group_id
+
+
+async def test_deleting_a_category_moves_its_transactions_and_its_splits(household_factory):
+    """Both tables a category can be filed in, and the counts say so.
+
+    A split parent's own ``category_id`` is null — the legs are what carry the
+    category there (ADR-0031 §1) — so a delete that moved only ``transactions``
+    would leave every leg pointing at a row that no longer exists. The FK's
+    ``SET NULL`` would blank them one at a time rather than moving them anywhere,
+    which is the difference between "my split entries followed the category I
+    chose" and "my split entries quietly became uncategorized".
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        gone = await _make_category(s, hh, "expense", "Groceries")
+        kept = await _make_category(s, hh, "expense", "Food")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+
+        plain = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-20"), transacted_at=_dt(2026, 1, 4),
+            category_id=gone.id))
+        parent = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-50"), transacted_at=_dt(2026, 1, 5)))
+        await txns.replace_splits(s, parent.id, [
+            SplitIn(amount=D("-30"), category_id=gone.id),
+            SplitIn(amount=D("-20"), category_id=gone.id)])
+        untouched = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-9"), transacted_at=_dt(2026, 1, 6),
+            category_id=kept.id))
+
+        # What the confirmation is told before anything happens...
+        usage = await ledger.category_usage(s, gone.id)
+        # ...and what actually happened, in the same shape.
+        counts = await ledger.delete_category(s, gone.id, reassign_to=kept.id)
+
+    assert usage == {"transactions": 1, "splits": 2}
+    assert counts == {"reassigned_transactions": 1, "reassigned_splits": 2}
+
+    async with scoped_session(household_id=hh) as s:
+        after = {t.id: t.category_id for t in (await s.execute(select(Transaction))).scalars()}
+        legs = {sp.category_id for sp in (await s.execute(select(TransactionSplit))).scalars()}
+        left = {c.id for c in (await s.execute(select(Category))).scalars()}
+
+    assert after[plain.id] == kept.id
+    assert legs == {kept.id}
+    assert after[untouched.id] == kept.id  # nothing else moved
+    assert gone.id not in left
+
+
+async def test_deleting_a_category_to_uncategorized_leaves_no_category_behind(
+    household_factory,
+):
+    """The default target is not a row — it is the absence of one.
+
+    "Uncategorized" everywhere the reports look is ``category_id IS NULL``
+    (``default_categories.py``), so filing the entries there has to leave the
+    column empty rather than invent a category of that name. The number the
+    confirmation promised is the number of rows that came out of the category,
+    and the sankey then shows them where it always shows unfiled entries.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        gone = await _make_category(s, hh, "expense", "Groceries")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-25"), transacted_at=_dt(2026, 1, 5),
+            category_id=gone.id))
+        counts = await ledger.delete_category(s, gone.id)  # no target: NULL
+        txn_id = txn.id
+
+    # Read back in a session of its own, the way the page that reports it does.
+    # The reassignment is one UPDATE with `synchronize_session=False`, so this
+    # session's identity map still holds the pre-delete values: a report read
+    # through it would draw a category that no longer exists.
+    async with scoped_session(household_id=hh) as s:
+        after = (
+            await s.execute(select(Transaction.category_id).where(Transaction.id == txn_id))
+        ).scalar_one()
+        names = {c.name for c in (await s.execute(select(Category))).scalars()}
+        graph = await reports.cash_flow_sankey(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+
+    assert counts == {"reassigned_transactions": 1, "reassigned_splits": 0}
+    assert after is None
+    # No row was invented to hold them, and no state was stored twice.
+    assert "Uncategorized" not in names
+    assert [(r["key"], r["label"], r["category_id"]) for r in graph["expense"]] == [
+        ("uncategorized", "Uncategorized", None)
+    ]
+    assert graph["total_expense"] == D("25.0000")
+
+
+async def test_a_category_named_uncategorized_is_a_row_and_not_the_sentinel(
+    household_factory,
+):
+    """A household may name a category "Uncategorized", and it stays its own thing.
+
+    Both directions of the conflation are pinned here, because both are wrong: the
+    delete's default must not pour entries into that row, and choosing it must.
+    The key is what keeps them apart — the same reason ``_flow_node`` returns one.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        # Deliberately the same name the unfiled bucket shows.
+        named = await _make_category(s, hh, "expense", "Uncategorized")
+        named_id = named.id
+        gone = await _make_category(s, hh, "expense", "Groceries")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        emptied = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-10"), transacted_at=_dt(2026, 1, 4),
+            category_id=gone.id))
+        emptied_id = emptied.id
+
+        await ledger.delete_category(s, gone.id)  # default: no category
+
+        # The row with that name survived the delete and holds nothing — a count
+        # query, so it reads the database rather than the session's cache.
+        assert await ledger.category_usage(s, named_id) == {"transactions": 0, "splits": 0}
+
+        # Now the other direction: deleted *into* the row, explicitly.
+        also_gone = await _make_category(s, hh, "expense", "Coffee")
+        moved = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-4"), transacted_at=_dt(2026, 1, 6),
+            category_id=also_gone.id))
+        moved_id = moved.id
+        counts = await ledger.delete_category(s, also_gone.id, reassign_to=named_id)
+
+    # Read back in a session of its own: the reassignment is one UPDATE with
+    # `synchronize_session=False`, so the writing session's identity map still
+    # holds the pre-delete values and would answer from a cache.
+    async with scoped_session(household_id=hh) as s:
+        still = {
+            t.id: t.category_id for t in (await s.execute(select(Transaction))).scalars()
+        }
+        graph = await reports.cash_flow_sankey(s, hh, date(2026, 1, 1), date(2026, 1, 31))
+
+    assert counts == {"reassigned_transactions": 1, "reassigned_splits": 0}
+    assert still[emptied_id] is None
+    assert still[moved_id] == named_id
+
+    # One label, two nodes: the row, and the absence of one.
+    assert {r["key"] for r in graph["expense"]} == {f"cat:{named_id}", "uncategorized"}
+    assert {r["label"] for r in graph["expense"]} == {"Uncategorized"}
+    assert {r["category_id"] for r in graph["expense"]} == {None, named_id}
+    assert graph["total_expense"] == D("14.0000")
+
+
+async def test_a_category_with_nothing_filed_under_it_still_deletes(household_factory):
+    """Zero is an answer, not a failure. The confirmation shows "0 transactions"
+    and the delete goes through — the counts a delete returns are not a guard."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        empty = await _make_category(s, hh, "expense", "Never used")
+        kept = await _make_category(s, hh, "expense", "Groceries")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-3"), transacted_at=_dt(2026, 1, 7),
+            category_id=kept.id))
+
+        assert await ledger.category_usage(s, empty.id) == {"transactions": 0, "splits": 0}
+        counts = await ledger.delete_category(s, empty.id, reassign_to=kept.id)
+
+        left = {c.id for c in (await s.execute(select(Category))).scalars()}
+        assert (await txns.get_transaction(s, txn.id)).category_id == kept.id
+
+    assert counts == {"reassigned_transactions": 0, "reassigned_splits": 0}
+    assert empty.id not in left
+    assert kept.id in left
+
+
+async def test_a_delete_cannot_move_entries_across_the_types(household_factory):
+    """Where the entries go has to keep them meaning what they meant.
+
+    A category's type *is* its group's and every report reads it, so dumping an
+    expense category's entries into an income one would flip which side of cash
+    flow they count on with nothing in the ledger having changed. Refused, and
+    refused without moving anything — the category is still there to try again.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        expense = await _make_category(s, hh, "expense", "Groceries")
+        income = await _make_category(s, hh, "income", "Salary")
+        acct = await ledger.create_account(
+            s, hh, AccountCreate(name="Checking", type="depository", currency="USD"))
+        txn = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=acct.id, amount=D("-12"), transacted_at=_dt(2026, 1, 8),
+            category_id=expense.id))
+
+        with pytest.raises(LedgerError) as exc:
+            await ledger.delete_category(s, expense.id, reassign_to=income.id)
+        assert exc.value.status == 422
+
+        # Nothing half-done: the category is still there and still holds its row.
+        assert (await txns.get_transaction(s, txn.id)).category_id == expense.id
+        assert await ledger.category_usage(s, expense.id) == {"transactions": 1, "splits": 0}
+
+        # Deleting into itself is not a target either.
+        with pytest.raises(LedgerError) as self_exc:
+            await ledger.delete_category(s, expense.id, reassign_to=expense.id)
+        assert self_exc.value.status == 400
+
+        # A same-type target is what it is for.
+        other = await _make_category(s, hh, "expense", "Food")
+        counts = await ledger.delete_category(s, expense.id, reassign_to=other.id)
+
+    assert counts == {"reassigned_transactions": 1, "reassigned_splits": 0}
