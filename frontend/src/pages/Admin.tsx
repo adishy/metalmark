@@ -144,10 +144,6 @@ export default function Admin() {
   const cancel = useCancelJob();
   const update = useUpdateConnection();
 
-  const [runFilter, setRunFilter] = useState<string>("");
-  const runs = useSyncRuns(runFilter || null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-
   const [actionError, setActionError] = useState<string | null>(null);
 
   const connectionList = connections.data ?? [];
@@ -420,56 +416,127 @@ export default function Admin() {
         {/* Column three: the history, and the token that lets an agent read this
             household's numbers without being handed the household's names. */}
         <div className="space-y-4 lg:min-w-0">
-          <Card title="Recent runs">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-fg-muted" htmlFor="run-filter">
-                Show
-              </label>
-              <Select
-                id="run-filter"
-                value={runFilter}
-                onChange={(e) => setRunFilter(e.target.value)}
-                className="w-auto"
-                data-testid="run-filter"
-              >
-                <option value="">All connections</option>
-                {connectionList.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {connectionName(c, c.id)}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            {runs.isPending && <Spinner />}
-            {runs.isError && (
-              <p className="text-sm text-negative" role="alert">
-                {(runs.error as Error).message}
-              </p>
-            )}
-            {runs.isSuccess && (runs.data?.length ?? 0) === 0 && (
-              <p className="text-sm text-fg-muted" data-testid="no-runs">
-                No runs yet.
-              </p>
-            )}
-            {(runs.data?.length ?? 0) > 0 && (
-              <ul className="divide-y divide-border rounded-control bg-surface-inset/40" data-testid="run-list">
-                {runs.data?.map((run) => (
-                  <RunRow
-                    key={run.id}
-                    run={run}
-                    expanded={expanded === run.id}
-                    onToggle={() => setExpanded(expanded === run.id ? null : run.id)}
-                  />
-                ))}
-              </ul>
-            )}
-          </Card>
-
+          <RecentRuns />
           <AgentAccess />
         </div>
       </div>
     </div>
+  );
+}
+
+// ---- the run history ------------------------------------------------------
+
+/** How many runs the panel asks for. The endpoint would default to the same 50
+ *  (`DEFAULT_RUN_LIMIT`), but the copy under the list names the number, and a
+ *  number the server picks is not one this file can truthfully print. Asking
+ *  for it explicitly is what keeps the two sentences agreeing. */
+const RUN_LIMIT = 50;
+
+/**
+ * The run history, bounded — issue #36.
+ *
+ * The card used to be as tall as the history. There is no ceiling on that: a
+ * household that syncs every hour has thousands of runs and the app keeps the
+ * most recent 50, which at ~56 px a row is 2,800 px of list at the bottom of a
+ * column that also holds the agent tokens. So the page's shape was something
+ * the *data* decided — it grew every time the worker ran, and the way to reach
+ * what was under the list was to scroll past all of it.
+ *
+ * The list is a **fixed, scrollable region** now: capped at 24rem and scrolled
+ * inside itself, so the card has the same height on the day the household
+ * connects its first bank and a year later. This is the "cap height + scroll"
+ * half of §9.3's answer to the imbalance issue (#33) — chosen over a "show
+ * more" button because the rows are all *here* (the cap is on the box, not on
+ * what is fetched), and over bounding the API because the API is already
+ * bounded: it returns 50 runs at most and this asks for exactly that.
+ *
+ * Nothing the server sent is hidden by the cap — every row is in the DOM, one
+ * scroll away, and the region is reachable by keyboard (§4.7: an `overflow` box
+ * is not focusable on its own, and a scroll region a keyboard cannot scroll
+ * fails 2.1.1). What *is* hidden is whatever the API did not return, which is
+ * why the line above the list gives the count and, when the response is exactly
+ * as long as the request, says outright that older runs are not listed — a
+ * history that silently stops at 51 runs reads as a history with 50 runs in it.
+ * Its `aria-label` carries the same count, since a reader who arrives at the
+ * region by keyboard gets no other cue that it scrolls.
+ */
+export function RecentRuns() {
+  // Polled, like the rest of the page: the runs are written by the *worker*, so
+  // nothing the client does invalidates them.
+  const connections = useConnections(true);
+  const connectionList = connections.data ?? [];
+  const [runFilter, setRunFilter] = useState<string>("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const runs = useSyncRuns(runFilter || null, RUN_LIMIT);
+
+  const rows = runs.data ?? [];
+  const oldestNotListed = rows.length >= RUN_LIMIT;
+  const plural = rows.length === 1 ? "run" : "runs";
+
+  return (
+    <Card title="Recent runs">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs text-fg-muted" htmlFor="run-filter">
+          Show
+        </label>
+        <Select
+          id="run-filter"
+          value={runFilter}
+          onChange={(e) => setRunFilter(e.target.value)}
+          className="w-auto"
+          data-testid="run-filter"
+        >
+          <option value="">All connections</option>
+          {connectionList.map((c) => (
+            <option key={c.id} value={c.id}>
+              {connectionName(c, c.id)}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {runs.isPending && <Spinner />}
+      {runs.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(runs.error as Error).message}
+        </p>
+      )}
+      {runs.isSuccess && rows.length === 0 && (
+        <p className="text-sm text-fg-muted" data-testid="no-runs">
+          No runs yet.
+        </p>
+      )}
+      {rows.length > 0 && (
+        <>
+          <p className="text-xs text-fg-muted" data-testid="run-count">
+            {oldestNotListed
+              ? `The ${RUN_LIMIT} most recent ${plural}. Older runs, if any, are not listed.`
+              : `${rows.length} ${plural}, newest first.`}
+          </p>
+          <div
+            role="region"
+            aria-label={`Run history, ${rows.length} ${plural}, newest first`}
+            tabIndex={0}
+            data-testid="run-region"
+            // `max-h-96` (24rem) and not a viewport unit: the region is a card
+            // among cards, and a height that follows the window would be a
+            // second thing that moves when nothing about the list did.
+            className="max-h-96 overflow-y-auto rounded-control bg-surface-inset/40"
+          >
+            <ul className="divide-y divide-border" data-testid="run-list">
+              {rows.map((run) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  expanded={expanded === run.id}
+                  onToggle={() => setExpanded(expanded === run.id ? null : run.id)}
+                />
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

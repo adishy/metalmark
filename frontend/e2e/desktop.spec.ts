@@ -337,3 +337,146 @@ test.describe("below lg (1023)", () => {
     expect(detail.modal).toBe("true");
   });
 });
+
+// Issue #36: the run history grew the page as syncs accumulated.
+//
+// The seeded household has *no* sync history — the demo seed creates none, and
+// the sync spec's own runs are made against a connection this fixture does not
+// have — so the one thing this test cannot get from the data is a long list. It
+// is supplied instead, and the assertion is on what the app does with it: the
+// server's own page (50 runs, the endpoint's default and `RUN_LIMIT` in
+// `Admin.tsx`) is exactly the shape the issue is about, and fifty syncs is a
+// fixture nobody would run a layout spec against.
+
+/** A run as `GET /connections/runs` returns it: every field `RunRow` reads. */
+function mockRun(i: number) {
+  return {
+    id: `mock-run-${i}`,
+    connection_id: "mock-conn",
+    connection_label: "Everyday",
+    trigger: "manual",
+    status: "ok",
+    started_at: new Date(Date.UTC(2026, 8, 20, 10, i)).toISOString(),
+    finished_at: new Date(Date.UTC(2026, 8, 20, 10, i) + 4_000).toISOString(),
+    duration_ms: 4_000,
+    http_ms: 900,
+    http_status: 200,
+    bytes_fetched: 1_024,
+    accounts_seen: 2,
+    accounts_created: 0,
+    accounts_remapped: 0,
+    txns_rekeyed: 0,
+    txns_inserted: 3,
+    txns_updated: 1,
+    txns_reconciled: 0,
+    pendings_expired: 0,
+    transfers_matched: 0,
+    rules_applied: 0,
+    error: null,
+  };
+}
+
+test.describe("the run history is a fixed region, not a page that grows (#36)", () => {
+  test("a longer history takes the same room, and stays scrollable by keyboard", async ({ page }) => {
+    // Three full loads of the page, each with its own connect/checks/tokens
+    // requests, plus a keyboard interaction — over the 30 s default.
+    test.slow();
+
+    await login(page);
+
+    let runs = 2;
+    await page.route("**/connections/runs*", (route) =>
+      route.fulfill({ json: Array.from({ length: runs }, (_, i) => mockRun(i)) }),
+    );
+
+    /** Render `/admin` with `n` runs in the history and measure it.
+     *
+     * `card` is the runs card itself, and it is measured instead of the page on
+     * purpose. Admin is three columns of live data — connections, checks, agent
+     * tokens — each landing on its own schedule, and an earlier version of this
+     * test compared page heights across two loads and came back 8 px apart when
+     * a neighbouring card had not finished: a difference in the *fixture's*
+     * timing, not in the list. The card that holds the list is fully determined
+     * by the list. */
+    const measure = async (n: number) => {
+      runs = n;
+      await page.goto("/admin");
+      await expect(page.getByTestId("run-region")).toBeVisible();
+      return page.evaluate(() => {
+        const region = document.querySelector("[data-testid=run-region]") as HTMLElement;
+        const cs = getComputedStyle(region);
+        return {
+          role: region.getAttribute("role"),
+          tabIndex: region.getAttribute("tabindex"),
+          label: region.getAttribute("aria-label"),
+          copy: document.querySelector("[data-testid=run-count]")!.textContent ?? "",
+          maxHeight: cs.maxHeight,
+          overflowY: cs.overflowY,
+          height: region.getBoundingClientRect().height,
+          clientHeight: region.clientHeight,
+          scrollHeight: region.scrollHeight,
+          card: Math.round(region.closest("section")!.getBoundingClientRect().height),
+          page: document.documentElement.scrollHeight,
+        };
+      });
+    };
+
+    const two = await measure(2);
+
+    // §4.7's scroll region: named, and in the tab order, because an `overflow`
+    // box is not focusable on its own and a scroll region a keyboard cannot
+    // scroll hides its content from anyone not using a pointer (2.1.1).
+    expect(two.role).toBe("region");
+    expect(two.tabIndex).toBe("0");
+    expect(two.label).toBe("Run history, 2 runs, newest first");
+    expect(two.copy).toBe("2 runs, newest first.");
+    // A short history is a short card. The cap is a ceiling, not a reservation:
+    // reserving 384 px for two rows is the empty gutter this batch is about.
+    expect(two.height).toBeLessThan(380);
+    expect(two.scrollHeight).toBe(two.clientHeight);
+
+    // The endpoint's own page size: what the panel asks for, and the most it can
+    // ever be asked for without changing that.
+    const fifty = await measure(50);
+    expect(fifty.copy).toBe("The 50 most recent runs. Older runs, if any, are not listed.");
+    expect(fifty.label).toBe("Run history, 50 runs, newest first");
+
+    // The cap itself: `max-h-96` is 24rem, and this app's root is 16 px.
+    expect(fifty.overflowY).toBe("auto");
+    expect(fifty.maxHeight).toBe("384px");
+    expect(fifty.height).toBeLessThanOrEqual(385);
+    // ...and it is doing work: fifty rows are far taller than the box.
+    expect(fifty.scrollHeight).toBeGreaterThan(fifty.clientHeight * 2);
+
+    // The claim the issue makes, in the sharpest form available: the *longest
+    // history the endpoint can return* (200 is `MAX_RUN_LIMIT`) takes exactly the
+    // same room as fifty runs. Four times the content, the same card, to the
+    // pixel — where an unbounded list would be some 17,000 px taller.
+    const longest = await measure(200);
+    expect(longest.copy).toBe(fifty.copy);
+    expect(longest.card).toBe(fifty.card);
+    expect(longest.height).toBeLessThanOrEqual(385);
+    // ...and it is genuinely four times the content, so the equality above is
+    // the cap doing its job rather than two short lists.
+    expect(longest.scrollHeight).toBeGreaterThan(fifty.scrollHeight * 3);
+    // The list is many times the height of the page it is on, which is what
+    // "scrolled inside itself" means. Laid out in the page, this state would put
+    // the document at ~23,000 px.
+    expect(longest.page).toBeLessThan(longest.scrollHeight / 4);
+
+    // Keyboard: focus the region and page down. This is the whole reason it is
+    // focusable — the rows below the fold have to be reachable without a mouse,
+    // and a scroll region that cannot be scrolled from the keyboard hides its
+    // content from anyone who does not use one (2.1.1).
+    await page.getByTestId("run-region").focus();
+    await page.keyboard.press("PageDown");
+    await expect
+      .poll(() => page.getByTestId("run-region").evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0);
+
+    // And a history that fits without scrolling is a short card, not 384 px of
+    // reserved space with two rows at the top of it: the cap is a ceiling, not a
+    // reservation — the empty gutter this batch exists to remove (#33).
+    expect(two.card).toBeLessThan(fifty.card);
+  });
+});
