@@ -266,7 +266,8 @@ test("net worth: the range brush re-scopes the headline, and the range gives it 
 
   const headline = page.getByTestId("net-worth-change");
   const whole = await headline.textContent();
-  expect(whole, "the card should start on the whole range").toContain("over 3 months");
+  // The card opens on the fortnight the issue asks for, and says so.
+  expect(whole, "the card should start on its default window").toContain("over the past 2 weeks");
 
   // The brush is the band across the top of the canvas. The window opens on the
   // whole range, where a *translation* has nowhere to go — so the gesture that
@@ -295,6 +296,74 @@ test("net worth: the range brush re-scopes the headline, and the range gives it 
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, { steps: 12 });
   await page.mouse.up();
   await expect(headline).toContainText("over 3 months");
+});
+
+/**
+ * The window the hero opens on, in the reader's hands.
+ *
+ * Two things the card promises. A shorter window is a shorter *request*, not a
+ * shorter label over the same series — the headline states the period it computed
+ * over, and the series has to start where that period does. And the choice is the
+ * reader's on their next visit: "networth chart at top should have more varied
+ * filters … but save / remember if the user selects something else".
+ *
+ * The window's *start* is read off the chart rather than assumed: hovering the
+ * left end of the plot gives back the first point's own day, in the app's own
+ * words, which is the one number that tells a fortnight from a week.
+ */
+test("net worth: the window is what the reader chose, and it is remembered", async ({ page }) => {
+  // The app prints a day as `<Mon> <DD>` (`formatDay`, medium), built from its own
+  // month names — so this can be computed rather than pattern-matched.
+  const MONTHS = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const said = (back: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - back);
+    return `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const chart = page.getByTestId("accounts-net-worth-chart");
+  const headline = page.getByTestId("net-worth-change");
+  const tooltip = chart.locator(".mm-chart-tooltip");
+
+  /** The day of the first point the plot is drawing, via the hover readout. */
+  const firstDay = async (): Promise<string> => {
+    await chart.scrollIntoViewIfNeeded();
+    const box = await chart.boundingBox();
+    if (!box) throw new Error("accounts-net-worth-chart has no bounding box");
+    // The left end of the plot is the first point; the pointer is moved off and
+    // back so a window change re-opens the tooltip rather than leaving the old
+    // one standing.
+    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.5);
+    await page.mouse.move(box.x + 72, box.y + box.height * 0.5);
+    await expect.poll(
+      async () => (await tooltip.innerText().catch(() => "")).split("\n")[0]?.trim() ?? "",
+      { timeout: 15_000, message: "the net-worth tooltip never opened" },
+    ).not.toBe("");
+    return (await tooltip.innerText()).split("\n")[0]!.trim();
+  };
+
+  await page.goto("/accounts");
+  await expect(chart).toBeVisible();
+  await page.waitForTimeout(1600);
+
+  // The default is the fortnight the reader asked to open on.
+  await expect(page.getByTestId("net-worth-range-2w")).toHaveAttribute("aria-pressed", "true");
+  await expect(headline).toContainText("over the past 2 weeks");
+  await expect.poll(firstDay, { timeout: 15_000 }).toBe(said(14));
+
+  await page.getByTestId("net-worth-range-1w").click();
+  await expect(headline).toContainText("over the past week");
+  await expect(page.getByTestId("net-worth-range-1w")).toHaveAttribute("aria-pressed", "true");
+  // The line re-scoped, not just its label: the leftmost point is a week back.
+  await expect.poll(firstDay, { timeout: 15_000 }).toBe(said(7));
+
+  // A new visit, in the same browser: the window is read back, not re-defaulted.
+  await page.reload();
+  await expect(page.getByTestId("net-worth-range-1w")).toHaveAttribute("aria-pressed", "true");
+  await expect(headline).toContainText("over the past week");
 });
 
 /**

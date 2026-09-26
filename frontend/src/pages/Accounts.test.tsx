@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Account, Owner, Portfolio } from "@/api/types";
 import Accounts from "@/pages/Accounts";
 import { formatMoney } from "@/lib/format";
-import { todayIso } from "@/lib/dates";
+import { isoDay, todayIso } from "@/lib/dates";
 
 // The page's own reads, stubbed. `useCreateAccount`/`useUpdateAccount`/`useDeleteAccount`
 // are never driven here, but the page calls them on every render and they reach the
@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   putBalance: vi.fn(),
   connections: [] as unknown[],
   deleteBalance: vi.fn(),
+  series: vi.fn(),
 }));
 
 vi.mock("@/api/investments", async () => {
@@ -54,7 +55,9 @@ vi.mock("@/api/hooks", async () => {
     useCreateAccount: () => ({ ...settled(undefined), mutate: h.create }),
     useUpdateAccount: () => ({ ...settled(undefined), mutate: h.update }),
     useDeleteAccount: () => settled(undefined),
-    useNetWorthSeries: () => settled(SERIES),
+    // Recorded rather than stubbed away: which window the card asked the server
+    // for is the claim its own label makes, and the two are checked together.
+    useNetWorthSeries: (...args: unknown[]) => settled(h.series(...args)),
     useBalances: () => settled(BALANCES),
     usePutBalance: () => ({ ...settled(undefined), mutate: h.putBalance }),
     useDeleteBalance: () => ({ ...settled(undefined), mutate: h.deleteBalance }),
@@ -158,6 +161,11 @@ beforeEach(() => {
   h.deleteBalance.mockReset();
   h.portfolio.mockReset();
   h.holdings.mockReset();
+  h.series.mockReset();
+  // The window the card opens on is a remembered choice, so a test that renders
+  // the page must not inherit the one before it.
+  window.localStorage.clear();
+  h.series.mockImplementation(() => SERIES);
   h.portfolio.mockImplementation(() => ({
     data: PORTFOLIO,
     isPending: false,
@@ -234,7 +242,7 @@ describe("<Accounts /> views", () => {
     render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.getByTestId("net-worth")).toHaveTextContent(formatMoney("100.00", "USD"));
     expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
-      `Up ${formatMoney("60.00", "USD")} over 3 months`,
+      `Up ${formatMoney("60.00", "USD")} over the past 2 weeks`,
     );
     expect(screen.getByTestId("accounts-net-worth-chart")).toHaveAccessibleName(/went up/);
   });
@@ -284,6 +292,103 @@ describe("<Accounts /> views", () => {
     expect(screen.getByTestId("accounts-view-investments")).toHaveFocus();
     expect(screen.getByTestId("accounts-view-investments")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("investments-view")).toBeInTheDocument();
+  });
+});
+
+// The window the hero opens on, and the reader's ability to move it: a day or a
+// fortnight at a time ("networth chart at top should have more varied filters
+// like last week, last day etc."), a fortnight by default, and whichever they
+// last chose when they come back.
+describe("the net-worth window", () => {
+  const KEY = "metalmark-networth-range";
+
+  /** The day a window of `n` days opens on, as the card computes it. */
+  const daysBack = (n: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return isoDay(d);
+  };
+
+  it("opens on a fortnight, and asks the server for exactly that", () => {
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    expect(screen.getByTestId("net-worth-range-2w")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
+      `Up ${formatMoney("60.00", "USD")} over the past 2 weeks`,
+    );
+    // The label and the request are one fact: a card that said "over 2 weeks"
+    // over a window the server was asked for differently is the failure this
+    // pins.
+    expect(h.series).toHaveBeenLastCalledWith(daysBack(14), todayIso(), null);
+  });
+
+  it("offers the short windows beside the long ones", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    for (const [id, back] of [
+      ["1d", 1],
+      ["1w", 7],
+    ] as const) {
+      await user.click(screen.getByTestId(`net-worth-range-${id}`));
+      expect(h.series).toHaveBeenLastCalledWith(daysBack(back), todayIso(), null);
+    }
+    // The ladder the card already had is still there, from 1M to all time.
+    for (const id of ["1m", "3m", "6m", "1y", "all"]) {
+      expect(screen.getByTestId(`net-worth-range-${id}`)).toBeInTheDocument();
+    }
+  });
+
+  it("remembers the window it was left on, and opens on it next visit", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    await user.click(screen.getByTestId("net-worth-range-1w"));
+    expect(window.localStorage.getItem(KEY)).toBe("1w");
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent("over the past week");
+    expect(h.series).toHaveBeenLastCalledWith(daysBack(7), todayIso(), null);
+
+    // A new visit: the preference is read at mount, not carried in React state.
+    unmount();
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+    expect(screen.getByTestId("net-worth-range-1w")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("net-worth-change")).toHaveTextContent("over the past week");
+  });
+
+  it("ignores a remembered window it cannot draw", () => {
+    // A week ladder from an older build, or a hand-typed value: the card opens on
+    // its default rather than on a window with no row.
+    window.localStorage.setItem(KEY, "42y");
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+    expect(screen.getByTestId("net-worth-range-2w")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("says which accounts it only counted partway through", () => {
+    // The figure a window states is the difference between two totals, and when
+    // an account joins in between, part of that difference is the account rather
+    // than money moving. The chart marks the point and withholds the bar; these
+    // are the words (ADR-0045), the same ones the Insights card prints.
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2026-06-01",
+          net_worth: "40.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "not_started" }],
+        },
+        { date: "2026-09-01", net_worth: "100.00", missing: [] },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    expect(screen.getByTestId("accounts-net-worth-coverage")).toHaveTextContent(
+      "Counted partway through: Savings from Sep 01.",
+    );
+  });
+
+  it("stays quiet when every point counts everything", () => {
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+    expect(screen.queryByTestId("accounts-net-worth-coverage")).not.toBeInTheDocument();
   });
 });
 
