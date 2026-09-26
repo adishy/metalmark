@@ -427,4 +427,59 @@ describe("<Allocations />", () => {
     expect(screen.getByTestId("allocation-not-drawn")).toHaveTextContent("SHORT");
     expect(screen.getByTestId("allocation-row-sec-short")).toBeInTheDocument();
   });
+
+  // ---- issue #31: a long ranking is bounded, not a page ----------------------
+
+  /** The geometry — the box's real height and that it scrolls — is measured in
+   *  `e2e/desktop.spec.ts`, where there is a layout. What is testable here is the
+   *  shape: which lists get a region, what it is called, and that the cap never
+   *  drops a row. */
+  function manyRows(n: number) {
+    h.allocation.mockImplementation(() =>
+      query({
+        ...BY_SECURITY,
+        rows: Array.from({ length: n }, (_, i) => ({
+          key: `sec-${i}`,
+          label: `SEC${i}`,
+          value_base: "100.00",
+          percent: "1.0",
+          holdings: 1,
+          sources: [],
+        })),
+      }),
+    );
+  }
+
+  it("bounds a ranking long enough to scroll, in a region a keyboard can reach", () => {
+    manyRows(12);
+    renderAllocations();
+
+    const region = screen.getByTestId("allocation-rows-region");
+    // §4.7: an `overflow` box is not focusable on its own, and a scroll region a
+    // keyboard cannot scroll fails 2.1.1. The label names the grouping and how
+    // many rows are inside it.
+    expect(region).toHaveAttribute("role", "region");
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveAttribute("aria-label", "Allocation by security, 12 rows");
+    expect(region.className).toContain("lg:max-h-96");
+    expect(region.className).toContain("lg:overflow-y-auto");
+    // Every row the server sent is in the DOM: the cap is on the box, not on the
+    // list.
+    expect(screen.getAllByTestId(/^allocation-row-/)).toHaveLength(12);
+    // And the total stays outside the box, so it is on screen while the ranking
+    // scrolls under it — the point of bounding rather than capping the data.
+    expect(region).not.toContainElement(screen.getByTestId("allocation-total"));
+  });
+
+  it("leaves a ranking that fits alone: no region, and no tab stop that does nothing", () => {
+    manyRows(7);
+    renderAllocations();
+
+    const box = screen.getByTestId("allocation-rows-region");
+    expect(box).not.toHaveAttribute("role");
+    expect(box).not.toHaveAttribute("tabindex");
+    expect(box).not.toHaveAttribute("aria-label");
+    expect(box.className).not.toContain("max-h");
+    expect(screen.getAllByTestId(/^allocation-row-/)).toHaveLength(7);
+  });
 });

@@ -40,10 +40,10 @@ export default function Insights() {
   if (!isTabId(tab)) return <Navigate to={`/insights/${DEFAULT_TAB}`} replace />;
 
   return (
-    // `max-w-6xl`: §9.1's two-up width, which Overview's charts need and
-    // Allocations' bars don't stretch past either. Owned here rather than by
-    // each tab, so every tab shares one width instead of jumping as you
-    // switch between them.
+    // `max-w-6xl`: §9.1's Insights width. The reports are charts, which read
+    // this wide and no wider, and Allocations' bars don't stretch past it
+    // either. Owned here rather than by each tab, so every tab shares one width
+    // instead of jumping as you switch between them.
     <div className="mx-auto max-w-6xl space-y-4">
       <h1 className="text-xl font-semibold">Insights</h1>
       <ScrollTabs

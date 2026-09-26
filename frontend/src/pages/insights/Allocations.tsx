@@ -7,9 +7,11 @@
 //   - every row can be tapped to see which accounts it's made of.
 //
 // The owner liked how the old card looked, so its good parts survive intact:
-// the group-by switch, the bars-as-percentages rows, and the honest
+// the group-by switch, the rows-as-percentages, and the honest
 // unpriced/FX counts beside the total. What moved is the *shape* — this is now
-// a page-width tab rather than a card squeezed into a two-up grid.
+// a page-width tab rather than a card squeezed into a two-up grid, and a
+// ranking with no natural end (issue #31) is bounded at `lg:` rather than
+// growing the page: see `SCROLL_AFTER` and `AllocationBody`.
 //
 // Issue #34 adds the treemap as a *view* of the same rows, beside the list
 // rather than instead of it: the picture answers "which group is big" at a
@@ -72,6 +74,18 @@ const VIEW_TESTID = "allocation-view";
  *  height on every canvas: squarify splits a canvas's area between the tiles, and
  *  a short one would hand the smaller groups slivers instead of rectangles. */
 const TREEMAP_HEIGHT = 300;
+
+/**
+ * How many rows the card shows at `lg:` before the list scrolls inside it.
+ *
+ * `max-h-96` is 24 rem = 384 px and a row is `min-h-11` plus `py-2` = 52 px, so
+ * seven rows are 364 px and eight are 416 px — the number is tied to those two
+ * facts and moves with either of them. It exists so that a list short enough to
+ * fit is never given a region: a focusable box that cannot scroll is a tab stop
+ * that does nothing (the same reason #36's run region is absent when there are
+ * no runs).
+ */
+const SCROLL_AFTER = 7;
 
 /** Per-viewer, not per-household: two people looking at the same allocation may
  *  each want a different default, and neither reading should overwrite the
@@ -294,6 +308,19 @@ function AllocationBody({
     );
   }
 
+  // The rows are a *ranking*, and a ranking has no natural end: the demo
+  // household's one cash row is 125 px, while a forty-security portfolio was
+  // measured at 2,212 px in a 2,515 px page at a 1280 viewport — a card that is
+  // really a page, and the one place left in the allocation/holdings area where a
+  // long list still had no shape of its own. At `lg:` it is bounded and scrolls
+  // inside the card, the same cap and the same §4.7 region the account cards on
+  // the Investments view use, so the total and the caveats below it stay on screen
+  // while the ranking moves under them. The cap is `lg:`-only on purpose: a nested
+  // scroll region on a 390 px screen is a trap rather than a use of space (§5), and
+  // a phone page is allowed to be long.
+  const bounded = data.rows.length > SCROLL_AFTER;
+  const rowCount = `${data.rows.length} ${data.rows.length === 1 ? "row" : "rows"}`;
+
   return (
     <div className="rounded-card bg-surface-raised p-4">
       {/* The picture, when the treemap view is on and there is something with
@@ -331,60 +358,73 @@ function AllocationBody({
         </div>
       )}
 
-      <ul data-testid="allocation-rows">
-        {data.rows.map((r) => (
-          <li key={r.key} className="border-b border-border last:border-b-0">
-            {/* A button, not a static row: every group taps through to its
-                sources (§4, the tap-through detail sheet), cash row or not —
-                the chevron says so and `min-h-11` clears the target floor with
-                room to spare. */}
-            <button
-              type="button"
-              onClick={() => onSelect(r)}
-              className="flex min-h-11 w-full min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2 text-left hover:bg-surface-inset"
-              data-testid={`allocation-row-${r.key}`}
-            >
-              <div className="flex min-w-0 items-start gap-2">
-                {/* A row's tile colour, beside the row: it is what makes the
-                    chart's colours *mean* something — identity on a treemap is
-                    otherwise carried by position alone, and a reader with a
-                    greyscale screen or a colour-vision difference gets the name
-                    and the figure out of the same list either way. Only drawn
-                    when a picture is on screen to key it to; a row without a
-                    tile (a short position) has no swatch. */}
-                {view === "treemap" && swatch.get(r.key) && (
-                  <span
-                    aria-hidden="true"
-                    className="mt-1 size-2.5 shrink-0 rounded-sm"
-                    style={{ backgroundColor: swatch.get(r.key) }}
-                    data-testid={`allocation-swatch-${r.key}`}
-                  />
-                )}
-                <div className="min-w-0">
-                  <p className="text-sm">{groupLabel(groupBy, r.key, r.label)}</p>
-                  {/* How many positions the line is made of: a 3% line that is
-                      one holding and a 3% line that is thirty read very
-                      differently. */}
-                  <p className="text-xs text-fg-muted" data-testid={`allocation-holdings-${r.key}`}>
-                    {r.holdings} {r.holdings === 1 ? "position" : "positions"}
-                  </p>
+      {/* §4.7: an `overflow` box is not focusable on its own, and a scroll region
+          a keyboard cannot scroll fails 2.1.1. The label names the grouping and
+          how many rows are in it, which is what tells a reader who lands here
+          what they are inside of. All four attributes are conditional because a
+          short list gets no region at all — see `SCROLL_AFTER`. */}
+      <div
+        role={bounded ? "region" : undefined}
+        aria-label={bounded ? `Allocation by ${groupBy}, ${rowCount}` : undefined}
+        tabIndex={bounded ? 0 : undefined}
+        className={bounded ? "lg:max-h-96 lg:overflow-y-auto" : undefined}
+        data-testid="allocation-rows-region"
+      >
+        <ul data-testid="allocation-rows">
+          {data.rows.map((r) => (
+            <li key={r.key} className="border-b border-border last:border-b-0">
+              {/* A button, not a static row: every group taps through to its
+                  sources (§4, the tap-through detail sheet), cash row or not —
+                  the chevron says so and `min-h-11` clears the target floor with
+                  room to spare. */}
+              <button
+                type="button"
+                onClick={() => onSelect(r)}
+                className="flex min-h-11 w-full min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2 text-left hover:bg-surface-inset"
+                data-testid={`allocation-row-${r.key}`}
+              >
+                <div className="flex min-w-0 items-start gap-2">
+                  {/* A row's tile colour, beside the row: it is what makes the
+                      chart's colours *mean* something — identity on a treemap is
+                      otherwise carried by position alone, and a reader with a
+                      greyscale screen or a colour-vision difference gets the name
+                      and the figure out of the same list either way. Only drawn
+                      when a picture is on screen to key it to; a row without a
+                      tile (a short position) has no swatch. */}
+                  {view === "treemap" && swatch.get(r.key) && (
+                    <span
+                      aria-hidden="true"
+                      className="mt-1 size-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: swatch.get(r.key) }}
+                      data-testid={`allocation-swatch-${r.key}`}
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm">{groupLabel(groupBy, r.key, r.label)}</p>
+                    {/* How many positions the line is made of: a 3% line that is
+                        one holding and a 3% line that is thirty read very
+                        differently. */}
+                    <p className="text-xs text-fg-muted" data-testid={`allocation-holdings-${r.key}`}>
+                      {r.holdings} {r.holdings === 1 ? "position" : "positions"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="ml-auto flex shrink-0 items-center gap-2">
-                <div className="text-right">
-                  <p className="text-sm" data-testid={`allocation-value-${r.key}`}>
-                    {formatMoney(r.value_base, ccy)}
-                  </p>
-                  <p className="text-xs text-fg-muted" data-testid={`allocation-percent-${r.key}`}>
-                    {formatPercent(r.percent)}
-                  </p>
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <div className="text-right">
+                    <p className="text-sm" data-testid={`allocation-value-${r.key}`}>
+                      {formatMoney(r.value_base, ccy)}
+                    </p>
+                    <p className="text-xs text-fg-muted" data-testid={`allocation-percent-${r.key}`}>
+                      {formatPercent(r.percent)}
+                    </p>
+                  </div>
+                  <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 text-fg-muted" />
                 </div>
-                <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 text-fg-muted" />
-              </div>
-            </button>
-          </li>
-        ))}
-      </ul>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       {/* The total is not the last row: semibold, with a border above it (§6.5),
           and it names its base currency at least once per screen (§6.4). */}

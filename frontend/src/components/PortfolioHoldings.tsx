@@ -128,9 +128,20 @@ export default function PortfolioHoldings() {
                   </Button>
                 </div>
               )}
-              {portfolio.data.accounts.map((a) => (
-                <AccountCard key={a.account_id} account={a} portfolio={portfolio.data} recorded={recorded} />
-              ))}
+              {/* §9.3's card grid, at the one level where there is more than
+                  one card to lay out: a household's investment accounts, side
+                  by side above `lg:`. Each card is bounded from the inside (see
+                  `AccountCard`'s list), so a column of forty positions and a
+                  column of three are cards of a similar shape rather than one
+                  tall card and one short one with a page of nothing under it. */}
+              <div
+                className="space-y-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-3 lg:space-y-0"
+                data-testid="portfolio-accounts"
+              >
+                {portfolio.data.accounts.map((a) => (
+                  <AccountCard key={a.account_id} account={a} portfolio={portfolio.data} recorded={recorded} />
+                ))}
+              </div>
             </>
           )}
         </>
@@ -247,24 +258,47 @@ function AccountCard({
         )}
       </div>
 
-      <ul className="divide-y divide-border" data-testid={`account-holdings-${account.account_id}`}>
-        {account.holdings.map((h) => (
-          <HoldingRow
-            key={h.holding_id ?? positionKey(h.account_id, h.security_id)}
-            holding={h}
-            baseCurrency={ccy}
-            asOf={portfolio.as_of}
-            recorded={recorded.get(positionKey(h.account_id, h.security_id))}
-          />
-        ))}
-        {account.holdings.length === 0 && (
-          <li className="px-4 py-4 text-sm text-fg-muted" data-testid={`account-no-positions-${account.account_id}`}>
-            {account.balance_source === "stated"
-              ? "The bank reports this account’s balance, not what it holds. Add its positions to see the breakdown."
-              : "No positions recorded yet — the balance above is the one entered for the account."}
-          </li>
-        )}
-      </ul>
+      {/* A position list is unbounded — a brokerage account can hold forty — and
+          an unbounded list inside one of two columns is what made this view
+          imbalanced: the card it was paired with ended two rows in, so the
+          column beside it was empty for the rest of the page. The list is
+          therefore capped and scrolls *inside* the card at `lg:`, which bounds
+          the card and keeps its header — the account's name and its value, the
+          two things a reader compares between cards — on screen while they
+          scroll. The cap only exists at `lg:`: a phone has no second column to
+          be unbalanced by, and a nested scroll region on a 390 px screen is a
+          trap, not a use of space.
+
+          `role="region"` + `tabIndex={0}` is §4.7's rule for a scrollable
+          region: one that cannot be scrolled by keyboard fails 2.1.1, and an
+          `overflow` box is not focusable on its own. The label names the account
+          rather than saying "holdings" three times on a page with three of
+          them. */}
+      <div
+        role="region"
+        aria-label={`${account.name} — holdings`}
+        tabIndex={0}
+        className="lg:max-h-96 lg:overflow-y-auto"
+      >
+        <ul className="divide-y divide-border" data-testid={`account-holdings-${account.account_id}`}>
+          {account.holdings.map((h) => (
+            <HoldingRow
+              key={h.holding_id ?? positionKey(h.account_id, h.security_id)}
+              holding={h}
+              baseCurrency={ccy}
+              asOf={portfolio.as_of}
+              recorded={recorded.get(positionKey(h.account_id, h.security_id))}
+            />
+          ))}
+          {account.holdings.length === 0 && (
+            <li className="px-4 py-4 text-sm text-fg-muted" data-testid={`account-no-positions-${account.account_id}`}>
+              {account.balance_source === "stated"
+                ? "The bank reports this account’s balance, not what it holds. Add its positions to see the breakdown."
+                : "No positions recorded yet — the balance above is the one entered for the account."}
+            </li>
+          )}
+        </ul>
+      </div>
     </section>
   );
 }

@@ -144,10 +144,6 @@ export default function Admin() {
   const cancel = useCancelJob();
   const update = useUpdateConnection();
 
-  const [runFilter, setRunFilter] = useState<string>("");
-  const runs = useSyncRuns(runFilter || null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-
   const [actionError, setActionError] = useState<string | null>(null);
 
   const connectionList = connections.data ?? [];
@@ -163,16 +159,28 @@ export default function Admin() {
     // Admin is tables and counters — §9.1's widest case, so no cap of its own
     // and the shell's `max-w-7xl` is the cap.
     //
-    // §9.3's card grid, and the three cards are exactly the three columns: what
-    // is configured, what is running, what ran. Read across rather than down,
-    // they answer the one question this page exists for — is sync healthy — in
-    // a single glance instead of three scroll positions. The header and the
-    // error line span all three because neither is a card.
-    <div
-      className="space-y-4 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 lg:space-y-0"
-      data-testid="admin-page"
-    >
-      <header className="lg:col-span-3">
+    // §9.3's card grid, and the three columns are the three questions this page
+    // exists for: what is configured, what is running, what ran. The header and
+    // the error line sit above all three because neither is a card.
+    //
+    // **§9.3's `lg:grid-cols-3` is kept, and its three items are columns rather
+    // than cards** — that is the whole fix for the imbalance this page had. Six
+    // cards in a three-column grid are two *grid rows*, and a grid row is as tall
+    // as its tallest cell: "Running now" is a one-line empty state most of the
+    // time, while "Connections" grows with the bank count and "Recent runs" with
+    // the history, so a short card simply ended and left a few hundred pixels of
+    // nothing under it before the next row began. Nothing here can be made to
+    // agree on a height — a household's bank count and its run history are
+    // independent facts — so the layout is what gives: the grid has one row of
+    // three cells, each cell is a stack, and a card is followed by the next card
+    // in *its* column rather than by the bottom of somebody else's.
+    //
+    // Three explicit columns rather than `columns-3` for the reason §9 gives for
+    // everything else: the DOM order has to *be* the reading order. CSS
+    // multi-column balances by filling column one first, which would put the
+    // card a screen reader reads second in the third visual column.
+    <div className="space-y-4" data-testid="admin-page">
+      <header>
         {/* "Admin" is the eyebrow rather than the heading on purpose: the page
             is one screen of sync operations, and calling *it* "Admin" would
             promise a broader console. The word is here because it is the one a
@@ -191,259 +199,344 @@ export default function Admin() {
           buttons that can fail are spread across three cards and the message is
           about the action, not the card. */}
       {actionError && (
-        <p className="text-sm text-negative lg:col-span-3" role="alert" data-testid="admin-error">
+        <p className="text-sm text-negative" role="alert" data-testid="admin-error">
           {actionError}
         </p>
       )}
 
-      <Card
-        title="Connections"
-        note={
-          defaults.data
-            ? `Cadence is per connection, between ${formatInterval(defaults.data.sync_interval_min_minutes)} and ${formatInterval(defaults.data.sync_interval_max_minutes)}.`
-            : undefined
-        }
-      >
-        {connections.isPending && <Spinner />}
-        {connections.isError && (
-          <p className="text-sm text-negative" role="alert">
-            {(connections.error as Error).message}
-          </p>
-        )}
-        {connections.isSuccess && connectionList.length === 0 && (
-          <p className="text-sm text-fg-muted" data-testid="no-connections">
-            No connections yet. Connect one from Settings → Connections.
-          </p>
-        )}
-        {connectionList.length > 0 && (
-          <ul
-            className="divide-y divide-border rounded-control bg-surface-inset/40"
-            data-testid="connection-list"
+      <div className="space-y-4 lg:grid lg:grid-cols-3 lg:items-start lg:gap-6 lg:space-y-0" data-testid="admin-columns">
+        {/* Column one: what is configured, and the pass that re-files what it
+            brought in. */}
+        <div className="space-y-4 lg:min-w-0">
+          <Card
+            title="Connections"
+            note={
+              defaults.data
+                ? `Cadence is per connection, between ${formatInterval(defaults.data.sync_interval_min_minutes)} and ${formatInterval(defaults.data.sync_interval_max_minutes)}.`
+                : undefined
+            }
           >
-            {connectionList.map((c) => (
-              <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg">
-                    {connectionName(c)}
-                  </span>
-                  <ConnectionBadge connection={c} />
-                </div>
+            {connections.isPending && <Spinner />}
+            {connections.isError && (
+              <p className="text-sm text-negative" role="alert">
+                {(connections.error as Error).message}
+              </p>
+            )}
+            {connections.isSuccess && connectionList.length === 0 && (
+              <p className="text-sm text-fg-muted" data-testid="no-connections">
+                No connections yet. Connect one from Settings → Connections.
+              </p>
+            )}
+            {connectionList.length > 0 && (
+              <ul
+                className="divide-y divide-border rounded-control bg-surface-inset/40"
+                data-testid="connection-list"
+              >
+                {connectionList.map((c) => (
+                  <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-fg">
+                        {connectionName(c)}
+                      </span>
+                      <ConnectionBadge connection={c} />
+                    </div>
 
-                <p className="text-xs text-fg-muted">
-                  {c.last_synced_at ? (
-                    <>
-                      Last synced <Instant value={c.last_synced_at} style="relative" />
-                    </>
-                  ) : (
-                    "Never synced"
-                  )}
-                  {c.next_sync_at && (
-                    <>
-                      {" · next "}
-                      <Instant value={c.next_sync_at} style="relative" />
-                    </>
-                  )}
-                  {` · every ${formatInterval(c.sync_interval_minutes)}`}
-                </p>
+                    <p className="text-xs text-fg-muted">
+                      {c.last_synced_at ? (
+                        <>
+                          Last synced <Instant value={c.last_synced_at} style="relative" />
+                        </>
+                      ) : (
+                        "Never synced"
+                      )}
+                      {c.next_sync_at && (
+                        <>
+                          {" · next "}
+                          <Instant value={c.next_sync_at} style="relative" />
+                        </>
+                      )}
+                      {` · every ${formatInterval(c.sync_interval_minutes)}`}
+                    </p>
 
-                {c.last_error && (
-                  <p className="text-xs text-negative" data-testid={`conn-error-${c.id}`}>
-                    {c.last_error}
-                  </p>
-                )}
-                {isStalled(c) && c.last_new_data_at && (
-                  <p
-                    className="rounded-control bg-warning/15 px-2 py-1 text-xs text-warning-ink"
-                    role="status"
-                    data-testid={`conn-stalled-${c.id}`}
-                  >
-                    No new transactions since <Instant value={c.last_new_data_at} style="long" /> —
-                    the last {c.quiet_syncs} syncs succeeded but the bank sent nothing new. The
-                    bank&rsquo;s link at SimpleFIN Bridge may need a refresh or a new sign-in.
-                  </p>
-                )}
+                    {c.last_error && (
+                      <p className="text-xs text-negative" data-testid={`conn-error-${c.id}`}>
+                        {c.last_error}
+                      </p>
+                    )}
+                    {isStalled(c) && c.last_new_data_at && (
+                      <p
+                        className="rounded-control bg-warning/15 px-2 py-1 text-xs text-warning-ink"
+                        role="status"
+                        data-testid={`conn-stalled-${c.id}`}
+                      >
+                        No new transactions since <Instant value={c.last_new_data_at} style="long" /> —
+                        the last {c.quiet_syncs} syncs succeeded but the bank sent nothing new. The
+                        bank&rsquo;s link at SimpleFIN Bridge may need a refresh or a new sign-in.
+                      </p>
+                    )}
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      trigger.mutate(c.id, {
-                        // A connection that needs reconnecting may have been
-                        // re-authed at the bridge a moment ago, so this is
-                        // allowed even when the status is bad; a *paused* one is
-                        // refused by the server, which is the one case where the
-                        // user's own instruction outranks the button.
-                        onError: (e) => setActionError((e as Error).message),
-                        onSuccess: () => setActionError(null),
-                      })
-                    }
-                    disabled={trigger.isPending || !c.is_enabled}
-                    data-testid={`sync-now-${c.id}`}
-                  >
-                    Sync now
-                  </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          trigger.mutate(c.id, {
+                            // A connection that needs reconnecting may have been
+                            // re-authed at the bridge a moment ago, so this is
+                            // allowed even when the status is bad; a *paused* one is
+                            // refused by the server, which is the one case where the
+                            // user's own instruction outranks the button.
+                            onError: (e) => setActionError((e as Error).message),
+                            onSuccess: () => setActionError(null),
+                          })
+                        }
+                        disabled={trigger.isPending || !c.is_enabled}
+                        data-testid={`sync-now-${c.id}`}
+                      >
+                        Sync now
+                      </Button>
 
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      update.mutate(
-                        { id: c.id, body: { is_enabled: !c.is_enabled } },
-                        {
-                          onError: (e) => setActionError((e as Error).message),
-                          onSuccess: () => setActionError(null),
-                        },
-                      )
-                    }
-                    disabled={update.isPending}
-                    data-testid={`pause-${c.id}`}
-                  >
-                    {c.is_enabled ? "Pause" : "Resume"}
-                  </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() =>
+                          update.mutate(
+                            { id: c.id, body: { is_enabled: !c.is_enabled } },
+                            {
+                              onError: (e) => setActionError((e as Error).message),
+                              onSuccess: () => setActionError(null),
+                            },
+                          )
+                        }
+                        disabled={update.isPending}
+                        data-testid={`pause-${c.id}`}
+                      >
+                        {c.is_enabled ? "Pause" : "Resume"}
+                      </Button>
 
-                  <label className="flex items-center gap-2 text-xs text-fg-muted">
-                    Every
-                    <Select
-                      value={String(c.sync_interval_minutes)}
-                      onChange={(e) =>
-                        update.mutate(
-                          { id: c.id, body: { sync_interval_minutes: Number(e.target.value) } },
-                          { onError: (err) => setActionError((err as Error).message) },
-                        )
-                      }
-                      disabled={update.isPending || !defaults.data}
-                      aria-label={`Sync interval for ${connectionName(c, "this connection")}`}
-                      inline
-                      className="w-auto"
-                      data-testid={`interval-${c.id}`}
-                    >
-                      {intervalOptions(c.sync_interval_minutes, defaults.data).map((m) => (
-                        <option key={m} value={m}>
-                          {formatInterval(m)}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card
-        title="Running now"
-        note="Jobs in flight. A job whose heartbeat has stopped advancing is one the worker has stopped reporting on — the server reclaims it and runs it again."
-      >
-        {jobs.isPending && <Spinner />}
-        {jobs.isError && (
-          <p className="text-sm text-negative" role="alert">
-            {(jobs.error as Error).message}
-          </p>
-        )}
-        {jobs.isSuccess && (jobs.data?.length ?? 0) === 0 && (
-          <p className="text-sm text-fg-muted" data-testid="no-jobs">
-            Nothing queued or running.
-          </p>
-        )}
-        {(jobs.data?.length ?? 0) > 0 && (
-          <div
-            className="overflow-x-auto"
-            role="region"
-            aria-label="Jobs in flight"
-            tabIndex={0}
-          >
-            <table className="w-full text-sm">
-              <caption className="sr-only">
-                Sync jobs that are queued or running, with their liveness and a control to cancel.
-              </caption>
-              <thead>
-                <tr className="text-left text-xs text-fg-muted">
-                  <th scope="col" className="py-2 pr-3 font-medium">Connection</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Trigger</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">State</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Started</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Heartbeat</th>
-                  <th scope="col" className="py-2 font-medium">Attempt</th>
-                  <th scope="col" className="py-2 font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {jobs.data?.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    label={label(job.connection_id)}
-                    onCancel={() =>
-                      cancel.mutate(job.id, {
-                        // The 409 — "it had already finished" — is shown as-is.
-                        // It is a real answer to the click and the operator is
-                        // owed it; replacing it with "cancelled" would be a lie
-                        // about what happened to their data.
-                        onError: (e) => setActionError((e as Error).message),
-                        onSuccess: () => setActionError(null),
-                      })
-                    }
-                    busy={cancel.isPending}
-                  />
+                      <label className="flex items-center gap-2 text-xs text-fg-muted">
+                        Every
+                        <Select
+                          value={String(c.sync_interval_minutes)}
+                          onChange={(e) =>
+                            update.mutate(
+                              { id: c.id, body: { sync_interval_minutes: Number(e.target.value) } },
+                              { onError: (err) => setActionError((err as Error).message) },
+                            )
+                          }
+                          disabled={update.isPending || !defaults.data}
+                          aria-label={`Sync interval for ${connectionName(c, "this connection")}`}
+                          inline
+                          className="w-auto"
+                          data-testid={`interval-${c.id}`}
+                        >
+                          {intervalOptions(c.sync_interval_minutes, defaults.data).map((m) => (
+                            <option key={m} value={m}>
+                              {formatInterval(m)}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                    </div>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <Card title="Recent runs">
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs text-fg-muted" htmlFor="run-filter">
-            Show
-          </label>
-          <Select
-            id="run-filter"
-            value={runFilter}
-            onChange={(e) => setRunFilter(e.target.value)}
-            className="w-auto"
-            data-testid="run-filter"
-          >
-            <option value="">All connections</option>
-            {connectionList.map((c) => (
-              <option key={c.id} value={c.id}>
-                {connectionName(c, c.id)}
-              </option>
-            ))}
-          </Select>
+              </ul>
+            )}
+          </Card>
+          <AutoCategorize />
         </div>
 
-        {runs.isPending && <Spinner />}
-        {runs.isError && (
-          <p className="text-sm text-negative" role="alert">
-            {(runs.error as Error).message}
-          </p>
-        )}
-        {runs.isSuccess && (runs.data?.length ?? 0) === 0 && (
-          <p className="text-sm text-fg-muted" data-testid="no-runs">
-            No runs yet.
-          </p>
-        )}
-        {(runs.data?.length ?? 0) > 0 && (
-          <ul className="divide-y divide-border rounded-control bg-surface-inset/40" data-testid="run-list">
-            {runs.data?.map((run) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                expanded={expanded === run.id}
-                onToggle={() => setExpanded(expanded === run.id ? null : run.id)}
-              />
-            ))}
-          </ul>
-        )}
-      </Card>
+        {/* Column two: what is running right now, and the data checks that say
+            whether the numbers the sync produced can be trusted. */}
+        <div className="space-y-4 lg:min-w-0">
+          <Card
+            title="Running now"
+            note="Jobs in flight. A job whose heartbeat has stopped advancing is one the worker has stopped reporting on — the server reclaims it and runs it again."
+          >
+            {jobs.isPending && <Spinner />}
+            {jobs.isError && (
+              <p className="text-sm text-negative" role="alert">
+                {(jobs.error as Error).message}
+              </p>
+            )}
+            {jobs.isSuccess && (jobs.data?.length ?? 0) === 0 && (
+              <p className="text-sm text-fg-muted" data-testid="no-jobs">
+                Nothing queued or running.
+              </p>
+            )}
+            {(jobs.data?.length ?? 0) > 0 && (
+              <div
+                className="overflow-x-auto"
+                role="region"
+                aria-label="Jobs in flight"
+                tabIndex={0}
+              >
+                <table className="w-full text-sm">
+                  <caption className="sr-only">
+                    Sync jobs that are queued or running, with their liveness and a control to cancel.
+                  </caption>
+                  <thead>
+                    <tr className="text-left text-xs text-fg-muted">
+                      <th scope="col" className="py-2 pr-3 font-medium">Connection</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">Trigger</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">State</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">Started</th>
+                      <th scope="col" className="py-2 pr-3 font-medium">Heartbeat</th>
+                      <th scope="col" className="py-2 font-medium">Attempt</th>
+                      <th scope="col" className="py-2 font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {jobs.data?.map((job) => (
+                      <JobRow
+                        key={job.id}
+                        job={job}
+                        label={label(job.connection_id)}
+                        onCancel={() =>
+                          cancel.mutate(job.id, {
+                            // The 409 — "it had already finished" — is shown as-is.
+                            // It is a real answer to the click and the operator is
+                            // owed it; replacing it with "cancelled" would be a lie
+                            // about what happened to their data.
+                            onError: (e) => setActionError((e as Error).message),
+                            onSuccess: () => setActionError(null),
+                          })
+                        }
+                        busy={cancel.isPending}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+          <DataChecks />
+        </div>
 
-      <AutoCategorize />
-      <DataChecks />
-      <AgentAccess />
+        {/* Column three: the history, and the token that lets an agent read this
+            household's numbers without being handed the household's names. */}
+        <div className="space-y-4 lg:min-w-0">
+          <RecentRuns />
+          <AgentAccess />
+        </div>
+      </div>
     </div>
+  );
+}
+
+// ---- the run history ------------------------------------------------------
+
+/** How many runs the panel asks for. The endpoint would default to the same 50
+ *  (`DEFAULT_RUN_LIMIT`), but the copy under the list names the number, and a
+ *  number the server picks is not one this file can truthfully print. Asking
+ *  for it explicitly is what keeps the two sentences agreeing. */
+const RUN_LIMIT = 50;
+
+/**
+ * The run history, bounded — issue #36.
+ *
+ * The card used to be as tall as the history. There is no ceiling on that: a
+ * household that syncs every hour has thousands of runs and the app keeps the
+ * most recent 50, which at ~56 px a row is 2,800 px of list at the bottom of a
+ * column that also holds the agent tokens. So the page's shape was something
+ * the *data* decided — it grew every time the worker ran, and the way to reach
+ * what was under the list was to scroll past all of it.
+ *
+ * The list is a **fixed, scrollable region** now: capped at 24rem and scrolled
+ * inside itself, so the card has the same height on the day the household
+ * connects its first bank and a year later. This is the "cap height + scroll"
+ * half of §9.3's answer to the imbalance issue (#33) — chosen over a "show
+ * more" button because the rows are all *here* (the cap is on the box, not on
+ * what is fetched), and over bounding the API because the API is already
+ * bounded: it returns 50 runs at most and this asks for exactly that.
+ *
+ * Nothing the server sent is hidden by the cap — every row is in the DOM, one
+ * scroll away, and the region is reachable by keyboard (§4.7: an `overflow` box
+ * is not focusable on its own, and a scroll region a keyboard cannot scroll
+ * fails 2.1.1). What *is* hidden is whatever the API did not return, which is
+ * why the line above the list gives the count and, when the response is exactly
+ * as long as the request, says outright that older runs are not listed — a
+ * history that silently stops at 51 runs reads as a history with 50 runs in it.
+ * Its `aria-label` carries the same count, since a reader who arrives at the
+ * region by keyboard gets no other cue that it scrolls.
+ */
+export function RecentRuns() {
+  // Polled, like the rest of the page: the runs are written by the *worker*, so
+  // nothing the client does invalidates them.
+  const connections = useConnections(true);
+  const connectionList = connections.data ?? [];
+  const [runFilter, setRunFilter] = useState<string>("");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const runs = useSyncRuns(runFilter || null, RUN_LIMIT);
+
+  const rows = runs.data ?? [];
+  const oldestNotListed = rows.length >= RUN_LIMIT;
+  const plural = rows.length === 1 ? "run" : "runs";
+
+  return (
+    <Card title="Recent runs">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs text-fg-muted" htmlFor="run-filter">
+          Show
+        </label>
+        <Select
+          id="run-filter"
+          value={runFilter}
+          onChange={(e) => setRunFilter(e.target.value)}
+          className="w-auto"
+          data-testid="run-filter"
+        >
+          <option value="">All connections</option>
+          {connectionList.map((c) => (
+            <option key={c.id} value={c.id}>
+              {connectionName(c, c.id)}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {runs.isPending && <Spinner />}
+      {runs.isError && (
+        <p className="text-sm text-negative" role="alert">
+          {(runs.error as Error).message}
+        </p>
+      )}
+      {runs.isSuccess && rows.length === 0 && (
+        <p className="text-sm text-fg-muted" data-testid="no-runs">
+          No runs yet.
+        </p>
+      )}
+      {rows.length > 0 && (
+        <>
+          <p className="text-xs text-fg-muted" data-testid="run-count">
+            {oldestNotListed
+              ? `The ${RUN_LIMIT} most recent ${plural}. Older runs, if any, are not listed.`
+              : `${rows.length} ${plural}, newest first.`}
+          </p>
+          <div
+            role="region"
+            aria-label={`Run history, ${rows.length} ${plural}, newest first`}
+            tabIndex={0}
+            data-testid="run-region"
+            // `max-h-96` (24rem) and not a viewport unit: the region is a card
+            // among cards, and a height that follows the window would be a
+            // second thing that moves when nothing about the list did.
+            className="max-h-96 overflow-y-auto rounded-control bg-surface-inset/40"
+          >
+            <ul className="divide-y divide-border" data-testid="run-list">
+              {rows.map((run) => (
+                <RunRow
+                  key={run.id}
+                  run={run}
+                  expanded={expanded === run.id}
+                  onToggle={() => setExpanded(expanded === run.id ? null : run.id)}
+                />
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

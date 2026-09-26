@@ -50,28 +50,28 @@ import PortfolioHoldings from "@/components/PortfolioHoldings";
 
 export default function InvestmentsView({ ownerName }: { ownerName?: string | null }) {
   return (
-    // §9.3's card grid, kept for the two things this view still holds: the
-    // pointer to where the allocation went (Insights → Allocations) and the
-    // holdings list beside it. The grid itself is unchanged from when the
-    // allocation lived here — the holdings table is the wide thing the view
-    // is for, and the link card sits opposite it rather than as a strip above.
-    // The owner note spans both because it is about the view, not about either
-    // card.
-    <div
-      className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
-      data-testid="investments-view"
-    >
+    // A single column, and it is one on purpose. This view held a two-up grid
+    // because the allocation card lived here and the holdings list needed
+    // something beside it; the allocation moved to Insights (ADR-0054) and what
+    // is left in the first cell is one 44 px link, which made the grid a
+    // liability rather than a layout: the row was as tall as the holdings list,
+    // so the grid's whole second column was empty space with a link at the top
+    // of it. There is no second thing of substance to put beside the holdings,
+    // and inventing one to fill a column is not a layout — so the pointer is a
+    // full-width row above them instead, and the page is one column of content
+    // that is the width it says it is.
+    //
+    // The holdings themselves still grid at `lg:` — one card per account, two
+    // up — which is §9.3's card grid doing its job where there is in fact more
+    // than one card to lay out.
+    <div className="space-y-6" data-testid="investments-view">
       {/* The owner filter is a Balances control — it scopes that view's list and
           its net-worth header — and the portfolio endpoints have no owner scope
           (`api/investments.ts`). Switching views while filtered would otherwise
           swap household-wide totals in under an active filter with nothing said,
           which reads as the filter having silently stopped working. */}
       {ownerName && (
-        <p
-          className="text-sm text-fg-muted lg:col-span-2"
-          role="status"
-          data-testid="investments-owner-note"
-        >
+        <p className="text-sm text-fg-muted" role="status" data-testid="investments-owner-note">
           Every owner — the portfolio is household-wide, so {ownerName}’s filter does not apply here.
         </p>
       )}

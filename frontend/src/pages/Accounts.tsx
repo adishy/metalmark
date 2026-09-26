@@ -538,7 +538,21 @@ function AccountGroups({
   })).filter((g) => g.rows.length > 0);
 
   return (
-    <div className="space-y-6" data-testid="account-list">
+    // §9.3's card grid for Accounts, which this page did not have: with no `lg:`
+    // class anywhere, the whole page was one 1152 px column at desktop, and a
+    // list row that names an account, its owner and its balance has no use for
+    // 1152 px. One group per column, two up — the group heading and its total
+    // stay attached to the rows they are about, which is the thing a single
+    // flat grid of accounts would lose.
+    //
+    // `items-start` rather than the default stretch: a group is as tall as the
+    // accounts in it, and a household with three depository accounts and one
+    // loan should see a short card, not a card padded out to match its
+    // neighbour.
+    <div
+      className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
+      data-testid="account-list"
+    >
       {groups.map(({ type, rows }) => {
         // A group total only when every row is in one currency: adding rupees to
         // dollars would be a number that is not any amount of money (§6.5).
