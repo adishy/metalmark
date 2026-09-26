@@ -12,14 +12,15 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import ScrollTabs from "@/components/ScrollTabs";
 import Overview from "@/pages/insights/Overview";
 import Allocations from "@/pages/insights/Allocations";
+import Recurring from "@/pages/insights/Recurring";
 
 // One declared list drives the tab strip, the route guard and which panel
-// renders — adding a tab (Agent A's `recurring`, task B7) is one line here
-// plus one line in the switch below; nothing else needs to know the list grew.
+// renders — adding a tab is one line here plus one line in the switch below;
+// nothing else needs to know the list grew.
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "allocations", label: "Allocations" },
-  // { id: "recurring", label: "Recurring" },  <- next entry goes here
+  { id: "recurring", label: "Recurring" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -56,6 +57,7 @@ export default function Insights() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} data-testid={`insights-panel-${tab}`}>
         {tab === "overview" && <Overview />}
         {tab === "allocations" && <Allocations />}
+        {tab === "recurring" && <Recurring />}
       </div>
     </div>
   );

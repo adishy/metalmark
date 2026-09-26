@@ -52,6 +52,7 @@ from app.schemas import institutions as ins
 from app.schemas import investments as inv
 from app.schemas import ledger as le
 from app.schemas import owners as ow
+from app.schemas import recurring as rq
 from app.schemas import reports as rp
 from app.schemas import rules as ru
 from app.schemas import transactions as tx
@@ -240,6 +241,53 @@ register(
     lines=N,
     created_at=K,
     updated_at=K,
+)
+
+# ---- recurring series (ADR-0053) -----------------------------------------------
+
+RECURRING_CADENCES = Code(
+    "weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "annual",
+)
+#: ``name`` is the short label the person gave the series (usually the merchant,
+#: which is why a subscription's name is a pseudonym either way) and ``merchant``
+#: is the text matched against a transaction — the same pair the ledger draws
+#: between a display label and a bank's free text.
+register(
+    rq.RecurringOut,
+    id=K,
+    name=Label("Recurring"),
+    merchant=Pseudonym("Merchant"),
+    account_id=K,
+    category_id=K,
+    amount=K,
+    currency=CUR,
+    cadence=RECURRING_CADENCES,
+    next_due_date=K,
+    is_active=K,
+    transaction_id=K,
+    monthly_amount=K,
+    occurrences=K,
+    last_seen_date=K,
+    created_at=K,
+    updated_at=K,
+)
+register(rq.RecurringTotalsOut, currency=CUR, monthly_in=K, monthly_out=K, net_monthly=K)
+register(rq.RecurringListOut, items=N, totals=N)
+register(
+    rq.RecurringSuggestionOut,
+    name=Label("Recurring"),
+    merchant=Pseudonym("Merchant"),
+    account_id=K,
+    category_id=K,
+    amount=K,
+    currency=CUR,
+    cadence=RECURRING_CADENCES,
+    monthly_amount=K,
+    occurrences=K,
+    first_date=K,
+    last_date=K,
+    next_due_date=K,
+    transaction_id=K,
 )
 register(
     hh.HouseholdOut,

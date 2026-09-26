@@ -910,3 +910,107 @@ export interface PaystubPatch {
   net?: Money;
   lines?: PaystubLineIn[];
 }
+
+// ---- recurring series (ADR-0053) --------------------------------------------
+
+export type Cadence =
+  | "weekly"
+  | "biweekly"
+  | "semimonthly"
+  | "monthly"
+  | "quarterly"
+  | "semiannual"
+  | "annual";
+
+export interface RecurringSeries {
+  id: UUID;
+  name: string;
+  /** The substring a transaction's merchant-or-description must contain to
+   *  count as one of this series' occurrences; null means "anything on the
+   *  account" (ADR-0053). */
+  merchant: string | null;
+  account_id: UUID | null;
+  category_id: UUID | null;
+  /** Signed, like every ledger amount: negative is money out. */
+  amount: Money;
+  currency: string;
+  cadence: Cadence;
+  next_due_date: string | null;
+  is_active: boolean;
+  transaction_id: UUID | null;
+  /** Derived at read time, never stored: what the cadence makes this worth per
+   *  month, how many transactions it currently matches, and the latest of them. */
+  monthly_amount: Money;
+  occurrences: number;
+  last_seen_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecurringTotals {
+  currency: string;
+  monthly_in: Money;
+  monthly_out: Money;
+  net_monthly: Money;
+}
+
+export interface RecurringList {
+  items: RecurringSeries[];
+  totals: RecurringTotals[];
+}
+
+/** Something the ledger looks like it repeats, before anyone confirms it.
+ *  Nothing is stored, and every field is what a create needs — accepting one is
+ *  posting it back with a cadence (ADR-0053). */
+export interface RecurringSuggestion {
+  name: string;
+  merchant: string | null;
+  account_id: UUID | null;
+  category_id: UUID | null;
+  amount: Money;
+  currency: string;
+  cadence: Cadence;
+  monthly_amount: Money;
+  occurrences: number;
+  first_date: string;
+  last_date: string;
+  next_due_date: string;
+  transaction_id: UUID;
+}
+
+/** ``transaction_id`` seeds whatever the body leaves blank — name, merchant,
+ *  amount, account, category, currency — and a field that *is* sent wins, so
+ *  this is also the shape of "accept this suggestion, but edit it first". */
+export interface RecurringCreate {
+  transaction_id?: UUID | null;
+  name?: string | null;
+  merchant?: string | null;
+  account_id?: UUID | null;
+  category_id?: UUID | null;
+  amount?: Money | null;
+  currency?: string | null;
+  cadence: Cadence;
+  next_due_date?: string | null;
+  is_active?: boolean;
+}
+
+export interface RecurringUpdate {
+  name?: string;
+  merchant?: string | null;
+  account_id?: UUID | null;
+  category_id?: UUID | null;
+  amount?: Money;
+  currency?: string | null;
+  cadence?: Cadence;
+  next_due_date?: string | null;
+  is_active?: boolean;
+}
+
+/** What the tab filters by. Every field is optional; an absent one is "any". */
+export interface RecurringFilter {
+  account_id?: UUID | null;
+  category_id?: UUID | null;
+  is_active?: boolean | null;
+  direction?: "in" | "out" | null;
+  q?: string | null;
+}
