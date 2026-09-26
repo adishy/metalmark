@@ -480,3 +480,119 @@ test.describe("the run history is a fixed region, not a page that grows (#36)", 
     expect(two.card).toBeLessThan(fifty.card);
   });
 });
+
+// Issue #31's other half. The holdings cards on the Investments view were the
+// named instance and #33's commit bounded them (one scroll region per account
+// card); this is the ranking the same view links to — Insights → Allocations —
+// which had no shape of its own at all. The demo household is the wrong fixture
+// for measuring it in either direction: it holds one cash row, so the page has
+// neither a long list nor a cap to prove, which is why the endpoint is mocked at
+// both sizes here.
+
+/** An `Allocation` as `GET /investments/allocation` returns it, at `n` rows. */
+function mockAllocation(n: number) {
+  return {
+    as_of: "2026-09-20",
+    base_currency: "USD",
+    total_base: String(n * 100),
+    rows: Array.from({ length: n }, (_, i) => ({
+      key: `sec-${i}`,
+      label: `SEC${i}`,
+      value_base: "100.00",
+      percent: "1.0000",
+      holdings: 1,
+      sources: [],
+    })),
+    unpriced_positions: 0,
+    no_rate_positions: 0,
+    max_stale_days: 2,
+  };
+}
+
+test.describe("a long allocation scrolls inside its card, not down the page (#31)", () => {
+  test("forty groups take one box, and the total stays on screen above them", async ({ page }) => {
+    // Two full loads plus a keyboard interaction — over the 30 s default on a
+    // loaded host.
+    test.slow();
+
+    await login(page);
+
+    let groups = 3;
+    await page.route("**/investments/allocation*", (route) =>
+      route.fulfill({ json: mockAllocation(groups) }),
+    );
+
+    const measure = async (n: number) => {
+      groups = n;
+      await page.goto("/insights/allocations");
+      await expect(page.getByTestId("allocation-rows-region")).toBeVisible();
+      return page.evaluate(() => {
+        const box = document.querySelector("[data-testid=allocation-rows-region]") as HTMLElement;
+        const cs = getComputedStyle(box);
+        const total = document.querySelector("[data-testid=allocation-total]") as HTMLElement;
+        return {
+          role: box.getAttribute("role"),
+          tabIndex: box.getAttribute("tabindex"),
+          label: box.getAttribute("aria-label"),
+          maxHeight: cs.maxHeight,
+          overflowY: cs.overflowY,
+          height: box.getBoundingClientRect().height,
+          clientHeight: box.clientHeight,
+          scrollHeight: box.scrollHeight,
+          rows: document.querySelectorAll("[data-testid^=allocation-row-]").length,
+          totalBottom: total.getBoundingClientRect().bottom,
+          page: document.documentElement.scrollHeight,
+          viewport: window.innerHeight,
+        };
+      });
+    };
+
+    const three = await measure(3);
+
+    // A ranking that fits is left alone: no region, no tab stop, no cap taking
+    // effect. Seven rows is where the box starts to scroll, and three is not it.
+    expect(three.rows).toBe(3);
+    expect(three.role).toBeNull();
+    expect(three.tabIndex).toBeNull();
+    expect(three.overflowY).toBe("visible");
+    expect(three.height).toBeLessThan(384);
+
+    const forty = await measure(40);
+
+    // §4.7's region: named with the grouping and the row count, and in the tab
+    // order, because an `overflow` box is not focusable on its own and a scroll
+    // region a keyboard cannot scroll hides its content from anyone not using a
+    // pointer (2.1.1).
+    expect(forty.role).toBe("region");
+    expect(forty.tabIndex).toBe("0");
+    expect(forty.label).toBe("Allocation by security, 40 rows");
+    // The cap itself: `max-h-96` is 24rem, and this app's root is 16 px.
+    expect(forty.overflowY).toBe("auto");
+    expect(forty.maxHeight).toBe("384px");
+    expect(forty.height).toBeLessThanOrEqual(385);
+    // ...and it is doing work: forty rows are far taller than the box.
+    expect(forty.scrollHeight).toBeGreaterThan(forty.clientHeight * 2);
+    // Nothing was dropped by the cap: every row the server sent is in the page.
+    expect(forty.rows).toBe(40);
+    // The total and the caveats below it are *outside* the box, so they are on
+    // screen — without scrolling the page at all — while the ranking moves under
+    // them. Laid out in the page instead, forty rows measured 2,212 px of card in
+    // a 2,515 px document, with the total at the bottom of it.
+    expect(forty.totalBottom).toBeLessThanOrEqual(forty.viewport);
+    // The claim the issue makes, in the sharpest form available: 37 more groups
+    // cost at most one box of page, where unbounded they cost ~1,900 px. The
+    // 400 px is the box's own growth (156 px of three rows to 384) plus slack for
+    // the row that follows the header; the difference being caught is the whole
+    // list.
+    expect(forty.page - three.page).toBeLessThan(400);
+    expect(forty.page).toBeLessThan(900);
+
+    // Keyboard: focus the box and page down. This is the whole reason it is
+    // focusable — the rows below the fold have to be reachable without a mouse.
+    await page.getByTestId("allocation-rows-region").focus();
+    await page.keyboard.press("PageDown");
+    await expect
+      .poll(() => page.getByTestId("allocation-rows-region").evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0);
+  });
+});

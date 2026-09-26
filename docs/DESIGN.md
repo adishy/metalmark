@@ -1665,6 +1665,17 @@ Five shapes, and they are the whole of it:
   was — flow diagrams lose their meaning when squeezed — and so is the spending
   breakdown, whose legend is a list of categories with totals. The tab strip above is
   `ScrollTabs` (§5), not part of this shape.
+  Its second tab, **Allocations, is a ranking in one card, bounded at `lg:`.** A ranking
+  has no natural end — the demo household's one cash row is 125 px, a forty-security
+  portfolio was measured at 2,212 px inside a 2,515 px page — and, unlike the pair above,
+  it has no second container that would have to agree with it, so the answer is not to
+  restructure but to bound: past `SCROLL_AFTER` rows the list scrolls inside the card
+  (`lg:max-h-96 lg:overflow-y-auto`) as §4.7's region — `role="region"`, `tabIndex={0}`,
+  a label naming the grouping and the row count — with the total, the excluded counts and
+  the price age below it staying on screen. Nothing is dropped: every row is in the DOM.
+  Below `lg:` there is no cap, because a page that scrolls is what a phone has and a
+  nested scroll region at 390 px is a trap (§5); a list short enough to fit gets no region
+  at all, since a focusable box that cannot scroll is a tab stop that does nothing.
 - **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
   their internal layout and simply stop being full-width.
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first
