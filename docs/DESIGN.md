@@ -728,7 +728,7 @@ Checkboxes are covered separately in §4.14.
   scrolled by keyboard fails 2.1.1.
 
 ```tsx
-<div className="overflow-x-auto" role="region" aria-label="Exchange rates" tabIndex={0}>
+<div className="relative overflow-x-auto" role="region" aria-label="Exchange rates" tabIndex={0}>
   <table className="w-full text-sm">
     <caption className="sr-only">Exchange rates by date</caption>
     <thead>
@@ -737,6 +737,11 @@ Checkboxes are covered separately in §4.14.
         ...
 ```
 
+- The container carries `relative` for a reason: a positioned descendant — every `sr-only`
+  label is `position: absolute` — starts from its static position, and with no positioned
+  ancestor inside the region it anchors to the document instead of being clipped by the
+  region, which pushes the whole page sideways at 360 px. A top-left `sr-only` caption is
+  safe; the same label in the **last** column is not (the Admin jobs table did this).
 - Numeric columns get `text-right tabular-nums`; the first column is the row's
   identity and should be frozen if the table scrolls horizontally.
 - The page body must never scroll horizontally. An `overflow-x-hidden` on `<body>` is
