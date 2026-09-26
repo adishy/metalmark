@@ -151,15 +151,25 @@ export default function Allocations() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         {/* Phone: a pill that opens a sheet — four segments is exactly the case
             §5 calls out (a row of choices that would not comfortably fit at
             360px becomes a picker, not a scrolling strip). Desktop keeps the
             segmented control, unchanged from the card this replaced. The view
             switch follows it: the same two shapes, one row down on a phone,
             because AGENTS.md's rule is about the *control* ("view switches on a
-            phone are SheetSelect"), not about which switch it is. */}
-        <div className="flex flex-wrap items-center gap-2">
+            phone are SheetSelect"), not about which switch it is.
+
+            At `sm:` and up each control carries the name it is chosen by, in the
+            same small muted line `RangeControl` puts over its two groups and
+            with the same 8 `gap-x` between them: two tab strips whose
+            underlines run into each other were read as one control with seven
+            segments, four of which changed the *other* thing. The words are the
+            ones the phone's pills already print ("Group by", "View"), so both
+            widths call the control the same thing — and the tablist's own name
+            is one of them, so what a reader sees is what a screen reader
+            announces (§4.3/§4.4). */}
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
           <div className="sm:hidden">
             <SheetSelect
               label="Group by"
@@ -170,8 +180,9 @@ export default function Allocations() {
             />
           </div>
           <div className="hidden sm:block">
+            <p className="mb-2 text-xs font-medium text-fg-muted">Group by</p>
             <SegmentedControl
-              label="Group allocation by"
+              label="Group by"
               segments={GROUPS}
               value={groupBy}
               onChange={setGroupBy}
@@ -188,8 +199,9 @@ export default function Allocations() {
             />
           </div>
           <div className="hidden sm:block">
+            <p className="mb-2 text-xs font-medium text-fg-muted">View</p>
             <SegmentedControl
-              label="Show the allocation as"
+              label="View"
               segments={VIEWS}
               value={view}
               onChange={setView}
