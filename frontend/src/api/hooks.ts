@@ -431,10 +431,20 @@ export function useUpsertFxRate() {
 
 export function useUpdateCategory() {
   const invalidate = useInvalidateTaxonomy();
+  // And the ledger with it. A rename is not cosmetic: every report that groups
+  // by category groups by the *name* a person reads, so the cash-flow sankey and
+  // the spending donut relabel themselves — and a delete moves the transactions
+  // that pointed at the category somewhere else, which is a change to rows, not
+  // to the taxonomy. Invalidating only the taxonomy left both serving what they
+  // fetched when the page opened, and `main.tsx` turns refetch-on-focus off.
+  const invalidateLedger = useInvalidateLedger();
   return useMutation({
     mutationFn: (v: { id: string; body: CategoryUpdate }) =>
       api.patch<Category>(`/categories/${v.id}`, v.body),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      invalidateLedger();
+    },
   });
 }
 

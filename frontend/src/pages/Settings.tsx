@@ -51,12 +51,13 @@ import {
 } from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import Dialog from "@/components/Dialog";
 import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
 import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
 import ScrollTabs from "@/components/ScrollTabs";
-import type { Owner, OwnerReassignment } from "@/api/types";
+import type { Category, CategoryGroup, Owner, OwnerReassignment } from "@/api/types";
 import { todayIso } from "@/lib/dates";
 import {
   Button,
@@ -533,7 +534,6 @@ function CategoriesSection() {
   const delGroup = useDeleteCategoryGroup();
   const createCat = useCreateCategory();
   const delCat = useDeleteCategory();
-  const updateCat = useUpdateCategory();
 
   const [gName, setGName] = useState("");
   const [gType, setGType] = useState("expense");
@@ -670,41 +670,12 @@ function CategoriesSection() {
               </div>
               <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
-                  <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="flex min-w-0 flex-1 items-center gap-3">
-                      {/* The emoji is edited in place: it is the one field
-                          people change for fun, and a dialog for one
-                          character is a long way round. Saved on blur. The
-                          wrapper sets the width — the control is w-full. */}
-                      <span className="w-14 shrink-0">
-                      <Input
-                        aria-label={`Emoji for ${c.name}`}
-                        defaultValue={c.icon ?? ""}
-                        maxLength={16}
-                        className="px-1 text-center"
-                        onBlur={(e) => {
-                          const next = e.target.value.trim() || null;
-                          if (next !== (c.icon ?? null)) {
-                            updateCat.mutate({ id: c.id, body: { icon: next } });
-                          }
-                        }}
-                        data-testid={`category-icon-${c.id}`}
-                      />
-                      </span>
-                      {!c.icon && (
-                        <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
-                      )}
-                      <span className="truncate">{c.name}</span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      className="px-2 py-1 text-xs"
-                      onClick={() => delCat.mutate(c.id)}
-                      data-testid={`category-delete-${c.id}`}
-                    >
-                      Delete
-                    </Button>
-                  </li>
+                  <CategoryRow
+                    key={c.id}
+                    category={c}
+                    groups={(groups.data ?? []).filter((other) => other.type === g.type)}
+                    onDelete={() => delCat.mutate(c.id)}
+                  />
                 ))}
                 {(byGroup.get(g.id) ?? []).length === 0 && (
                   <li className="px-3 py-2 text-xs text-fg-muted">No categories.</li>
@@ -715,6 +686,203 @@ function CategoriesSection() {
         </ul>
       </Card>
     </div>
+  );
+}
+
+/**
+ * One category in the list: the emoji is edited *in* the row, everything else
+ * lives one tap away in `EditCategoryDialog`.
+ *
+ * **The emoji is in the row on purpose.** It is the one field people change for
+ * fun, and a dialog for one character is a long way round; saved on blur, like
+ * every other in-place edit here. Its wrapper sets the width — the control is
+ * `w-full`.
+ *
+ * **Everything else moved into the panel** (§4.6: a row has one primary action,
+ * and a second one either sits beside it at 44 px or moves into the detail). The
+ * arithmetic decided it rather than taste: at 360 px this row is 296 px wide, and
+ * an inline Rename button beside Delete left the *name* — the one thing the list
+ * is for — 51 px, which truncates "Paychecks". One Edit button costs less width
+ * than the Delete button it replaces and the name reads whole again.
+ */
+function CategoryRow({
+  category,
+  groups,
+  onDelete,
+}: {
+  category: Category;
+  /** Groups this category may move to: its own type only, never across. */
+  groups: CategoryGroup[];
+  onDelete: () => void;
+}) {
+  const updateCat = useUpdateCategory();
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <li className="px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-14 shrink-0">
+          <Input
+            aria-label={`Emoji for ${category.name}`}
+            defaultValue={category.icon ?? ""}
+            maxLength={16}
+            className="px-1 text-center"
+            onBlur={(e) => {
+              const next = e.target.value.trim() || null;
+              if (next !== (category.icon ?? null)) {
+                updateCat.mutate({ id: category.id, body: { icon: next } });
+              }
+            }}
+            data-testid={`category-icon-${category.id}`}
+          />
+        </span>
+        {!category.icon && (
+          <span
+            className="inline-block h-3 w-3 shrink-0 rounded-full"
+            style={{ background: category.color ?? "#64748b" }}
+            aria-hidden="true"
+          />
+        )}
+        <span className="min-w-0 flex-1 truncate text-fg">{category.name}</span>
+        <Button
+          variant="ghost"
+          className="px-2 py-1 text-xs"
+          onClick={() => setEditing(true)}
+          data-testid={`category-edit-${category.id}`}
+        >
+          Edit
+        </Button>
+      </div>
+      {updateCat.isError && (
+        <p
+          className="mt-1 text-xs text-negative"
+          role="alert"
+          data-testid={`category-error-${category.id}`}
+        >
+          {(updateCat.error as Error).message}
+        </p>
+      )}
+
+      {editing && (
+        <EditCategoryDialog
+          category={category}
+          groups={groups}
+          onDelete={onDelete}
+          onClose={() => setEditing(false)}
+        />
+      )}
+    </li>
+  );
+}
+
+/**
+ * Rename a category, or move it to another group of the same type.
+ *
+ * **Rename is a plain PATCH of one field** and the row behind the dialog is the
+ * same row it started from — no page, no context switch, and the list keeps
+ * showing every other category while this one is edited.
+ *
+ * **The group list is filtered to the category's own type, and that filter is a
+ * correctness rule rather than a tidy-up.** A category's type *is* its group's
+ * and every report reads it, so offering an income group here would let a rename
+ * silently move an expense category to the other side of cash flow with nothing
+ * in the ledger having changed. `update_category` refuses the same move
+ * server-side, so the two agree rather than one relying on the other.
+ */
+function EditCategoryDialog({
+  category,
+  groups,
+  onDelete,
+  onClose,
+}: {
+  category: Category;
+  groups: CategoryGroup[];
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const updateCat = useUpdateCategory();
+  const [name, setName] = useState(category.name);
+  const [group, setGroup] = useState(category.group_id);
+  const [err, setErr] = useState<string | null>(null);
+  const nameId = useFieldId(`edit-category-name-${category.id}`);
+  const groupId = useFieldId(`edit-category-group-${category.id}`);
+
+  const save = () => {
+    const e = requiredText(name);
+    setErr(e);
+    if (e) return;
+    updateCat.mutate(
+      {
+        id: category.id,
+        body: {
+          name: name.trim(),
+          // Only when the reader moved it: a rename is not a re-file.
+          ...(group !== category.group_id ? { group_id: group } : {}),
+        },
+      },
+      { onSuccess: onClose },
+    );
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit “${category.name}”`}
+      testid={`edit-category-dialog-${category.id}`}
+      footer={
+        <>
+          <Button
+            variant="danger"
+            onClick={onDelete}
+            data-testid={`category-delete-${category.id}`}
+          >
+            Delete
+          </Button>
+          <div className="flex-1" />
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={save}
+            disabled={updateCat.isPending}
+            data-testid={`category-save-${category.id}`}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Name" htmlFor={nameId} required error={err}>
+          <Input
+            id={nameId}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            data-testid={`category-edit-name-${category.id}`}
+          />
+        </Field>
+        <Field
+          label="Group"
+          htmlFor={groupId}
+          hint={`Only ${groups[0]?.type ?? "matching"} groups: a category's type is its group's, and the reports read it.`}
+        >
+          <Combobox
+            id={groupId}
+            listLabel="Category group"
+            value={group}
+            onChange={setGroup}
+            options={groups.map((g) => ({ value: g.id, label: g.name }))}
+            data-testid={`category-edit-group-${category.id}`}
+          />
+        </Field>
+        {updateCat.isError && (
+          <p className="text-sm text-negative" role="alert">
+            {(updateCat.error as Error).message}
+          </p>
+        )}
+      </div>
+    </Dialog>
   );
 }
 

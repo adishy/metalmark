@@ -94,7 +94,7 @@ test("split a transaction by amount", async ({ page }) => {
   await expect(page.getByTestId("txn-list")).toContainText("split");
 });
 
-test("add and delete a category in settings", async ({ page }) => {
+test("add, rename and delete a category in settings", async ({ page }) => {
   const run = Date.now();
   await login(page);
   await page.getByTestId("nav-settings").click();
@@ -105,9 +105,19 @@ test("add and delete a category in settings", async ({ page }) => {
   await page.getByTestId("category-save").click();
   await expect(page.getByTestId("category-list")).toContainText(name);
 
-  // Delete the freshly-added category via its row's Delete button.
+  // Rename it from its own row: Edit opens a dialog over the list, so the tab
+  // you were on is still the tab you are on — no full-page context switch.
   const row = page.locator('[data-testid="category-list"] li', { hasText: name }).last();
-  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await row.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("dialog").getByTestId(/^category-edit-name-/).fill(`${name} renamed`);
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("category-list")).toContainText(`${name} renamed`);
+
+  // Delete it from that same dialog: the row carries one action (§4.6), and
+  // the destructive one lives where the full-page context already is.
+  const renamed = page.locator('[data-testid="category-list"] li', { hasText: `${name} renamed` }).last();
+  await renamed.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByTestId("category-list")).not.toContainText(name);
 });
 

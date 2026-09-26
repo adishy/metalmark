@@ -458,14 +458,19 @@ async def list_tags(session: AsyncSession) -> list[Tag]:
 
 async def update_category(session: AsyncSession, category_id: uuid.UUID,
                           data: CategoryUpdate) -> Category:
-    """Rename, re-emoji, recolour or move a category. Only the fields sent change."""
+    """Rename, re-emoji, recolour or move a category. Only the fields sent change.
+
+    A move is only ever within one type: a category's own type *is* its group's,
+    and every report reads it, so crossing income/expense/transfer would change
+    what the same rows mean without changing a row.
+    """
     obj = (
         await session.execute(select(Category).where(Category.id == category_id))
     ).scalar_one_or_none()
     if obj is None:
         raise LedgerError("Category not found", 404)
     fields = data.model_dump(exclude_unset=True)
-    if "group_id" in fields:
+    if "group_id" in fields and fields["group_id"] != obj.group_id:
         grp = (
             await session.execute(
                 select(CategoryGroup).where(CategoryGroup.id == fields["group_id"])
@@ -473,6 +478,22 @@ async def update_category(session: AsyncSession, category_id: uuid.UUID,
         ).scalar_one_or_none()
         if grp is None:
             raise LedgerError("Category group not found", 404)
+        # A category's type *is* its group's, and the type is what every report
+        # reads (ARCHITECTURE §2): an expense category that moved to an income
+        # group would keep its rows and flip which side of cash flow they count
+        # on, with nothing in the ledger having changed. Moving between two
+        # groups of the *same* type is a re-file and is allowed.
+        #
+        # The group is non-nullable and CASCADE-bound, so the category's current
+        # group cannot have gone missing behind it; `session.get` therefore
+        # returns a row, and a None here would be a bug rather than a state.
+        current = await session.get(CategoryGroup, obj.group_id)
+        if current is not None and current.type != grp.type:
+            raise LedgerError(
+                f"A category cannot move from a {current.type} group to a "
+                f"{grp.type} one: its group's type is what the reports read.",
+                422,
+            )
     for name, value in fields.items():
         setattr(obj, name, value)
     await session.flush()

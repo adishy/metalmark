@@ -22,7 +22,7 @@ from app.models import (
     Owner,
     Tag,
 )
-from app.schemas.ledger import AccountCreate, AccountUpdate
+from app.schemas.ledger import AccountCreate, AccountUpdate, CategoryUpdate
 from app.schemas.transactions import SplitIn, TransactionCreate, TransactionUpdate
 from app.services import ledger, periods, reports
 from app.services import transactions as txns
@@ -721,3 +721,48 @@ async def test_explicit_null_tag_ids_clears_the_tags(household_factory):
         # explicit null: cleared
         await txns.update_transaction(s, hh, txn.id, TransactionUpdate(tag_ids=None))
         assert (await txns._tag_ids_for(s, [txn.id])) == {}
+
+
+async def test_a_category_can_be_renamed_in_place(household_factory):
+    """The whole of the rename path: one field, one row, nothing else touched."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Grocerys")
+        renamed = await ledger.update_category(s, cat.id, CategoryUpdate(name="Groceries"))
+    assert renamed.name == "Groceries"
+    assert (renamed.icon, renamed.color, renamed.group_id) == (cat.icon, cat.color, cat.group_id)
+
+
+async def test_a_category_can_move_between_groups_of_the_same_type(household_factory):
+    """A re-file is not a retype. Moving between two ``expense`` groups keeps
+    every report reading the rows the way it read them before."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Groceries")
+        other = await ledger.create_category_group(s, hh, "Everyday", "expense", 10)
+        moved = await ledger.update_category(s, cat.id, CategoryUpdate(group_id=other.id))
+    assert moved.group_id == other.id
+
+
+async def test_a_category_cannot_move_to_a_group_of_another_type(household_factory):
+    """A category's type *is* its group's, and every report reads the type.
+
+    Nothing in the ledger changes when the group does, so moving an expense
+    category into an income group left the same rows meaning the opposite thing:
+    the money kept its amount and its account and changed which side of cash flow
+    it counted on. A rename popover that offered every group could do that by
+    accident, so the service refuses it rather than trusting the caller not to.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        cat = await _make_category(s, hh, "expense", "Groceries")
+        income = await ledger.create_category_group(s, hh, "Income", "income", 0)
+        with pytest.raises(LedgerError) as exc:
+            await ledger.update_category(s, cat.id, CategoryUpdate(group_id=income.id))
+        assert exc.value.status == 422
+        # Refused, not half-applied.
+        assert cat.group_id != income.id
+
+        # Sending the group it already has is not a move, and stays allowed.
+        same = await ledger.update_category(s, cat.id, CategoryUpdate(group_id=cat.group_id))
+        assert same.group_id == cat.group_id
