@@ -425,6 +425,19 @@ Seven further chart rules:
   a fifth of a 310 px phone canvas on gutter when the ticks are short and clips them
   when they are long.
 
+- **Grid furniture is sized to the canvas, and never repeats the data.** A value axis
+  divides its range into `valueTicks(box)` intervals — three or four on the heights
+  this app draws (220 px in the accounts card, 280 px in Insights) — and every axis
+  turns its **ticks off**: a tick marks a position the label beside it already names.
+  ECharts' `splitNumber` default is not a count but the by-product of a hunt for round
+  numbers, and on the demo household's own ranges it answers with eight or nine rules
+  where five read just as well. The count asked for is a *request* — the library may
+  return a tick or two more — so it is tuned against rules counted on the **drawn**
+  chart (§8's audit through the SVG renderer) rather than derived from a formula. The
+  rules stay solid, in `split`, which is a lighter value than the axis: it is their
+  number and not their weight that makes a hatch. `zeroRule` is the one dashed line,
+  in the axis colour, so the baseline is never mistaken for one of the grid.
+
 - **A bar stack is rounded at the end the value is at, and a chart that grows both
   ways rules its baseline.** `barEndRadius("top" | "bottom")` rounds the *outer* end
   of each stack and only that end: the inner ends are joins, and a pill on every

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as echarts from "echarts";
 import type { NetWorthSeries } from "@/api/types";
 import { coverageNotes, netWorthOption, startsHere, tooltipBody } from "@/lib/netWorthChart";
+import { valueTicks } from "@/theme/chartInteraction";
 import type { ChartTokens } from "@/theme/chartTokens";
 
 const T = {
@@ -24,8 +25,11 @@ const series = (points = POINTS) =>
 
 type LineSeries = { smooth: boolean; data: { value: [number, number]; symbol?: string }[] };
 
+const INSIGHTS = { width: 310, height: 280 };
+const ACCOUNTS = { width: 296, height: 220 };
+
 describe("netWorthOption", () => {
-  const option = netWorthOption(series(), T);
+  const option = netWorthOption(series(), T, INSIGHTS);
   const line = (option.series as LineSeries[])[0];
 
   it("puts points on a time axis with straight segments", () => {
@@ -72,6 +76,7 @@ describe("netWorthOption", () => {
           { date: "2026-02-28", net_worth: "38579.2400", missing: [] },
         ]),
         T,
+        { width: 310, height: 280 },
       ),
     );
     const drawn = [...chart.renderToSVGString().matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(
@@ -84,6 +89,18 @@ describe("netWorthOption", () => {
     expect(money.length).toBeGreaterThan(1);
     expect(money[0]).toBe("$0");
     expect(drawn.some((text) => /^\d{1,3},\d{3}$/.test(text))).toBe(false);
+  });
+
+  // How many rules the axis draws follows from the card's height, because that is
+  // the direction they crowd in — and this chart is two different heights in two
+  // different places (280 px in Insights, 220 px in the accounts card).
+  it("asks the value axis for a count the canvas's height can carry", () => {
+    const y = (box: { width: number; height: number }) =>
+      netWorthOption(series(), T, box).yAxis as { splitNumber: number };
+    expect(y(INSIGHTS).splitNumber).toBe(valueTicks(INSIGHTS));
+    expect(y(ACCOUNTS).splitNumber).toBe(valueTicks(ACCOUNTS));
+    // Shorter canvas, fewer rules asked for.
+    expect(y(ACCOUNTS).splitNumber).toBeLessThan(y(INSIGHTS).splitNumber);
   });
 });
 

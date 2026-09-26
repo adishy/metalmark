@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as echarts from "echarts";
-import { BAR_RADIUS, barEndRadius, zeroRule } from "@/theme/chartInteraction";
+import { BAR_RADIUS, barEndRadius, chartAxis, valueTicks, zeroRule } from "@/theme/chartInteraction";
 import type { ChartTokens } from "@/theme/chartTokens";
 
 const T = {
@@ -26,6 +26,39 @@ describe("zeroRule", () => {
     expect(rule.silent).toBe(true);
     expect(rule.symbol).toBe("none");
     expect(rule.label).toEqual({ show: false });
+  });
+});
+
+describe("valueTicks", () => {
+  it("asks a short canvas for fewer rules, and never asks for a hatch", () => {
+    expect(valueTicks({ width: 310, height: 280 })).toBe(4);
+    expect(valueTicks({ width: 296, height: 220 })).toBe(3);
+    // A canvas that has not been laid out yet is short, not tall.
+    expect(valueTicks({ width: 310, height: 0 })).toBe(3);
+    // Whatever the height, the ask stays in the band that draws readable rules —
+    // the numbers are a request to ECharts, whose nice-number search may return a
+    // tick or two more, so the band is what keeps a tall canvas from asking for
+    // the eight-rule hatch this exists to remove.
+    for (const height of [140, 220, 280, 360, 700]) {
+      expect(valueTicks({ width: 310, height })).toBeGreaterThanOrEqual(3);
+      expect(valueTicks({ width: 310, height })).toBeLessThanOrEqual(4);
+    }
+  });
+});
+
+describe("chartAxis", () => {
+  it("turns the ticks off: a tick marks a position its label already names", () => {
+    expect(chartAxis(T).axisTick).toEqual({ show: false });
+    expect(chartAxis(T, { grid: true, splitNumber: 4 }).axisTick).toEqual({ show: false });
+  });
+
+  it("carries the count it was given, and neither key when it was not", () => {
+    expect(chartAxis(T, { splitNumber: 3 }).splitNumber).toBe(3);
+    expect("splitNumber" in chartAxis(T)).toBe(false);
+    // The rules belong to the value axis; a category axis carrying them would
+    // draw a hatch across the plot nothing is measured against.
+    expect("splitLine" in chartAxis(T)).toBe(false);
+    expect(chartAxis(T, { grid: true }).splitLine).toEqual({ lineStyle: { color: T.split } });
   });
 });
 
@@ -89,6 +122,43 @@ describe("as ECharts draws them", () => {
     // One fill per segment, rounded on one end: four corners, two of them curved.
     const arcs = bars.map((p) => (p.d.match(/[Aa]/g) ?? []).length);
     expect(new Set(arcs)).toEqual(new Set([2]));
+  });
+
+  // The count above is an ask; this is the answer. ECharts' nice-number search
+  // decides both the step and how far the axis runs past the data, which is how a
+  // default `splitNumber` returns eight or nine rules on the two extents this app
+  // actually plots — and why the band in `valueTicks` was tuned against the drawn
+  // result rather than derived.
+  const drawnRules = (range: [number, number], splitNumber?: number) => {
+    const chart = echarts.init(null as never, null, {
+      renderer: "svg",
+      ssr: true,
+      width: 310,
+      height: 280,
+    });
+    chart.setOption({
+      grid: { top: 16, right: 8, bottom: 8, left: 8, containLabel: true },
+      xAxis: { type: "category", data: ["a", "b"], ...chartAxis(T) },
+      // The value axis extends to include zero by default, exactly as the app's do.
+      yAxis: { type: "value", ...chartAxis(T, { grid: true, tick: (v) => `$${v}`, splitNumber }) },
+      series: [{ type: "bar", data: [range[0], range[1]] }],
+    });
+    const svg = chart.renderToSVGString();
+    chart.dispose();
+    return [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)]
+      .map((m) => m[1])
+      .filter((text) => text.startsWith("$"));
+  };
+
+  it("replaces the default hatch with rules a reader can count off", () => {
+    // The demo household's own extents: cash flow over a month, and the accounts
+    // card's net worth.
+    const cashFlow: [number, number] = [-990, 5235];
+    const accounts: [number, number] = [0, 34000];
+    expect(drawnRules(cashFlow)).toHaveLength(8);
+    expect(drawnRules(cashFlow, valueTicks({ width: 310, height: 280 }))).toHaveLength(5);
+    expect(drawnRules(accounts)).toHaveLength(8);
+    expect(drawnRules(accounts, valueTicks({ width: 296, height: 220 }))).toHaveLength(5);
   });
 
   it("draws the zero rule across the plot, after the bars it divides", () => {

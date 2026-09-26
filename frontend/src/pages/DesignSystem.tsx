@@ -6,7 +6,7 @@
 // which is worse than having no gallery.
 //
 // Add a component to the app, add it here in the same commit.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -25,8 +25,11 @@ import {
   emphasisBar,
   emphasisLine,
   emphasisPie,
+  valueTicks,
   zeroRule,
+  type ChartBox,
 } from "@/theme/chartInteraction";
+import { sliceLabels } from "@/lib/donutChart";
 import { formatDuration, formatMoney, formatMoneyTick } from "@/lib/format";
 import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
 import AccountMark from "@/components/AccountMark";
@@ -214,8 +217,8 @@ export default function DesignSystem() {
     area: useFieldId("ds-area"),
   };
 
-  const lineOption: EChartsOption = useMemo(
-    () => ({
+  const lineOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
       grid: { top: 16, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       xAxis: {
@@ -223,7 +226,14 @@ export default function DesignSystem() {
         data: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, "USD") }) },
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, "USD"),
+          splitNumber: valueTicks(box),
+        }),
+      },
       series: [
         {
           type: "line",
@@ -239,8 +249,8 @@ export default function DesignSystem() {
     [t],
   );
 
-  const barOption: EChartsOption = useMemo(
-    () => ({
+  const barOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
       grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       legend: chartLegend(t, { top: 0 }),
@@ -249,7 +259,14 @@ export default function DesignSystem() {
         data: ["Jan", "Feb", "Mar", "Apr"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, "USD") }) },
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, "USD"),
+          splitNumber: valueTicks(box),
+        }),
+      },
       series: [
         {
           name: "Income",
@@ -273,8 +290,8 @@ export default function DesignSystem() {
     [t],
   );
 
-  const donutOption: EChartsOption = useMemo(
-    () => ({
+  const donutOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
       tooltip: chartTooltip(t, { trigger: "item" }),
       legend: chartLegend(t, { bottom: 0, type: "scroll" }),
       color: t.series,
@@ -284,7 +301,9 @@ export default function DesignSystem() {
           radius: ["45%", "70%"],
           center: ["50%", "45%"],
           itemStyle: { borderColor: t.surface, borderWidth: 2 },
-          label: { color: t.label },
+          // The same rule the real donut follows, from the same module: the
+          // design system shows the app's charts, not a second set of them.
+          ...sliceLabels(t, box),
           emphasis: emphasisPie(t),
           data: [
             { name: "Groceries", value: 820 },

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import {
@@ -21,6 +21,7 @@ import { formatMoney, negateAmount } from "@/lib/format";
 import { isoDay, todayIso } from "@/lib/dates";
 import { netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
+import type { ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -261,7 +262,12 @@ function NetWorthHero({
   const start = useMemo(() => rangeStart(months), [months]);
   const series = useNetWorthSeries(start, today(), ownerFilter);
   const t = useChartTokens();
-  const option: EChartsOption = useMemo(() => netWorthOption(series.data, t), [series.data, t]);
+  // A function of the box: this card is 220 px tall, and how many values the
+  // reader is asked to count off its axis follows from that (`valueTicks`).
+  const option = useCallback(
+    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box),
+    [series.data, t],
+  );
 
   const points = series.data?.points ?? [];
   const first = points[0];

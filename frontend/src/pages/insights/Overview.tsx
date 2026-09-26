@@ -36,6 +36,7 @@ import {
   chartTooltip,
   emphasisBar,
   emphasisLine,
+  valueTicks,
   zeroRule,
   type ChartBox,
   type TooltipPoint,
@@ -100,12 +101,17 @@ export default function Overview() {
   const t = useChartTokens();
 
   // Built in `lib/netWorthChart`: a time axis, straight segments, and partial
-  // points drawn and named as partial (ADR-0045).
-  const nwOption: EChartsOption = useMemo(() => netWorthOption(nw.data, t), [nw.data, t]);
+  // points drawn and named as partial (ADR-0045). A function of the box because
+  // how many values a reader is asked to count off the axis is a question about
+  // the canvas's height (`valueTicks`).
+  const nwOption = useCallback(
+    (box: ChartBox): EChartsOption => netWorthOption(nw.data, t, box),
+    [nw.data, t],
+  );
   const nwNotes = useMemo(() => coverageNotes(nw.data?.points ?? []), [nw.data]);
 
-  const cashFlowOption: EChartsOption = useMemo(
-    () => ({
+  const cashFlowOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
       // `top` clears the legend row. `containLabel` is the phone's share: the
       // tick gutter is measured from the labels rather than reserved as 60 px of
       // a 310 px-wide canvas.
@@ -136,10 +142,16 @@ export default function Overview() {
         ...chartAxis(t),
       },
       // Money ticks: `$5k` in a gutter that used to read `5,000` with no
-      // currency anywhere on the axis.
+      // currency anywhere on the axis. How many of them comes from the canvas:
+      // the range here (−$2k … $6k) drew nine rules at ECharts' default, four of
+      // them within a thumb's width of another on a phone.
       yAxis: {
         type: "value",
-        ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, ccy) }),
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, ccy),
+          splitNumber: valueTicks(box),
+        }),
       },
       series: [
         {

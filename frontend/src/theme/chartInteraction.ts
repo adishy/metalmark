@@ -221,16 +221,56 @@ export function chartTooltip(
  * currency. It lives here rather than in each option for the same reason the
  * tooltip does — one implementation across the charts, so the net-worth, cash-flow
  * and design-system axes cannot end up three different shapes.
+ *
+ * `splitNumber` is how many intervals the axis divides its range into, and it is
+ * worth passing `valueTicks(box)`: ECharts' own choice is not a count but a
+ * consequence of hunting for round numbers, and on an 8,000-wide range it lands on
+ * nine rules where five read better (`−$2k … $6k` in 2k steps at 220 px).
+ *
+ * Axis ticks are off, always. A tick marks a position the label already names, and
+ * on a phone-width axis that is a row of stubs under five labels saying nothing the
+ * labels do not.
  */
 export function chartAxis(
   t: ChartTokens,
-  { grid = false, tick }: { grid?: boolean; tick?: (value: number) => string } = {},
+  {
+    grid = false,
+    tick,
+    splitNumber,
+  }: { grid?: boolean; tick?: (value: number) => string; splitNumber?: number } = {},
 ) {
   return {
     axisLine: { lineStyle: { color: t.axis } },
+    axisTick: { show: false },
     axisLabel: { color: t.label, ...(tick ? { formatter: tick } : {}) },
+    ...(splitNumber === undefined ? {} : { splitNumber }),
     ...(grid ? { splitLine: { lineStyle: { color: t.split } } } : {}),
   };
+}
+
+/**
+ * How many intervals to ask a value axis for, on a canvas of this height: roughly
+ * one rule per 70 px, floored at three and capped at four.
+ *
+ * Grid lines are furniture — what a reader measures a bar against — and past a
+ * handful they stop being that and become a hatch. The count that matters is
+ * vertical, so this asks the box's height and never the viewport's width: the
+ * cash-flow chart is 280 px tall in a phone card and 280 px on a wide page, and it
+ * had the same nine rules in both. Nine was never chosen — it is what ECharts'
+ * nice-number search returns for the default `splitNumber` on a range from −$990 to
+ * $5,235 — which is why the fix is to say how many and let the library keep
+ * choosing the round values.
+ *
+ * **The ask is a request, not a promise.** ECharts may return a tick or two more
+ * than asked, by a margin that depends on the data's own range rather than on the
+ * canvas, so these numbers were tuned against the *drawn* result (counted through
+ * the SVG renderer, §2.9) and not derived from a formula: four intervals draws five
+ * rules for the two extents this app actually has (8 and 9 before), and never more
+ * than six of them for any range tested. Asking for more is what produces the
+ * hatch: five intervals returns eight rules on the same data.
+ */
+export function valueTicks(box: ChartBox): number {
+  return Math.max(3, Math.min(4, Math.round(box.height / 70)));
 }
 
 /** A chart's own box, in CSS pixels: what `Chart.tsx` measures and hands to an

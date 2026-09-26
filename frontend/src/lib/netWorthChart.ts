@@ -23,6 +23,8 @@ import {
   chartAxis,
   chartTooltip,
   emphasisLine,
+  valueTicks,
+  type ChartBox,
   type TooltipPoint,
 } from "@/theme/chartInteraction";
 import type { ChartTokens } from "@/theme/chartTokens";
@@ -107,7 +109,11 @@ export function tooltipBody(p: Point, started: string[], ccy: string): string {
   return lines.join("<br/>");
 }
 
-export function netWorthOption(data: NetWorthSeries | undefined, t: ChartTokens): EChartsOption {
+export function netWorthOption(
+  data: NetWorthSeries | undefined,
+  t: ChartTokens,
+  box: ChartBox,
+): EChartsOption {
   const points = data?.points ?? [];
   const ccy = data?.base_currency ?? "USD";
   const byTs = new Map(points.map((p, i) => [dayTs(p.date), i]));
@@ -134,9 +140,14 @@ export function netWorthOption(data: NetWorthSeries | undefined, t: ChartTokens)
     // The ticks are money, and the axis says so: `$10k`, `$20k` — these read
     // `10,000`, `20,000` with no currency at all until this. The exact figure is
     // in the tooltip and in the headline the section prints above the chart.
+    //
+    // `splitNumber` is the canvas's own: this chart is 220 px tall in the accounts
+    // card and 280 px in Insights, and ECharts' nice-number search answered the
+    // first with eight rules (`$0 … $35k` in 5k steps) — a hatch to read a line
+    // through, when four rules measure it just as well.
     yAxis: {
       type: "value",
-      ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, ccy) }),
+      ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, ccy), splitNumber: valueTicks(box) }),
     },
     series: [
       {

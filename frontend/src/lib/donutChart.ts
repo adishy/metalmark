@@ -30,6 +30,25 @@ import {
 } from "@/theme/chartInteraction";
 import type { ChartTokens } from "@/theme/chartTokens";
 
+/**
+ * How a ring's slices are labelled on a canvas this size — the rule, in one place,
+ * for every ring in the app (this chart, and the sample on the design-system page).
+ *
+ * Named on a wide canvas; silent on a phone card, where ECharts would clip each
+ * label to whatever room its leader line ended in. The leader line goes with the
+ * label: `PieView` keeps a slice's guide line on the strength of the label's
+ * *position*, not its visibility, so hiding the text alone leaves strokes pointing
+ * at nothing.
+ */
+export function sliceLabels(
+  t: ChartTokens,
+  box: ChartBox,
+  formatter?: (p: TooltipPoint) => string,
+) {
+  if (phoneCanvas(box)) return { label: { show: false }, labelLine: { show: false } };
+  return { label: { color: t.label, ...(formatter ? { formatter } : {}) } };
+}
+
 export function donutOption(
   rows: CategorySpendRow[],
   t: ChartTokens,
@@ -46,7 +65,6 @@ export function donutOption(
   // labels all read them back out.
   const nameOf = (key: unknown) =>
     rows.find((r) => r.key === key)?.category_name ?? String(key);
-  const phone = phoneCanvas(box);
   return {
     tooltip: chartTooltip(t, {
       trigger: "item",
@@ -67,12 +85,7 @@ export function donutOption(
         center: ["50%", "45%"],
         // The gap between slices is the card behind them, not a fixed navy.
         itemStyle: { borderColor: t.surface, borderWidth: 2 },
-        label: phone ? { show: false } : { color: t.label, formatter: (p: TooltipPoint) => nameOf(p.name) },
-        // Hiding the label does not hide the leader line ECharts draws to it —
-        // `PieView` keeps the guide line on the strength of the label's
-        // *position*, not its visibility — so a phone would be left with six
-        // strokes pointing at nothing.
-        ...(phone ? { labelLine: { show: false } } : {}),
+        ...sliceLabels(t, box, (p: TooltipPoint) => nameOf(p.name)),
         emphasis: emphasisPie(t),
         data: rows.map((r) => ({ name: r.key, value: Number(r.total) })),
       },
