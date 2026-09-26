@@ -29,7 +29,14 @@ import {
 import OwnerSelect from "@/components/OwnerSelect";
 import SheetSelect from "@/components/SheetSelect";
 import SheetMultiSelect from "@/components/SheetMultiSelect";
-import { ChevronDownIcon, FilterIcon, PlusIcon, SearchIcon, UploadIcon } from "@/components/icons";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FilterIcon,
+  PlusIcon,
+  SearchIcon,
+  UploadIcon,
+} from "@/components/icons";
 import TxnPhoneList from "@/components/TxnPhoneList";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import ImportDialog from "@/components/ImportDialog";
@@ -346,7 +353,12 @@ export default function Transactions() {
             <span className="text-right">Amount</span>
           </div>
           <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="txn-list">
-            {items.map((t) => (
+            {items.map((t) => {
+              // The row the pane beside the list is showing. It is one fact, and
+              // three things below read it: the wrapper's tint, the row button's
+              // `aria-current`, and the chevron in the description cell.
+              const isSelected = selected?.id === t.id;
+              return (
               <li key={t.id}>
                 {/* The row's grid lives on this wrapper, not on the button, and
                     that is what makes the inline category control possible at
@@ -376,8 +388,23 @@ export default function Transactions() {
                     button, and a highlight that belongs to the button would
                     leave a hole exactly where the new control is. `group` is for
                     the control's chevron, which appears when the pointer is
-                    anywhere on the row. */}
-                <div className={`group hover:bg-surface-inset/60 lg:grid lg:px-4 ${ROW_COLUMNS}`}>
+                    anywhere on the row.
+
+                    The **selected** row's tint is here too, and at `lg:` only.
+                    Hover and selected were the same wash (`bg-surface-inset/60`
+                    and nothing), so a pointer resting on one row and the row the
+                    pane was showing looked identical (#F5). §4.6 asks for more
+                    than colour and this is that more: the chevron in the
+                    description cell, and `aria-current` on the button, with the
+                    tint — the app's own "this one is chosen" pairing elsewhere
+                    (`bg-accent/15` with a `-ink` accent). Below `lg:` there is
+                    no pane to be selected *for*: the row opens a sheet, so the
+                    phone's ledger is untouched. */}
+                <div
+                  className={`group hover:bg-surface-inset/60 lg:grid lg:px-4 ${ROW_COLUMNS} ${
+                    isSelected ? "lg:bg-accent/15" : ""
+                  }`}
+                >
                   <button
                     type="button"
                     // `flex` is the phone row; `lg:grid` is §9.4's row that gains
@@ -393,6 +420,10 @@ export default function Transactions() {
                     // in height.
                     className={`flex w-full items-center gap-2 px-4 py-3 text-left lg:col-span-6 lg:col-start-1 lg:row-start-1 lg:min-h-12 lg:grid lg:px-0 ${ROW_COLUMNS}`}
                     onClick={() => setSelected(t)}
+                    // §4.6's selected state, for a reader who is not looking at
+                    // the tint: "current" is what `aria-current` is for, and the
+                    // row the pane is showing is the current item of this list.
+                    aria-current={isSelected ? "true" : undefined}
                     data-testid={`txn-row-${t.id}`}
                   >
                   {/* The mark leads the row because it answers the question the
@@ -434,6 +465,17 @@ export default function Transactions() {
                         <span className="shrink-0 rounded bg-surface-inset px-1.5 py-0.5 text-xs text-fg">
                           split
                         </span>
+                      )}
+                      {/* §4.6's selected state, as the "or an icon" half of it:
+                          a shape, so it survives a greyscale screenshot where the
+                          accent tint the row also carries does not. It points at
+                          the pane, which is on that side. Decorative — the
+                          accessible statement is the button's `aria-current`. */}
+                      {isSelected && (
+                        <ChevronRightIcon
+                          aria-hidden="true"
+                          className="hidden size-4 shrink-0 text-accent-ink lg:block"
+                        />
                       )}
                     </div>
 
@@ -575,7 +617,8 @@ export default function Transactions() {
                   )}
                 </div>
               </li>
-            ))}
+              );
+            })}
             {items.length === 0 && !txns.isLoading && (
               <li className="px-4">
                 {/* The message *about* the results, not the list itself: a filter
