@@ -4,7 +4,7 @@ import { addAccount, addTransaction, login, readNetWorth } from "./helpers";
 // One end-to-end pass through the manual ledger. Data is uniquely named per run
 // (Date.now suffix) and assertions are relative, so the suite is repeatable
 // against a long-lived compose DB with no reset.
-test("manual happy path: login -> account -> transaction -> reports", async ({ page }) => {
+test("manual happy path: login -> account -> transaction -> insights", async ({ page }) => {
   const run = Date.now();
   await login(page);
 
@@ -33,8 +33,8 @@ test("manual happy path: login -> account -> transaction -> reports", async ({ p
   });
   await expect(page.getByTestId("txn-list")).toContainText(merchant);
 
-  // --- Reports: net-worth section + spending donut render --------------------
-  await page.getByTestId("nav-reports").click();
+  // --- Insights: net-worth section + spending donut render --------------------
+  await page.getByTestId("nav-insights").click();
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
   await expect(page.getByTestId("report-spending")).toBeVisible();
   // We just posted a Groceries expense this year, so the donut has data.

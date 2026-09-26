@@ -6,7 +6,15 @@ import { login } from "./helpers";
 // horizontally, and a transactions screen wider than the phone. Both are
 // failures of the same rule, so one test holds every route to it at the two
 // widths DESIGN.md §5 names.
-const ROUTES = ["/accounts", "/transactions", "/review", "/reports", "/settings", "/admin"];
+const ROUTES = [
+  "/accounts",
+  "/transactions",
+  "/review",
+  "/insights/overview",
+  "/insights/allocations",
+  "/settings",
+  "/admin",
+];
 const WIDTHS = [360, 390];
 
 async function sidewaysOffenders(page: Page): Promise<string[]> {

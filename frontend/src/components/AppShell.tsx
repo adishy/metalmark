@@ -39,7 +39,7 @@ const NAV: NavItem[] = [
   { to: "/accounts", label: "Accounts", Icon: WalletIcon },
   { to: "/transactions", label: "Transactions", Icon: ListIcon },
   { to: "/review", label: "Review", Icon: ReviewIcon },
-  { to: "/reports", label: "Reports", Icon: ChartIcon },
+  { to: "/insights", label: "Insights", Icon: ChartIcon },
   { to: "/settings", label: "Settings", Icon: SettingsIcon },
   { to: "/admin", label: "Admin", Icon: AdminIcon, adminOnly: true },
 ];
@@ -100,8 +100,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   // The primary orientation cue for a screen reader and for a phone's tab
   // switcher, and it was the same string on every route (§7.11).
+  //
+  // Prefix match, not exact: Insights is the first destination with sub-routes
+  // (`/insights/overview`, `/insights/allocations`, …) and every one of them
+  // is still "Insights" — the tab within it isn't a separate document title,
+  // the same way Settings' eleven tabs (all under the one route `/settings`)
+  // never were.
   useEffect(() => {
-    const here = items.find((n) => n.to === pathname)?.label ?? EXTRA_TITLES[pathname];
+    const here =
+      items.find((n) => n.to === pathname || pathname.startsWith(`${n.to}/`))?.label ??
+      EXTRA_TITLES[pathname];
     document.title = here ? `${here} · MetalMark Money` : "MetalMark Money";
     // `items` is a new array each render; `isAdmin` is what actually varies.
   }, [pathname, isAdmin]);

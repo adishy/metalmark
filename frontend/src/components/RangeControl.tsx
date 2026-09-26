@@ -54,7 +54,7 @@ export function useReportRange(): ReportRangeState {
    * `replace`, not push. The chips are a lens on one page, and pushing a history
    * entry per press would put every way the page had been drawn between the
    * reader and whatever they came from. The URL still carries the window, so it
-   * is still shareable; back leaves Reports instead of stepping through it.
+   * is still shareable; back leaves Insights instead of stepping through it.
    */
   const write = (next: Record<string, string | null>) => {
     const q = new URLSearchParams(params);

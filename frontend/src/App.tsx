@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { QueryError } from "@/components/QueryStates";
 import Login from "@/pages/Login";
@@ -7,10 +7,22 @@ import AppShell from "@/components/AppShell";
 import Accounts from "@/pages/Accounts";
 import Transactions from "@/pages/Transactions";
 import Review from "@/pages/Review";
-import Reports from "@/pages/Reports";
+import Insights from "@/pages/Insights";
 import Settings from "@/pages/Settings";
 import Admin from "@/pages/Admin";
 import DesignSystem from "@/pages/DesignSystem";
+
+// `/reports` is Insights' old address (session 09 renamed it). A bookmark or
+// a stored report link still has to land somewhere real: the equivalent tab
+// is Overview, and any query string it carried (RangeControl's window —
+// `?range=custom&start=...&end=...`) is the state that link was actually
+// for, so it rides along. There's nothing meaningful to carry a `#hash`
+// *to* — Insights doesn't use one — so it's dropped rather than cargo-culted
+// onto a URL shape that no longer means anything.
+function ReportsRedirect() {
+  const location = useLocation();
+  return <Navigate to={`/insights/overview${location.search}`} replace />;
+}
 
 export default function App() {
   const { me, loading, probeError, retryProbe } = useAuth();
@@ -60,7 +72,10 @@ export default function App() {
         <Route path="/accounts" element={<Accounts />} />
         <Route path="/transactions" element={<Transactions />} />
         <Route path="/review" element={<Review />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/insights" element={<Navigate to="/insights/overview" replace />} />
+        <Route path="/insights/:tab" element={<Insights />} />
+        {/* Old address, kept working (any query string rides along). */}
+        <Route path="/reports" element={<ReportsRedirect />} />
         <Route path="/settings" element={<Settings />} />
         {/* The sync control panel. Now a nav destination for administrators —
             the desktop nav has room for a sixth item even though the phone tab
