@@ -253,7 +253,134 @@ async def test_link_rejects_a_same_account_or_same_sign_pair(household_factory):
     assert orphans == []
 
 
+async def test_link_refuses_a_leg_that_moves_nothing(household_factory):
+    """A zero-amount leg is not the opposite of a positive one.
+
+    ``(a.amount > 0) == (b.amount > 0)`` reads `0 > 0` as False — the same side as
+    an expense — so a $0.00 row pairs with a real $500 deposit and takes it out of
+    cash-flow and spending with nothing on the other side to account for it. ADR-0049
+    pairs equal-and-opposite legs, and $0.00 has no opposite.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b = await _accounts(s, hh, "USD", "USD")
+        zero = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("0.0000"), transacted_at=_dt(2026, 1, 10)))
+        real = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+
+        # Either position: the zero leg offered, and the zero leg asked for.
+        with pytest.raises(LedgerError) as as_other_exc:
+            await txns.link_transfer(s, hh, zero.id, real.id)
+        with pytest.raises(LedgerError) as as_subject_exc:
+            await txns.link_transfer(s, hh, real.id, zero.id)
+
+        groups = (await s.execute(select(TransferGroup.id))).scalars().all()
+        linked = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(
+                    Transaction.id.in_([zero.id, real.id])
+                )
+            )
+        ).scalars().all()
+    assert as_other_exc.value.status == 400
+    assert as_subject_exc.value.status == 400
+    assert groups == []
+    assert all(leg is None for leg in linked)
+
+
+async def test_link_refuses_a_leg_that_is_already_in_a_transfer(household_factory):
+    """The picker hides taken legs; this is where it is enforced.
+
+    Re-linking one leg of a pair moves it into the new group and leaves the old one
+    one-legged: still excluded from cash-flow and spending, but no longer a pair —
+    a state nothing else in the app can produce, and nothing can repair, because
+    unlinking the group that is left deletes it and orphans the leg it still holds.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c = await _accounts(s, hh, "USD", "USD", "USD")
+        out = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("-500"), transacted_at=_dt(2026, 1, 10)))
+        into = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        free = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=c.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        group = await txns.link_transfer(s, hh, out.id, into.id)
+
+        # One leg taken, the other free — and the pair that is already a pair.
+        with pytest.raises(LedgerError) as taken_exc:
+            await txns.link_transfer(s, hh, out.id, free.id)
+        with pytest.raises(LedgerError) as again_exc:
+            await txns.link_transfer(s, hh, out.id, into.id)
+
+        # The group it was in is untouched, and the free leg is still free.
+        groups = (await s.execute(select(TransferGroup.id))).scalars().all()
+        legs = (
+            await s.execute(
+                select(Transaction.id).where(Transaction.transfer_group_id == group.id)
+            )
+        ).scalars().all()
+        free_group = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(Transaction.id == free.id)
+            )
+        ).scalar_one()
+    assert taken_exc.value.status == 400
+    assert again_exc.value.status == 400
+    assert groups == [group.id]
+    assert sorted(legs) == sorted([out.id, into.id])
+    assert free_group is None
+
+
 # ---- Candidates -----------------------------------------------------------
+
+
+async def test_the_picker_offers_nothing_the_linker_would_refuse(household_factory):
+    """The picker's stated property, on the rows this change moved.
+
+    A zero row used to be offered to a positive subject (``amount <= 0``) and
+    accepted by the linker; a taken leg used to be hidden as a *row* but the subject
+    itself was never checked. Both are now refusals on the link side, so neither may
+    be offered here — and what is offered has to link, which is asserted rather than
+    argued.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c, d = await _accounts(s, hh, "USD", "USD", "USD", "USD")
+        subject = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        # A row that moves nothing, in an account of its own: the shape the old
+        # `amount <= 0` predicate let through.
+        zero = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("0"), transacted_at=_dt(2026, 1, 10)))
+        counterpart = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("-500"), transacted_at=_dt(2026, 1, 10)))
+        taken_out = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=c.id, amount=D("-700"), transacted_at=_dt(2026, 1, 10)))
+        taken_in = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=d.id, amount=D("700"), transacted_at=_dt(2026, 1, 10)))
+        await txns.link_transfer(s, hh, taken_out.id, taken_in.id)
+
+        offered = await txns.list_transfer_candidates(s, hh, subject.id)
+        # A zero subject pairs with nothing at all.
+        no_pair = await txns.list_transfer_candidates(s, hh, zero.id)
+        # And neither does one that is already half of a transfer.
+        taken = await txns.list_transfer_candidates(s, hh, taken_out.id)
+
+        assert [c.txn.id for c in offered] == [counterpart.id]
+
+        # The property itself: the row offered is a row the linker takes.
+        (only,) = offered
+        group = await txns.link_transfer(s, hh, subject.id, only.txn.id)
+        subject_group = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(Transaction.id == subject.id)
+            )
+        ).scalar_one()
+    assert no_pair == []
+    assert taken == []
+    assert subject_group == group.id
 
 
 async def test_candidates_offer_the_counterpart_and_nothing_else(household_factory):

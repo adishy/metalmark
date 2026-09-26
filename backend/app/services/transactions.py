@@ -547,12 +547,33 @@ def _matches_on_amounts(subject: Transaction, other: Transaction,
 async def link_transfer(session: AsyncSession, household_id: uuid.UUID,
                         from_txn_id: uuid.UUID, to_txn_id: uuid.UUID, *,
                         matched_by: str = "manual") -> TransferGroup:
+    """Pair two legs into a transfer group. Every refusal here is a rule the
+    candidate picker applies too (``list_transfer_candidates``), so a pair a human
+    was offered is a pair this accepts, and the reverse.
+
+    The house rule has two accounts: the guards below are what stops a group being
+    created that is not a transfer, and ``TransferGroup`` is created only after all
+    of them have passed — a refusal leaves no half-made group behind.
+    """
     a = await get_transaction(session, from_txn_id)
     b = await get_transaction(session, to_txn_id)
     if a.account_id == b.account_id:
         raise LedgerError("A transfer must span two different accounts", 400)
+    if a.amount == 0 or b.amount == 0:
+        # A leg that moves nothing is not the smaller side of a transfer. Left out,
+        # the sign test below waves it through — `0 > 0` is False, which is the same
+        # side as the expense it would be paired with — and the pair would take that
+        # real leg out of cash-flow and spending with nothing on the other side to
+        # account for it: the silent zero ADR-0017 refuses to report anywhere else.
+        raise LedgerError("A transfer leg must move money", 400)
     if (a.amount > 0) == (b.amount > 0):
         raise LedgerError("Transfer legs must have opposite signs", 400)
+    if a.transfer_group_id is not None or b.transfer_group_id is not None:
+        # The picker does not offer these; this is where it is enforced. Re-linking
+        # a leg silently takes it out of the group it was in, leaving that group
+        # one-legged: still excluded from cash-flow and spending, but no longer a
+        # pair — a state nothing else in the app can produce or repair.
+        raise LedgerError("A leg already in a transfer group cannot be linked again", 400)
     if matched_by not in ("auto", "manual"):
         raise LedgerError("Transfer groups are auto or manual", 400)
 
@@ -667,10 +688,11 @@ async def list_transfer_candidates(
     """Counterpart legs for ``txn_id``, best first, each with the cost of linking it.
 
     The filters are ``link_transfer``'s own rules — a different account, opposite
-    signs — plus the two that make a row a *candidate*: not the subject itself,
-    and not already spoken for by another group. A row that survives the query is
-    therefore a row the link endpoint would accept, which is the property that
-    keeps the picker from offering choices that then fail.
+    signs, a leg that moves money, neither leg already spoken for by a group — plus
+    the one that makes a row a *candidate* rather than a leg: not the subject itself.
+    A row that survives the query is therefore a row the link endpoint would accept,
+    which is the property that keeps the picker from offering choices that then
+    fail.
 
     Ordering is time first, base amount second: a transfer posts within days of
     its other leg (ARCHITECTURE §3 "within a few days"), so proximity in time is
@@ -682,6 +704,18 @@ async def list_transfer_candidates(
     a claim that a row is not half of a transfer.
     """
     subject = await get_transaction(session, txn_id)
+    if subject.amount == 0:
+        # A leg that moves nothing is not half of a transfer, so there is no pair to
+        # offer — ``link_transfer`` refuses it outright. Sign is not a filter that
+        # can say this: a zero amount takes the positive branch and would be offered
+        # every row on the other side, all of them dead ends.
+        return []
+    if subject.transfer_group_id is not None:
+        # The subject is already half of a transfer, so it is not free to match
+        # again — every row below would be one ``link_transfer`` refuses. The same
+        # rule as the ``transfer_group_id IS NULL`` filter, applied to the leg the
+        # caller asked about rather than to the legs offered.
+        return []
     base = await base_currency(session, household_id)
     # The tolerance is a share of the amount being matched. With no base amount on
     # the subject there is no scale to take a share of, and every residual below
@@ -700,11 +734,11 @@ async def list_transfer_candidates(
         Transaction.transacted_at <= subject.transacted_at + window,
     ]
     # The complement of the sign test ``link_transfer`` rejects on, written as a
-    # range so the two can never drift apart. ``amount > 0`` rather than ``< 0`` is
-    # deliberate: that is the predicate over there, and a zero amount falls on its
-    # negative side in both places.
+    # range so the two can never drift apart. Strict on both sides, so a zero-amount
+    # row is not offered either — that is what "a leg that moves money" means over
+    # there, and a non-strict `<= 0` here would offer rows the linker now refuses.
     if subject.amount > 0:
-        conds.append(Transaction.amount <= 0)
+        conds.append(Transaction.amount < 0)
     else:
         conds.append(Transaction.amount > 0)
 
