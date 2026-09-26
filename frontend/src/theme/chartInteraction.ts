@@ -214,6 +214,57 @@ export function chartAxis(
   };
 }
 
+/** A chart's own box, in CSS pixels: what `Chart.tsx` measures and hands to an
+ *  option that has to be laid out for the canvas it is drawn on. */
+export interface ChartBox {
+  width: number;
+  height: number;
+}
+
+/** Below this a canvas is a phone card; at or above it, a column of a wide page. */
+const PHONE_MAX = 480;
+
+/** The gap ECharts leaves between a label and the node it belongs to. */
+const LABEL_GAP = 5;
+
+/** The widest a chart label may be before it truncates (§2.9). */
+const LABEL_WIDTH = 84;
+
+/** What a canvas this size affords a chart that is laid out in columns. */
+export interface ChartLayout {
+  /** Room for the column of labels on each side of the picture. */
+  left: number;
+  right: number;
+  /** How wide a label may be before it truncates. */
+  labelWidth: number;
+  nodeWidth: number;
+  nodeGap: number;
+}
+
+/**
+ * The layout a canvas can afford, from its own measured width.
+ *
+ * A chart has no viewport, only the box it was given, and the two are not the same
+ * fact: the sankey is 310 px wide on a phone and 1104 px on a wide page *inside the
+ * same card*. Its margins are where the node labels live, so on a phone they are
+ * sized to the labels and not a pixel more — a label column takes `LABEL_WIDTH` plus
+ * ECharts' own gap, and every remaining pixel goes to the ribbons, which are the
+ * thing the chart is *for*. On a wide canvas the roomy margins are kept: they were
+ * chosen when the chart was drawn there, and nothing about a 1104 px card argues for
+ * changing them.
+ *
+ * A canvas measured as zero — a chart whose box has not been laid out yet — takes the
+ * phone layout rather than a sliver, because the numbers here are floors and ribs
+ * cannot be drawn in a negative space.
+ */
+export function chartLayout(box: ChartBox): ChartLayout {
+  if (box.width >= PHONE_MAX) {
+    return { left: 88, right: 104, labelWidth: LABEL_WIDTH, nodeWidth: 14, nodeGap: 10 };
+  }
+  const column = LABEL_WIDTH + LABEL_GAP;
+  return { left: column, right: column, labelWidth: LABEL_WIDTH, nodeWidth: 10, nodeGap: 8 };
+}
+
 /**
  * The legend.
  *

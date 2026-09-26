@@ -415,7 +415,7 @@ The mapping, per chart:
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
-Six further chart rules:
+Seven further chart rules:
 
 - **A money value axis says it is money, and stays short.** `chartAxis(t, { tick })`
   takes a currency formatter; every money axis passes `formatMoneyTick` (§6.5), so
@@ -438,6 +438,17 @@ Six further chart rules:
   bars are measured *from* is otherwise one gridline among five of the same weight,
   and which one it is becomes a guess. ECharts paints a mark line above its series,
   so the rule divides the two halves of each bar rather than hiding behind them.
+
+- **A chart is laid out for its own box, not for the window.** `Chart.tsx` measures the
+  box it was given — in a layout effect before the first paint, and through a
+  `ResizeObserver` after that — and hands it to any option passed as a function of it.
+  `chartLayout(box)` is the one place that says what a canvas of a given size affords.
+  The same sankey is 310 px wide on a phone and 1104 px on a wide page **inside the same
+  card**, so an option that places anything in px — a column of labels, a node width —
+  cannot be a constant without being wrong on one of them. On a phone the sankey's label
+  columns take what a label needs (84 px plus ECharts' own 5 px gap) and the ribbons take
+  the rest, which is what they are for; a wide canvas keeps the roomy margins it has
+  always been drawn with.
 
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
