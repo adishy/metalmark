@@ -1048,6 +1048,112 @@ async def test_owner_income_survives_a_round_trip_and_an_old_document_imports_as
         assert (await s.execute(select(OwnerIncomeProfile))).scalar_one_or_none() is None
 
 
+async def test_recurring_series_survive_a_round_trip_and_an_old_document_reads_as_none(
+    household_factory,
+):
+    """A series travels with its scope and its provenance: the account it was
+    tied to becomes the target's account, the charge it was picked from becomes
+    the target's transaction, and the derived occurrence count still finds those
+    charges on the other side — which is the only end-to-end proof that the
+    remap produced a series that *matches* rather than one that merely exists.
+
+    A document written before ADR-0053 has no ``recurring_series`` key at all;
+    it must read as "none", not as a KeyError.
+    """
+    from app.models import RecurringSeries
+    from app.schemas.recurring import RecurringCreate
+    from app.services import recurring as recurring_svc
+
+    source = await household_factory(name="Source")
+    target = await household_factory(name="Target")
+    async with scoped_session(household_id=source) as s:
+        owner = await owners_svc.ensure_shared_owner(s, source)
+        checking = Account(household_id=source, name="Checking", type="depository",
+                           currency="USD", current_balance=D("100.0000"),
+                           balance_date=ON, is_asset=True, owner_id=owner.id, is_manual=True)
+        s.add(checking)
+        await s.flush()
+        # Two monthly charges, so the series has something to match on both sides.
+        for day in ("2026-01-05", "2026-02-05"):
+            await txns.create_transaction(
+                s, source,
+                TransactionCreate(account_id=checking.id, amount=D("-12.9900"),
+                                  transacted_at=datetime(2026, int(day[5:7]), 5, 12, tzinfo=UTC),
+                                  description="Streaming"),
+                source="manual",
+            )
+        picked = (
+            await s.execute(
+                select(Transaction).where(Transaction.description == "Streaming")
+                .order_by(Transaction.transacted_at.desc())
+            )
+        ).scalars().first()
+        # One series accepted from that charge (the seeded path), one typed by
+        # hand with no account at all (the broad "any account" case).
+        await recurring_svc.create(
+            s, source,
+            RecurringCreate(cadence="monthly", transaction_id=picked.id, merchant="Streaming",
+                            name="Streaming", next_due_date=date(2026, 3, 5)),
+        )
+        await recurring_svc.create(
+            s, source,
+            RecurringCreate(cadence="annual", name="Home insurance", amount=D("-840.0000"),
+                            currency="USD"),
+        )
+
+    document, result = await _roundtrip(source, target)
+    assert result.as_dict()["created"]["recurring_series"] == 2
+    assert result.as_dict()["warnings"] == []
+
+    async with scoped_session(household_id=target) as s:
+        target_checking = (
+            await s.execute(select(Account).where(Account.name == "Checking"))
+        ).scalar_one()
+        rows = (await s.execute(select(RecurringSeries).order_by(RecurringSeries.name)))
+        series = list(rows.scalars().all())
+        assert [r.name for r in series] == ["Home insurance", "Streaming"]
+        streaming = series[1]
+        assert streaming.amount == D("-12.9900")
+        assert streaming.cadence == "monthly"
+        assert streaming.next_due_date == date(2026, 3, 5)
+        assert streaming.account_id == target_checking.id
+        assert streaming.merchant == "Streaming"
+        # The picked charge is the *target's* row, not the document's id.
+        assert streaming.transaction_id is not None
+        target_txn = (
+            await s.execute(
+                select(Transaction).where(Transaction.id == streaming.transaction_id)
+            )
+        ).scalar_one()
+        assert target_txn.account_id == target_checking.id
+        # And the derived stats find the remapped ledger: a series that restored
+        # but matched nothing would be a series that lies about its occurrences.
+        listed = await recurring_svc.list_series(s, target, q="Streaming")
+        assert [item.occurrences for item in listed.items] == [2]
+        assert listed.items[0].last_seen_date == date(2026, 2, 5)
+        # The broad series kept its scope and needs no account to be valid.
+        assert series[0].account_id is None
+        assert series[0].currency == "USD"
+
+    # Re-importing the same document creates nothing: (account, lower(name)) is
+    # the key, and the second pass finds both series already here.
+    async with scoped_session(household_id=target) as s:
+        again = await portability.import_document(s, target, portability.dumps(document))
+    assert "recurring_series" not in again.as_dict()["created"]
+    assert again.as_dict()["matched"]["recurring_series"] == 2
+
+    # A document written before this ADR has no recurring_series key at all.
+    older = await household_factory(name="Older")
+    async with scoped_session(household_id=source) as s:
+        before = await _export(s, source)
+    before.pop("recurring_series")
+    async with scoped_session(household_id=older) as s:
+        old_result = await portability.import_document(s, older, portability.dumps(before))
+    assert "recurring_series" not in old_result.as_dict()["created"]
+    async with scoped_session(household_id=older) as s:
+        assert (await s.execute(select(RecurringSeries))).scalars().all() == []
+
+
 async def test_version_2_is_read_as_written(household_factory):
     hh = await household_factory()
     card, snaps = _v1_card("Card", current="-850.0000", snapshots=[("2026-02-01", "-850.0000")])
