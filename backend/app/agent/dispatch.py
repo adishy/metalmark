@@ -79,6 +79,9 @@ STRING_PARAMS: dict[str, re.Pattern[str]] = {
     "cursor": re.compile(r"[A-Za-z0-9_\-=]{1,512}"),
     "group_by": re.compile(r"[a-z_]{1,32}"),
     "granularity": re.compile(r"[a-z_]{1,32}"),
+    # A closed vocabulary, not text a caller composes: the route's own query
+    # declaration allows exactly these two words.
+    "direction": re.compile(r"in|out"),
 }
 
 #: String query parameters that exist on an exposed route but are refused.
@@ -86,6 +89,12 @@ REFUSED_PARAMS: dict[str, str] = {
     "search": (
         "Free-text search is an oracle: whether a name matches is itself the name. "
         "Filter by account, category, owner, date or review status instead."
+    ),
+    # Same oracle, reached through the ledger's own search box: a series matches
+    # on its merchant, and a merchant is a name.
+    "q": (
+        "Free-text search is an oracle: whether a name matches is itself the name. "
+        "Filter by account, category, direction or active state instead."
     ),
 }
 
@@ -100,6 +109,7 @@ ID_SOURCES: dict[str, str] = {
     "category_id": "categories",
     "connection_id": "connections",
     "since": "connections/notifications (an id from a previous page)",
+    "series_id": "recurring",
 }
 
 

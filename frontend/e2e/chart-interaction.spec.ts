@@ -115,7 +115,7 @@ const ring = (b: Box) => {
 
 test.beforeEach(async ({ page }) => {
   await login(page);
-  await page.goto("/reports");
+  await page.goto("/insights/overview");
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
   await page.waitForTimeout(800);
 });

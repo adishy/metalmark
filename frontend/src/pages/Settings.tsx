@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import InstitutionsSection from "@/pages/InstitutionsSection";
@@ -55,9 +55,9 @@ import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
 import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
+import ScrollTabs from "@/components/ScrollTabs";
 import type { Owner, OwnerReassignment } from "@/api/types";
 import { todayIso } from "@/lib/dates";
-import { useIsDesktop } from "@/lib/media";
 import {
   Button,
   Checkbox,
@@ -98,45 +98,6 @@ export default function Settings() {
   // property read would not typecheck — the `in` check narrows to it, and its
   // only value there is `true`. A member's list is the eight that follow.
   const tabs = TABS.filter((t) => !("adminOnly" in t) || isAdmin);
-  // §9.3's rail. This is the one thing on the page a media query cannot decide:
-  // the strip below `lg:` is horizontal and the rail above it is vertical, and
-  // `aria-orientation` has to say which one is on screen. An ARIA attribute is
-  // not a style, so there is no class that can carry it — hence the hook.
-  const rail = useIsDesktop();
-  // Keep the chosen tab in view in the phone's swiping strip.
-  useEffect(() => {
-    const i = tabs.findIndex((t) => t.id === tab);
-    tabRefs.current[i]?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps -- `tabs` is rebuilt each render
-  // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
-  // it. Declaring role="tablist" without that model announces a tab widget that
-  // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  function onTabKey(e: React.KeyboardEvent<HTMLButtonElement>) {
-    // `tabs`, not `TABS`: the roving index has to walk the list that is actually
-    // rendered, or an administrator's arrow keys land one short of the end and a
-    // member's skip the tab their index no longer matches.
-    const i = tabs.findIndex((t) => t.id === tab);
-    const last = tabs.length - 1;
-    let next: number;
-    // Both pairs move the same way — Right/Down forward, Left/Up back — in both
-    // presentations. ARIA's own guidance names the pair that matches the axis and
-    // is silent on the other; accepting it costs one `||` and saves a reader who
-    // guessed wrong from concluding the tablist is broken. `aria-orientation`
-    // below is what tells assistive tech which pair is the canonical one, and that
-    // is the only part of this that has to know the axis.
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = i === last ? 0 : i + 1;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = i === 0 ? last : i - 1;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = last;
-    else return;
-    e.preventDefault();
-    // Automatic activation: the panel is a local swap, so selecting on focus
-    // saves the Enter that manual activation would cost.
-    setTab(tabs[next].id);
-    tabRefs.current[next]?.focus();
-  }
 
   return (
     // §9.1 files Settings under form width — `max-w-2xl` (672 px), because a
@@ -153,51 +114,19 @@ export default function Settings() {
     // not the panel.
     <div className="mx-auto max-w-4xl space-y-4 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
       <h1 className="text-xl font-semibold lg:col-span-2">Settings</h1>
-      <div
-        // Below `lg:` this is the underline strip it has always been. At `lg:` it
-        // is a vertical rail, and a rail is not the strip rotated: the underline
-        // becomes the AppShell nav's inset fill and the radius goes back to
-        // `rounded-control`, because a tab that sits *beside* its panel has no
-        // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
-        // that may still wrap turns its overflow into extra columns.
-        // Phone: one row of tabs that swipes sideways — the one strip in the
-        // app allowed to (DESIGN §5), because eleven sections are a lot to read
-        // from a picker and tabs show where you are among them. The edges fade
-        // to say there is more; the selected tab is scrolled into view.
-        data-scroll-x-ok
-        className="-mx-4 flex snap-x gap-1 overflow-x-auto border-b border-border px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:[mask-image:none] lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
-        role="tablist"
-        aria-label="Settings sections"
-        aria-orientation={rail ? "vertical" : "horizontal"}
-      >
-        {tabs.map((t, i) => (
-          <button
-            key={t.id}
-            ref={(el) => {
-              tabRefs.current[i] = el;
-            }}
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
-            onClick={() => setTab(t.id)}
-            onKeyDown={onTabKey}
-            // The `lg:` overrides ride on Tailwind's own order — every variant
-            // block is emitted after the unvariant utilities — so `lg:border-b-0`
-            // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
-            // without a `!` or a duplicated branch.
-            className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
-              tab === t.id
-                ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
-                : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"
-            }`}
-            data-testid={`settings-tab-${t.id}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Below `lg:` this is the underline strip it has always been. At `lg:`
+          it is a vertical rail (`rail`, §9.3) — the tab list is *navigation*
+          beside its panel, so the underline becomes the AppShell nav's inset
+          fill instead. Eleven sections are a lot to read from a picker, and
+          tabs show where you are among them (DESIGN §5). */}
+      <ScrollTabs
+        tabs={tabs}
+        selected={tab}
+        onSelect={(id) => setTab(id as TabId)}
+        ariaLabel="Settings sections"
+        testidPrefix="settings-tab"
+        rail
+      />
 
       <div
         role="tabpanel"
@@ -1294,6 +1223,7 @@ const ENTITY_LABELS: Record<string, string> = {
   holdings: "holdings",
   investment_transactions: "investment transactions",
   owners: "owners",
+  recurring_series: "recurring series",
   rules: "rules",
   securities: "securities",
   security_prices: "security prices",

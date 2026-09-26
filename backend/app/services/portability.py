@@ -81,6 +81,7 @@ from app.models import (
     OwnerIncomeProfile,
     Paystub,
     PaystubLine,
+    RecurringSeries,
     Rule,
     Security,
     SecurityPrice,
@@ -329,6 +330,13 @@ _PAYSTUB_FIELDS = (
 _PAYSTUB_LINE_FIELDS = (
     "id", "paystub_id", "kind", "label", "amount", "ytd_amount", "position",
 )
+# ADR-0053. ``transaction_id`` travels because it is provenance a person can see
+# ("picked from this charge"); the import remaps it optionally, since the
+# transaction it names may be one this document did not carry.
+_RECURRING_FIELDS = (
+    "id", "name", "merchant", "account_id", "category_id", "amount", "currency",
+    "cadence", "next_due_date", "is_active", "transaction_id",
+)
 
 
 async def _select(session: AsyncSession, model: type, order_by=None) -> list[Any]:
@@ -395,6 +403,9 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
     paystub_lines = await _select(
         session, PaystubLine, (PaystubLine.paystub_id, PaystubLine.position)
     )
+    recurring = await _select(
+        session, RecurringSeries, (RecurringSeries.name, RecurringSeries.id)
+    )
 
     return {
         "format": FORMAT,
@@ -430,6 +441,7 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
         "owner_income_profiles": [_row(p, _INCOME_PROFILE_FIELDS) for p in income_profiles],
         "paystubs": [_row(p, _PAYSTUB_FIELDS) for p in paystubs],
         "paystub_lines": [_row(pl, _PAYSTUB_LINE_FIELDS) for pl in paystub_lines],
+        "recurring_series": [_row(r, _RECURRING_FIELDS) for r in recurring],
     }
 
 
@@ -744,6 +756,13 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
         await _import_holdings(session, household_id, doc, remap, result)
         rows, created = await _import_transactions(session, household_id, doc, remap, result,
                                                    legs)
+        # Into the remap as well as into the three importers that take the map
+        # directly: a transaction is referenced by document id from outside its own
+        # block — a recurring series names the charge it was picked from — so the
+        # reference resolves like any other rather than warning "not defined" about
+        # a row the document plainly carries.
+        for old, new in rows.items():
+            remap.put(old, new)
         await _import_splits(session, doc, remap, result, rows, created)
         await _import_transaction_tags(session, doc, remap, result, rows, created)
         await _import_investment_transactions(session, household_id, doc, remap, result, legs)
@@ -755,6 +774,10 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
         await _import_income_profiles(session, household_id, doc, remap, result)
         pay_rows, pay_created = await _import_paystubs(session, household_id, doc, remap, result)
         await _import_paystub_lines(session, household_id, doc, pay_rows, pay_created, result)
+        # Last, and after the transactions it may point at: a series references an
+        # account, a category and (as provenance) one transaction, so every one of
+        # those remaps has to be populated before this runs.
+        await _import_recurring_series(session, household_id, doc, remap, result)
     except IntegrityError as exc:
         # Nothing here adopts a source id, so a primary-key collision is no longer
         # the expected shape of failure — it means the document contradicts itself
@@ -1853,4 +1876,78 @@ async def _import_paystub_lines(
             position=_int(entry, "position", where, required=False) or 0,
         ))
         result.made("paystub_lines")
+    await session.flush()
+
+
+# ---- recurring series (ADR-0053) -------------------------------------------
+
+
+async def _import_recurring_series(session: AsyncSession, household_id: uuid.UUID,
+                                   doc: dict[str, Any], remap: _Remap,
+                                   result: ImportResult) -> None:
+    """Series key on ``(account_id, lower(name))``, and get a fresh id.
+
+    A series has no id a person chose either, and that pair is what makes two
+    series the same series to whoever is reading the list: the same name on the
+    same account (``None`` being "any account", which is its own key). The
+    ordinal rule ``_import_rules`` uses keeps two genuinely different series that
+    happen to share a name apart.
+
+    The account is compared *after* the remap, so a key is "the account this
+    document's account became" — matching by the document's old id would find
+    nothing on a first import into this household and everything on a second,
+    which is exactly backwards.
+    """
+    existing = (
+        await session.execute(
+            select(RecurringSeries).order_by(RecurringSeries.name, RecurringSeries.id)
+        )
+    ).scalars().all()
+    by_key: dict[Any, list[RecurringSeries]] = {}
+    for series in existing:
+        by_key.setdefault((series.account_id, series.name.lower()), []).append(series)
+    ordinals = _Ordinals()
+
+    for i, entry in enumerate(_entries(doc, "recurring_series")):
+        where = f"recurring_series[{i}]"
+        old_id = _str_id(_get(entry, "id", where), f"{where}.id")
+        if old_id is None:
+            raise _fail(where, "a recurring series must carry its id")
+        name = _text(entry, "name", where) or ""
+        account_id = remap.get_optional(
+            _str_id(_get(entry, "account_id", where), f"{where}.account_id"), "account"
+        )
+        key = (account_id, name.lower())
+        found = _nth(by_key, key, ordinals.next(key))
+        if found is not None:
+            remap.put(old_id, found.id)
+            result.found("recurring_series")
+            continue
+        series = RecurringSeries(
+            household_id=household_id,
+            name=name,
+            merchant=_text(entry, "merchant", where, required=False),
+            account_id=account_id,
+            category_id=remap.get_optional(
+                _str_id(_get(entry, "category_id", where), f"{where}.category_id"), "category"
+            ),
+            amount=_money(entry, "amount", where) or Decimal("0"),
+            currency=(_text(entry, "currency", where, required=False) or "USD").upper(),
+            cadence=_text(entry, "cadence", where) or "monthly",
+            next_due_date=_date(entry, "next_due_date", where, required=False),
+            is_active=_bool(entry, "is_active", where, required=False) is not False,
+            # Optional, not required: the transaction a series was picked from is
+            # provenance, and a document that carried the series without that one
+            # row should still restore the series. ``get_optional`` records what it
+            # dropped so the import's warnings say so.
+            transaction_id=remap.get_optional(
+                _str_id(_get(entry, "transaction_id", where), f"{where}.transaction_id"),
+                "transaction",
+            ),
+        )
+        session.add(series)
+        await session.flush()
+        by_key.setdefault(key, []).append(series)
+        remap.put(old_id, series.id)
+        result.made("recurring_series")
     await session.flush()

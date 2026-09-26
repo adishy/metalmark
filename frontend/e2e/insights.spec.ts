@@ -1,15 +1,17 @@
 import { test, expect } from "@playwright/test";
 import { addAccount, addOwner, login, parseMoney } from "./helpers";
 
-// Reports owns four ECharts surfaces — the net-worth series, the income-vs-expense
-// trend, the cash-flow Sankey and the spending donut — and has no component test, so
-// this spec is the only place that proves they mount at all (vitest renders none of
+// Insights' Overview tab (formerly the whole of `/reports`, session 09) owns four
+// ECharts surfaces — the net-worth series, the income-vs-expense trend, the
+// cash-flow Sankey and the spending donut — and has no component test, so this
+// spec is the only place that proves they mount at all (vitest renders none of
 // them; jsdom has no canvas) and that the owner filter genuinely re-scopes them.
 //
-// The trend chart in particular is what `/reports/cash-flow` draws: one stacked bar
+// The trend chart in particular is the income-vs-expense surface: one stacked bar
 // per month with a net line over it. Asserting the canvas exists is the honest
 // limit of what a headless browser can check cheaply — the numbers behind it are
-// covered by the backend's report tests.
+// covered by the backend's report tests. The backend routes themselves are still
+// `/api/reports/*` — this rename is the frontend destination only.
 
 test("reports render their charts and re-scope to one owner", async ({ page }) => {
   const run = Date.now();
@@ -28,7 +30,7 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
     owner: ownerName,
   });
 
-  await page.getByTestId("nav-reports").click();
+  await page.getByTestId("nav-insights").click();
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
 
   // Unfiltered: all four surfaces draw, and nothing claims an attribution — with no
@@ -83,7 +85,7 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
 // window they get back a day later.
 test("the report window is the reader's, and survives a reload", async ({ page }) => {
   await login(page);
-  await page.getByTestId("nav-reports").click();
+  await page.getByTestId("nav-insights").click();
 
   // The default is the current year. The control names the period ("This year"),
   // and this line prints the days it resolved to, because a stored link read next
@@ -127,4 +129,20 @@ test("the report window is the reader's, and survives a reload", async ({ page }
   await page.getByTestId("range-this-year").click();
   await expect(page).not.toHaveURL(/range=/);
   await expect(page.getByTestId("net-worth-chart").locator("canvas")).toBeVisible();
+});
+
+// `/reports` is the old address. Nothing outside this app controls what links
+// to it — an owner's own bookmark, an email they sent themselves — so it has
+// to keep landing somewhere real rather than 404ing the day the route was
+// renamed.
+test("/reports redirects to Insights' Overview tab, carrying its query string", async ({
+  page,
+}) => {
+  await login(page);
+
+  await page.goto("/reports?range=custom&start=2020-03-01&end=2020-03-31");
+  await expect(page).toHaveURL(/\/insights\/overview\?range=custom&start=2020-03-01&end=2020-03-31/);
+  // The redirect landed on a real, working tab — not just the right URL.
+  await expect(page.getByTestId("report-net-worth")).toBeVisible();
+  await expect(page.getByTestId("insights-tab-overview")).toHaveAttribute("aria-selected", "true");
 });

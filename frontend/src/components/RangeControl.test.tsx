@@ -6,7 +6,8 @@ import RangeControl, { useReportRange } from "@/components/RangeControl";
 import { resolvePreset } from "@/lib/reportRange";
 
 /**
- * The control and its state, wired the way `Reports` wires them.
+ * The control and its state, wired the way `Overview` (Insights' report tab)
+ * wires them.
  *
  * What this file is for: the **URL round-trip**. The arithmetic of a preset is
  * pinned against fixed dates in `reportRange.test.ts`, and the harness here
@@ -35,7 +36,7 @@ function Harness() {
 
 function renderAt(search = "") {
   render(
-    <MemoryRouter initialEntries={[`/reports${search}`]}>
+    <MemoryRouter initialEntries={[`/insights/overview${search}`]}>
       <Harness />
     </MemoryRouter>,
   );
@@ -68,7 +69,7 @@ describe("<RangeControl />", () => {
     expect(screen.getByTestId("range-this-year")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("granularity-auto")).toHaveAttribute("aria-pressed", "true");
     // Nothing in the URL: the default is spelled by the absence of a param.
-    expect(screen.getByTestId("url")).toHaveTextContent("/reports");
+    expect(screen.getByTestId("url")).toHaveTextContent("/insights/overview");
   });
 
   it("writes the preset to the URL and resolves the same window", async () => {
@@ -88,7 +89,7 @@ describe("<RangeControl />", () => {
     await userEvent.setup().click(screen.getByTestId("range-this-year"));
     // Back to a bare URL, so the default preset and its explicit spelling share
     // one cache entry rather than being two keys for one window.
-    expect(h.url()).toBe("/reports");
+    expect(h.url()).toBe("/insights/overview");
     expect(h.state().mode).toBe("this-year");
   });
 

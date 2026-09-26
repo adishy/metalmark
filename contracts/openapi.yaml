@@ -2234,6 +2234,283 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /recurring:
+    get:
+      tags:
+      - recurring
+      summary: List Recurring
+      description: 'The household''s series, filtered, each with what it currently matches.
+
+
+        ``occurrences`` and ``last_seen_date`` come from the ledger on every read
+
+        rather than from a stored counter (ADR-0035''s "read once", ADR-0053): a
+
+        series that stopped matching anything shows zero, which is the truth, and
+
+        the one thing a person needs to see before they delete it.'
+      operationId: list_recurring_recurring_get
+      parameters:
+      - name: account_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+      - name: category_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+      - name: is_active
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+      - name: direction
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^(in|out)$
+          - type: 'null'
+          title: Direction
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Q
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringListOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - recurring
+      summary: Create Recurring
+      description: 'Add a series — by hand, or from a transaction picked out of the ledger.
+
+
+        When ``transaction_id`` is sent, whatever the body left blank (name,
+
+        merchant, amount, account, category) is seeded from that transaction; an
+
+        explicitly sent field always wins, so accepting a suggestion is posting it
+
+        straight back.'
+      operationId: create_recurring_recurring_post
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /recurring/suggestions:
+    get:
+      tags:
+      - recurring
+      summary: List Suggestions
+      description: 'What this household''s own ledger already looks like it repeats.
+
+
+        Recomputed on every read and never stored: a suggestion is a question, and
+
+        it stops being asked the moment a series covers it — whether that series was
+
+        accepted from here or entered by hand.'
+      operationId: list_suggestions_recurring_suggestions_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RecurringSuggestionOut'
+                title: Response List Suggestions Recurring Suggestions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /recurring/{series_id}:
+    get:
+      tags:
+      - recurring
+      summary: Get Recurring
+      operationId: get_recurring_recurring__series_id__get
+      parameters:
+      - name: series_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Series Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - recurring
+      summary: Update Recurring
+      description: 'Change a series. Absent fields are unchanged; an explicit ``null`` clears
+
+        one (``schemas/patch.py``) — which is how "stop filtering by merchant" and
+
+        "pause this" are expressed.'
+      operationId: update_recurring_recurring__series_id__patch
+      parameters:
+      - name: series_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Series Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecurringUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecurringOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - recurring
+      summary: Delete Recurring
+      description: 'Drop the series, not the transactions: it never owned them (ADR-0053),
+
+        so the ledger is untouched and the charges stay categorized as they were.'
+      operationId: delete_recurring_recurring__series_id__delete
+      parameters:
+      - name: series_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Series Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /import/csv/preview:
     post:
       tags:
@@ -7267,6 +7544,361 @@ components:
       - price_date
       - price
       title: PriceUpsert
+    RecurringCreate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Name
+        merchant:
+          anyOf:
+          - type: string
+            maxLength: 300
+          - type: 'null'
+          title: Merchant
+        account_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        currency:
+          anyOf:
+          - type: string
+            maxLength: 3
+            minLength: 3
+          - type: 'null'
+          title: Currency
+        cadence:
+          type: string
+          title: Cadence
+        next_due_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Next Due Date
+        is_active:
+          type: boolean
+          title: Is Active
+          default: true
+        transaction_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transaction Id
+      type: object
+      required:
+      - cadence
+      title: RecurringCreate
+      description: '``POST /recurring``.
+
+
+        ``transaction_id`` is the "pick a transaction" path: when it is sent, the
+
+        server fills whatever the body left blank from that transaction (name,
+
+        merchant, amount, account, category, currency), so a client that picked a
+
+        row sends only the cadence it inferred and the id. The fields it sends
+
+        explicitly always win — the person''s edit is not overwritten by the seed.'
+    RecurringListOut:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/RecurringOut'
+          type: array
+          title: Items
+        totals:
+          items:
+            $ref: '#/components/schemas/RecurringTotalsOut'
+          type: array
+          title: Totals
+      type: object
+      required:
+      - items
+      - totals
+      title: RecurringListOut
+    RecurringOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        merchant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Merchant
+        account_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+        cadence:
+          type: string
+          title: Cadence
+        next_due_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Next Due Date
+        is_active:
+          type: boolean
+          title: Is Active
+        transaction_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Transaction Id
+        monthly_amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Monthly Amount
+          default: '0'
+        occurrences:
+          type: integer
+          title: Occurrences
+          default: 0
+        last_seen_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Last Seen Date
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - merchant
+      - account_id
+      - category_id
+      - amount
+      - currency
+      - cadence
+      - next_due_date
+      - is_active
+      - transaction_id
+      - created_at
+      - updated_at
+      title: RecurringOut
+    RecurringSuggestionOut:
+      properties:
+        name:
+          type: string
+          title: Name
+        merchant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Merchant
+        account_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+        cadence:
+          type: string
+          title: Cadence
+        monthly_amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Monthly Amount
+        occurrences:
+          type: integer
+          title: Occurrences
+        first_date:
+          type: string
+          format: date
+          title: First Date
+        last_date:
+          type: string
+          format: date
+          title: Last Date
+        next_due_date:
+          type: string
+          format: date
+          title: Next Due Date
+        transaction_id:
+          type: string
+          format: uuid
+          title: Transaction Id
+      type: object
+      required:
+      - name
+      - merchant
+      - account_id
+      - category_id
+      - amount
+      - currency
+      - cadence
+      - monthly_amount
+      - occurrences
+      - first_date
+      - last_date
+      - next_due_date
+      - transaction_id
+      title: RecurringSuggestionOut
+      description: 'One thing the ledger says happens regularly, before anyone confirms it.
+
+
+        Nothing is stored: suggestions are recomputed from transactions on every
+
+        read, and they stop being offered once a series covers the same account and
+
+        merchant (whether the person accepted one or entered it by hand). Every
+
+        field here is what ``POST /recurring`` needs, so accepting is sending this
+
+        back.'
+    RecurringTotalsOut:
+      properties:
+        currency:
+          type: string
+          title: Currency
+        monthly_in:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Monthly In
+        monthly_out:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Monthly Out
+        net_monthly:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net Monthly
+      type: object
+      required:
+      - currency
+      - monthly_in
+      - monthly_out
+      - net_monthly
+      title: RecurringTotalsOut
+      description: 'Per currency, because summing dollars and euros into one figure would be
+
+        a conversion nobody asked for (ADR-0005/ADR-0035). One entry per currency
+
+        the filtered series use, the household''s base currency first.'
+    RecurringUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Name
+        merchant:
+          anyOf:
+          - type: string
+            maxLength: 300
+          - type: 'null'
+          title: Merchant
+        account_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Account Id
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        currency:
+          anyOf:
+          - type: string
+            maxLength: 3
+            minLength: 3
+          - type: 'null'
+          title: Currency
+        cadence:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cadence
+        next_due_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Next Due Date
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+      type: object
+      title: RecurringUpdate
+      description: '``PATCH /recurring/{id}``. Absent means unchanged, like every other
+
+        patch here (``schemas/patch.py``); an explicit ``null`` clears the field.'
     RouteOut:
       properties:
         name:

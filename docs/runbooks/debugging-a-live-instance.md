@@ -30,7 +30,8 @@ equal pseudonyms mean equal values.
 
 ### A report looks wrong (e.g. cash flow far off)
 
-1. `anon_debug/pages/reports` — every request the Reports page makes, exactly as it gets them.
+1. `anon_debug/pages/reports` — every request Insights' Overview tab makes (the backend route
+   group is still `reports`; only the frontend destination was renamed), exactly as it gets them.
    Check the window (`start`/`end`) and `granularity` each call used.
 2. `agent/v1/transactions?limit=200` (follow `next_cursor`), then sort by `base_amount`: the
    largest rows are nearly always the story. Group by `account_id` for per-account sums.

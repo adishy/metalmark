@@ -63,7 +63,7 @@ function bucketLabels(
   return data?.points.map((p) => formatBucket(p.date, data.granularity)) ?? [];
 }
 
-export default function Reports() {
+export default function Overview() {
   const range = useReportRange();
   const owners = useOwners();
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
@@ -347,10 +347,11 @@ export default function Reports() {
   );
 
   return (
-    // `max-w-6xl` rather than the shell's `max-w-7xl`: §9.1 gives Reports the
-    // middle width because its content at `lg:` is a two-up grid, and a 1280 px
-    // pair of charts is two 620 px charts — the second column is not worth the
-    // stretch. `mx-auto` keeps the page centred inside the wider shell.
+    // No `mx-auto max-w-6xl` of its own any more — that's `Insights.tsx` now
+    // (§9.1 gives this content the middle width because it's a two-up grid at
+    // `lg:`, and a 1280 px pair of charts is two 620 px charts; the second
+    // column isn't worth the stretch), and the heading above the tabs is the
+    // page's one `<h1>`, so this tab doesn't carry its own.
     //
     // §9.3's two-up, and the grid is the page rather than a wrapper around two
     // of its children, so a section's place is decided by one class on it and
@@ -358,11 +359,9 @@ export default function Reports() {
     // stack; at `lg:` the gap does the same job on both axes, which is why the
     // vertical step is turned off rather than left to double up with it.
     <div
-      className="mx-auto max-w-6xl space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
-      data-testid="reports-page"
+      className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
+      data-testid="insights-overview-page"
     >
-      <h1 className="text-xl font-semibold lg:col-span-2">Reports</h1>
-
       <div className="space-y-4 rounded-card bg-surface-raised p-4 lg:col-span-2">
         <RangeControl state={range} />
         <OwnerFilterChips
