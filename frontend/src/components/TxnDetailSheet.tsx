@@ -14,7 +14,7 @@ import {
 } from "@/api/hooks";
 import { useLinkTransfer, useTransfer, useTransferCandidates, useUnlinkTransfer } from "@/api/transfers";
 import type { Account, Category, Money, SplitIn, Tag, Transaction } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
@@ -567,12 +567,16 @@ function SplitEditor({
       : [blankRow(), blankRow()],
   );
 
-  const target = Number(txn.amount);
+  const target = useMemo(() => sumMinorUnits([txn.amount], currency), [txn.amount, currency]);
   const sum = useMemo(
-    () => rows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0),
-    [rows],
+    () => sumMinorUnits(rows.map((r) => r.amount), currency),
+    [rows, currency],
   );
-  const balanced = Math.abs(sum - target) < 0.005;
+  // The server's own rule, applied here (ADR-0056): a set is balanced when its
+  // legs are a whole number of minor units and equal the parent's, exactly. The
+  // half-cent float tolerance this replaced called sets balanced that
+  // `POST /splits` refuses, so Save could post a 400 back at the user.
+  const balanced = sum.exact && target.exact && sum.minor === target.minor;
 
   const setRow = (i: number, patch: Partial<SplitRow>) =>
     setRows((cur) => cur.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -612,7 +616,7 @@ function SplitEditor({
             Split transaction
           </Button>
         ) : (
-          <span className="text-xs text-fg-muted">Total {formatMoney(String(target), currency)}</span>
+          <span className="text-xs text-fg-muted">Total {formatMoney(txn.amount, currency)}</span>
         )}
       </div>
 
@@ -672,7 +676,21 @@ function SplitEditor({
             className={`text-xs ${balanced ? "text-positive" : "text-warning"}`}
             data-testid="split-sum"
           >
-            Splits sum {formatMoney(String(sum), currency)} — must equal {formatMoney(String(target), currency)}
+            {sum.exact ? (
+              <>
+                Splits sum {formatMoney(fromMinorUnits(sum.minor, currency), currency)} — must equal{" "}
+                {formatMoney(txn.amount, currency)}
+              </>
+            ) : (
+              // The sum above would be a rounding, so it is not shown as though it
+              // were the total: a leg with more precision than the currency has no
+              // representation at all, and the API refuses the set for exactly the
+              // reason a cent is the smallest thing this app moves.
+              <>
+                Each split must be a whole {formatMoney(fromMinorUnits(1, currency), currency)} — the
+                legs as typed are not
+              </>
+            )}
           </p>
 
           {replace.isError && <p className="text-sm text-negative">{(replace.error as Error).message}</p>}

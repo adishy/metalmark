@@ -5,6 +5,139 @@
 /** Currencies with no minor unit. Anything absent is assumed to have 2. */
 const MINOR_UNITS: Record<string, number> = { JPY: 0, KRW: 0, VND: 0 };
 
+/** Decimal places the currency's minor unit has — the `?? 2` is the whole of
+ *  "assume two unless told otherwise", in one place. */
+function minorUnitDigits(currency: string): number {
+  return MINOR_UNITS[currency] ?? 2;
+}
+
+/**
+ * How many minor units make one major unit: `1` for JPY, `100` for USD, `1000`
+ * for a 3-decimal currency. The scale the money helpers below count in.
+ */
+export function minorUnitScale(currency = "USD"): number {
+  return 10 ** minorUnitDigits(currency);
+}
+
+/**
+ * A decimal money string as an integer count of the currency's minor units,
+ * **exactly** — the string is split on its point and scaled digits, so no float
+ * is involved and nothing is rounded on the way.
+ *
+ * `null` has two meanings, and both are "this is not a whole number of minor
+ * units": the text is not a decimal number at all (an empty split row, a
+ * half-typed value — the caller's own validator owns those), or it carries
+ * non-zero digits *finer* than the minor unit (`"0.004"` in USD). Trailing zeros
+ * are of course fine: the API sends `"-100.0000"`, which is 10000 cents.
+ */
+function parseMinorUnits(text: string, digits: number): number | null {
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(text.trim());
+  if (!match || (!match[2] && !match[3])) return null;
+  const [, sign, whole = "", frac = ""] = match;
+  if (frac.length > digits && !/^0*$/.test(frac.slice(digits))) return null;
+  const scaled = Number(`${whole || "0"}${frac.slice(0, digits).padEnd(digits, "0")}`);
+  return sign === "-" ? -scaled : scaled;
+}
+
+/**
+ * One money value as integer minor units (ADR-0005).
+ *
+ * Take the **string** path for anything exact: it parses the digits, so
+ * `toMinorUnits("12.34", "USD")` is 1234 with no float in sight. A `number` is
+ * already a float — the caller has left the exact path — so this can only round
+ * it to the nearest minor unit, which is what a display figure wants and what
+ * the split gate must never rely on (see `sumMinorUnits`).
+ *
+ * A value finer than the minor unit (`"0.004"`), and a value that is not a
+ * number at all (an empty input row), come back rounded and as `0`
+ * respectively: this is a *display and gate* conversion, and the callers that
+ * care about the difference read `sumMinorUnits(...).exact`.
+ */
+export function toMinorUnits(value: string | number, currency = "USD"): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.round(value * minorUnitScale(currency)) : 0;
+  }
+  const digits = minorUnitDigits(currency);
+  const exact = parseMinorUnits(value, digits);
+  if (exact !== null) return exact;
+  const approx = Number(value.trim());
+  return Number.isFinite(approx) ? Math.round(approx * minorUnitScale(currency)) : 0;
+}
+
+/** A total in minor units, and whether it is the exact one. */
+export interface MinorSum {
+  /** The total, counted in the currency's minor units. */
+  minor: number;
+  /**
+   * True when every value was a whole number of minor units, so `minor` is the
+   * exact total rather than a rounding of it. A client check that gates a write
+   * the server validates exactly has to require this — otherwise `"0.004"` and
+   * `"0.004"` "sum" to `"0.004"` here and the API answers 400.
+   */
+  exact: boolean;
+}
+
+/**
+ * Sum money as **integer minor units** (ADR-0005 wants every monetary value to be
+ * an exact decimal, never a float; this is the client's half of it).
+ *
+ * This module is the one place that rule is not honoured end to end: JavaScript
+ * has no decimal type, and the app's money arrives as decimal strings that
+ * `Intl` and ECharts both want as numbers. Integer minor units are the closest
+ * thing to the server's `Decimal` that the client can do — the parts are exact
+ * decimal strings scaled to the currency's minor unit (`MINOR_UNITS` above, so
+ * JPY counts yen rather than hundredths of one) and integers add exactly. Turn
+ * the result back into a decimal string with `fromMinorUnits` before it meets
+ * `formatMoney`.
+ *
+ * The alternative is adding money as JS numbers, which is not wrong by a cent —
+ * it is wrong by a hundredth of one, which is worse, because `0.1 + 0.2 !== 0.3`
+ * and a total that is off in the last bit still renders exactly like a total.
+ *
+ * The one place this is not a display concern is the split sheet, whose client
+ * gate used to accept a half-cent of drift the run above the API refuses
+ * outright. Any caller making that judgement must check `.exact` as well — and
+ * pass strings, since a `number` has already been through a float.
+ */
+export function sumMinorUnits(
+  values: readonly (string | number)[],
+  currency = "USD",
+): MinorSum {
+  const scale = minorUnitScale(currency);
+  const digits = minorUnitDigits(currency);
+  let minor = 0;
+  let exact = true;
+  for (const value of values) {
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) continue;
+      const scaled = value * scale;
+      if (!Number.isInteger(scaled)) exact = false;
+      minor += Math.round(scaled);
+      continue;
+    }
+    const parsed = parseMinorUnits(value, digits);
+    if (parsed === null) exact = false;
+    minor += parsed ?? toMinorUnits(value, currency);
+  }
+  return { minor, exact };
+}
+
+/**
+ * Integer minor units back as a decimal string, exactly, for `formatMoney`.
+ *
+ * The inverse of the string path above, and here for the same reason: a total
+ * that leaves the integer world as `minor / 100` re-enters the float one. JPY
+ * gets no fractional part at all.
+ */
+export function fromMinorUnits(minor: number, currency = "USD"): string {
+  const digits = minorUnitDigits(currency);
+  const whole = Math.round(Math.abs(minor));
+  if (digits === 0) return `${minor < 0 ? "-" : ""}${whole}`;
+  const padded = String(whole).padStart(digits + 1, "0");
+  const body = `${padded.slice(0, -digits)}.${padded.slice(-digits)}`;
+  return minor < 0 ? `-${body}` : body;
+}
+
 /*
  * The sign is supplied here, not by `Intl`, and is U+2212 MINUS SIGN rather than
  * the hyphen-minus (DESIGN.md §6.2). Two reasons, both load-bearing:

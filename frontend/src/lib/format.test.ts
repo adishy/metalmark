@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatMoneyTick, formatDuration, negateAmount } from "@/lib/format";
+import {
+  formatMoney,
+  formatMoneyTick,
+  formatDuration,
+  fromMinorUnits,
+  minorUnitScale,
+  negateAmount,
+  sumMinorUnits,
+  toMinorUnits,
+} from "@/lib/format";
 
 // Intl uses NBSP / narrow-NBSP between symbol and digits in some runtimes;
 // normalize to a plain space so assertions are locale-runtime-stable.
@@ -156,5 +165,77 @@ describe("negateAmount", () => {
   it("never signs a zero", () => {
     expect(negateAmount("0.0000")).toBe("0.0000");
     expect(negateAmount("-0")).toBe("0");
+  });
+});
+
+describe("minor-unit money arithmetic", () => {
+  // ADR-0005 says money is never a float, and this is the client's half of it.
+  // The bug it fixes was not "a cent off": floating point is off in the fifteenth
+  // decimal place, which is worse, because a total that is wrong in the last bit
+  // still renders exactly like a total.
+  it("adds money the way the arithmetic does not", () => {
+    expect(0.1 + 0.2).not.toBe(0.3); // the reason this module has a helper at all
+    expect(sumMinorUnits(["0.1", "0.2"], "USD")).toEqual({ minor: 30, exact: true });
+    expect(sumMinorUnits(["0.1", "0.2", "-0.3"], "USD")).toEqual({ minor: 0, exact: true });
+  });
+
+  it("parses a decimal string into minor units without a float in the way", () => {
+    expect(toMinorUnits("12.34", "USD")).toBe(1234);
+    expect(toMinorUnits("-100.0000", "USD")).toBe(-10000); // the API's storage scale
+    expect(toMinorUnits("0", "USD")).toBe(0);
+    expect(toMinorUnits(".5", "USD")).toBe(50);
+    expect(toMinorUnits("+0.05", "USD")).toBe(5);
+    expect(toMinorUnits("1234567.89", "USD")).toBe(123456789);
+  });
+
+  it("counts in the currency's own minor unit, not in hundredths", () => {
+    // JPY has no minor unit: 1234 yen is 1234 units, not 123400.
+    expect(toMinorUnits("1234", "JPY")).toBe(1234);
+    expect(sumMinorUnits(["1234", "766"], "JPY")).toEqual({ minor: 2000, exact: true });
+    expect(minorUnitScale("JPY")).toBe(1);
+    expect(minorUnitScale("USD")).toBe(100);
+  });
+
+  it("reports a total it cannot state exactly instead of rounding it", () => {
+    // "0.004" is not a whole cent. Rounding it here is how a client gate calls a
+    // set balanced that the API (which compares Decimals, exactly) refuses.
+    expect(sumMinorUnits(["0.004", "0.004"], "USD").exact).toBe(false);
+    expect(sumMinorUnits(["0.004", "0.004", "-0.004"], "USD").exact).toBe(false);
+    expect(sumMinorUnits(["0.004", "0.006"], "USD")).toEqual({ minor: 1, exact: false });
+    // Trailing zeros are not extra precision: the API sends "-100.0000".
+    expect(sumMinorUnits(["100.0000"], "USD").exact).toBe(true);
+  });
+
+  it("treats an unparseable value as nothing rather than as a number", () => {
+    // A half-typed split row contributes nothing until it is a number; the
+    // field's own validator is what refuses "abc".
+    expect(sumMinorUnits(["", "  ", "abc", "1.00"], "USD")).toEqual({ minor: 100, exact: false });
+  });
+
+  it("sums a numeric value by rounding it to the minor unit", () => {
+    // A `number` has already been through a float, so this is the display path:
+    // it recovers the integer ECharts handed over — and reports the sum as
+    // inexact when the scale did not land on one, which is the truth about a
+    // float rather than a claim the callers may lean on.
+    expect(sumMinorUnits([12.34, 0.06], "USD")).toEqual({ minor: 1240, exact: true });
+    expect(sumMinorUnits([12.345], "USD")).toEqual({ minor: 1235, exact: false });
+    expect(sumMinorUnits([12, 8], "USD")).toEqual({ minor: 2000, exact: true }); // integers are exact
+  });
+
+  it("renders minor units back as an exact decimal string", () => {
+    expect(fromMinorUnits(-10000, "USD")).toBe("-100.00");
+    expect(fromMinorUnits(5, "USD")).toBe("0.05");
+    expect(fromMinorUnits(0, "USD")).toBe("0.00");
+    expect(fromMinorUnits(300, "JPY")).toBe("300");
+    expect(fromMinorUnits(-7, "JPY")).toBe("-7");
+  });
+
+  it("round-trips a money value through minor units without losing it", () => {
+    // It comes back at the minor unit's scale rather than the storage scale —
+    // "-100.0000" is "-100.00" — and it is the same number either way.
+    expect(fromMinorUnits(toMinorUnits("-100.0000", "USD"), "USD")).toBe("-100.00");
+    expect(fromMinorUnits(toMinorUnits("0.01", "USD"), "USD")).toBe("0.01");
+    expect(fromMinorUnits(toMinorUnits("1234", "JPY"), "JPY")).toBe("1234");
+    expect(fromMinorUnits(toMinorUnits("-0.05", "EUR"), "EUR")).toBe("-0.05");
   });
 });
