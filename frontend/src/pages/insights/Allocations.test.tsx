@@ -4,7 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import type { Allocation, AllocationGroup } from "@/api/types";
 import Allocations from "@/pages/insights/Allocations";
+import { formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/format";
+import { token } from "@/theme/chartTokens";
 
 // The component owns its one call, so the hook is stubbed rather than standing up
 // a QueryClient and a fetch mock. The stub is a plain function of
@@ -318,5 +320,111 @@ describe("<Allocations />", () => {
     expect(screen.getByTestId("allocation-detail-value")).toHaveTextContent(
       formatMoney("2345.67", "USD"),
     );
+  });
+
+  // ---- issue #34: the treemap view ----------------------------------------
+
+  it("opens on the treemap, and states the picture's finding in the chart's own name", () => {
+    renderAllocations();
+
+    const chart = screen.getByTestId("allocation-treemap");
+    // Canvas is invisible to assistive technology, so this accessible name *is*
+    // what the chart says — and it states the finding rather than the chart type.
+    expect(chart).toHaveAttribute("role", "img");
+    const name = chart.getAttribute("aria-label") ?? "";
+    expect(name).toContain(`Allocation by security, as of ${formatDay("2026-09-20")}`);
+    expect(name).toContain(`${formatMoney("12345.67", "USD")} across 2 groups`);
+    expect(name).toContain(`VTI is the largest at ${formatMoney("10000.00", "USD")} (81.0%)`);
+    // The list under it is the text equivalent §2.9 requires, and the picture
+    // is added above it rather than instead of it.
+    expect(screen.getByTestId("allocation-rows")).toBeInTheDocument();
+    expect(screen.getByTestId("allocation-row-sec-vti")).toHaveTextContent("VTI");
+  });
+
+  it("keys each row to its tile with the colour the tile is drawn in", () => {
+    renderAllocations();
+
+    // The palette in row order: the same slots `treemapOption` colours the tiles
+    // with, so the swatch is a key to the picture rather than a decoration.
+    expect(screen.getByTestId("allocation-swatch-sec-vti")).toHaveStyle({
+      backgroundColor: token("chart-1"),
+    });
+    expect(screen.getByTestId("allocation-swatch-sec-bnd")).toHaveStyle({
+      backgroundColor: token("chart-2"),
+    });
+    // Not announced: the row beside it says the name, and a colour read aloud is
+    // noise.
+    expect(screen.getByTestId("allocation-swatch-sec-vti")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("switches to the list alone and back, keeping every row in both", async () => {
+    const user = userEvent.setup();
+    renderAllocations();
+
+    await user.click(screen.getByTestId("allocation-view-list"));
+    expect(screen.getByTestId("allocation-view-list")).toHaveAttribute("aria-selected", "true");
+    // No picture, so nothing to key: the swatches go with it.
+    expect(screen.queryByTestId("allocation-treemap")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("allocation-swatch-sec-vti")).not.toBeInTheDocument();
+    // The figures are the same either way — this switch is about the picture,
+    // not about what the page reports.
+    expect(screen.getByTestId("allocation-rows")).toBeInTheDocument();
+    expect(screen.getByTestId("allocation-value-sec-vti")).toHaveTextContent(
+      formatMoney("10000.00", "USD"),
+    );
+
+    await user.click(screen.getByTestId("allocation-view-treemap"));
+    expect(screen.getByTestId("allocation-treemap")).toBeInTheDocument();
+    expect(screen.getByTestId("allocation-swatch-sec-vti")).toBeInTheDocument();
+  });
+
+  it("names a row the picture cannot draw, and keeps it in the list", () => {
+    h.allocation.mockImplementation(() =>
+      query({
+        ...BY_SECURITY,
+        rows: [
+          BY_SECURITY.rows[0],
+          {
+            key: "sec-short", label: "SHORT", value_base: "-1000.00", percent: "-10.0010",
+            holdings: 1, sources: [],
+          },
+        ],
+      }),
+    );
+    renderAllocations();
+
+    const notDrawn = screen.getByTestId("allocation-not-drawn");
+    expect(notDrawn).toHaveTextContent(
+      `A treemap's area is value, so this row is not drawn: SHORT (${formatMoney("-1000.00", "USD")}).`,
+    );
+    expect(notDrawn).toHaveTextContent("It is in the list below, at the figure shown.");
+    // The sentence is in the chart's name as well as under it, so a screen
+    // reader gets the caveat with the picture rather than in a separate region.
+    expect(screen.getByTestId("allocation-treemap").getAttribute("aria-label")).toContain(
+      `SHORT (${formatMoney("-1000.00", "USD")})`,
+    );
+    // The row is still reported, and has no tile colour to be keyed to.
+    expect(screen.getByTestId("allocation-row-sec-short")).toHaveTextContent("SHORT");
+    expect(screen.queryByTestId("allocation-swatch-sec-short")).not.toBeInTheDocument();
+  });
+
+  it("explains a treemap with nothing to draw, rather than leaving the view blank", () => {
+    h.allocation.mockImplementation(() =>
+      query({
+        ...BY_SECURITY,
+        total_base: "-1000.00",
+        rows: [
+          {
+            key: "sec-short", label: "SHORT", value_base: "-1000.00", percent: "-100.0000",
+            holdings: 1, sources: [],
+          },
+        ],
+      }),
+    );
+    renderAllocations();
+
+    expect(screen.queryByTestId("allocation-treemap")).not.toBeInTheDocument();
+    expect(screen.getByTestId("allocation-not-drawn")).toHaveTextContent("SHORT");
+    expect(screen.getByTestId("allocation-row-sec-short")).toBeInTheDocument();
   });
 });

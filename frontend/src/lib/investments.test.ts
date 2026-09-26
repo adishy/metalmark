@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   STALE_DAYS,
   excludedSentence,
+  formatPercent,
   formatPrice,
   isCash,
   isZeroDecimal,
@@ -100,6 +101,28 @@ describe("formatPrice", () => {
     // MINOR_UNITS here: ¥0 for a nonzero quote is the same failure.
     expect(formatPrice("0.40000000", "JPY")).toBe("0.4 JPY");
     expect(formatPrice("1200.00000000", "JPY")).toBe(formatMoney("1200", "JPY"));
+  });
+});
+
+describe("formatPercent", () => {
+  it("states a share at one decimal, from the API's four", () => {
+    expect(formatPercent("81.0012")).toBe("81.0%");
+    expect(formatPercent("100.0000")).toBe("100.0%");
+    // A real zero is zero: the bound below is for shares that are *not* zero.
+    expect(formatPercent("0.0000")).toBe("0.0%");
+  });
+
+  it("bounds a nonzero share rather than rounding it away, in the direction it points", () => {
+    // The §6.5 rule on a share instead of money: a row that holds value must not
+    // print as nothing. `(0.04).toFixed(1)` and `(-0.04).toFixed(1)` are both
+    // "0.0", which is the failure this prevents.
+    expect(formatPercent("0.0333")).toBe("<0.1%");
+    expect(formatPercent("-0.0333")).toBe(">-0.1%");
+    expect(formatPercent("-0.0004")).toBe(">-0.1%");
+    // The bound is on the magnitude, so the ordinary negating case is untouched.
+    expect(formatPercent("-3.3333")).toBe("-3.3%");
+    // Right at the boundary the figure is displayed as itself.
+    expect(formatPercent("0.05")).toBe("0.1%");
   });
 });
 

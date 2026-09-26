@@ -100,10 +100,16 @@ export default function Overview() {
   // switch repaints these. `t` is memoised per theme, so it is a stable dep.
   const t = useChartTokens();
 
-  // Built in `lib/netWorthChart`: a time axis, straight segments, and partial
-  // points drawn and named as partial (ADR-0045). A function of the box because
-  // how many values a reader is asked to count off the axis is a question about
-  // the canvas's height (`valueTicks`).
+  // Built in `lib/netWorthChart`: a time axis, a monotone curve that cannot pass
+  // its own values, the change strip under it, and partial points drawn and named
+  // as partial (ADR-0045). A function of the box because how many values a reader
+  // is asked to count off the axis is a question about the canvas's height
+  // (`valueTicks`).
+  //
+  // No brush here: the drag would window the plot while the delta, the
+  // reconciliation and the coverage notes below it stayed whole-window, and this
+  // card has no second figure to state the window with. The Accounts hero, which
+  // does, asks for one.
   const nwOption = useCallback(
     (box: ChartBox): EChartsOption => netWorthOption(nw.data, t, box),
     [nw.data, t],

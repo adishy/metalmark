@@ -38,12 +38,28 @@ export default function Chart({
   label,
   height = 280,
   testid,
+  onEvents,
 }: {
   option: EChartsOption | ((box: ChartBox) => EChartsOption);
   /** The finding, in a sentence. Read aloud in place of the canvas. */
   label: string;
   height?: number;
   testid?: string;
+  /**
+   * ECharts' own events, as `echarts-for-react` takes them: one handler per
+   * event name (`dataZoom`, `legendselectchanged`). The parameter is the
+   * library's payload — `unknown`, so each handler narrows what it reads
+   * (`zoomWindow()` in `theme/chartInteraction.ts` does that narrowing for the
+   * one event this app listens to).
+   *
+   * **Memoise it at the call site.** The wrapper compares this prop by value on
+   * every update and corrects the bindings when it differs: an object literal of
+   * fresh arrow functions is a different value on every render, so the handler
+   * would be unbound and rebound each time. That is not a leak — the library
+   * unbinds by name — but it is churn the chart does not need, and the same
+   * `useMemo`/`useCallback` the options already use costs one line.
+   */
+  onEvents?: Record<string, (params: unknown, instance: unknown) => void>;
 }) {
   const { resolved } = useTheme();
   const reduced = useReducedMotion();
@@ -79,13 +95,50 @@ export default function Chart({
     // the axis) belongs to the chart. Without it a chart the width of the phone
     // was a dead zone the page could not be scrolled from.
     <div ref={box} role="img" aria-label={label} data-testid={testid} style={{ touchAction: "pan-y" }}>
-      <ReactECharts
-        key={resolved}
-        option={merged}
-        style={{ height, touchAction: "pan-y" }}
-        opts={{ renderer: "canvas" }}
-        notMerge
-      />
+      {/* **Mount only once the box has been measured.** This is what removes the
+          double-blink, and it is not a cosmetic guard — the chart is *fed* the
+          measurement, so before it arrives there is no option to draw and the one
+          that would be drawn is laid out for a zero-width canvas.
+
+          Without the guard the sequence on every chart mount is:
+
+            1. this component renders with `width: 0`, so `sized` is `{0, h}` and
+               `resolvedOption` is an option laid out for a canvas with no width;
+            2. `ReactECharts` mounts and `echarts-for-react` starts `echarts.init`
+               on the container — and `init` is *asynchronous* here, because the
+               library builds a throwaway instance, waits for its `finished` event,
+               disposes it and builds the real one (`node_modules/echarts-for-react/
+               lib/core.js::initEchartsInstance`);
+            3. the layout effect above settles `width`, React re-renders, and the
+               `option` prop is now a *different object* — so
+               `componentDidUpdate` calls `setOption` on the instance that exists
+               at that moment, which is the throwaway one. It draws, and its entry
+               animation plays;
+            4. that animation's `finished` is the event the library was waiting
+               for: it disposes the instance — wiping the canvas mid-view — and
+               builds the real one, which `setOption`s the same data and animates
+               in from nothing a second time.
+
+          Measured, on the built frontend: ink climbs to its full 35,785 px over
+          200 ms, is wiped to 1,788 px, and climbs again — two complete entry
+          animations, back to back.
+
+          With the guard, step 1 is the only render that does not hand an option
+          over, so nothing changes while `init` is pending: the throwaway instance
+          is disposed before it ever draws, and the real instance is the first one
+          to see an option. One animation. It costs no visible delay — the effect
+          runs before the browser paints, so the measured render is still the
+          first frame anyone sees. */}
+      {width > 0 && (
+        <ReactECharts
+          key={resolved}
+          option={merged}
+          style={{ height, touchAction: "pan-y" }}
+          opts={{ renderer: "canvas" }}
+          notMerge
+          onEvents={onEvents}
+        />
+      )}
     </div>
   );
 }

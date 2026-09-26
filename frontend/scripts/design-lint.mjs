@@ -59,10 +59,12 @@ const RULES = [
   {
     id: "5",
     why: "hardcoded hex in a chart option — read it from chartTokens()",
-    // Scoped to the files that build chart options. Not all of `src/pages/`:
-    // Settings.tsx holds hex legitimately, as the *default colour of a new
-    // category*, which is user data rather than a theme value.
+    // Scoped to the files that build chart options: the option builders under
+    // `src/lib/`, and the two pages that assemble one inline. Not all of
+    // `src/pages/`: Settings.tsx holds hex legitimately, as the *default colour
+    // of a new category*, which is user data rather than a theme value.
     files: (f) =>
+      /src\/lib\/[a-zA-Z]*[Cc]hart\.ts$/.test(f) ||
       f.endsWith("src/pages/insights/Overview.tsx") ||
       f.endsWith("src/pages/DesignSystem.tsx") ||
       f.endsWith("src/components/Chart.tsx"),
@@ -84,7 +86,7 @@ const RULES = [
   },
   {
     id: "8",
-    why: "hand-written chart interaction — build it with chartTooltip()/emphasis*()/chartAxis() (§2.10)",
+    why: "hand-written chart interaction — build it with chartTooltip()/emphasis*()/chartAxis()/rangeBrush() (§2.10)",
     // The shared module is the standard, so it is the one place allowed to name
     // these keys. Everywhere else must go through it, which is what makes the
     // interaction identical across charts instead of remembered per chart.
@@ -102,11 +104,15 @@ const RULES = [
     test: (line) =>
       /\btooltip:(?!\s*chartTooltip\()/.test(line) ||
       /\baxisPointer:/.test(line) ||
+      // A brush is interaction too, and it takes its colours, its band and its
+      // `xAxisIndex` from the module like everything else — a second grid is
+      // exactly the case a hand-written `dataZoom` gets wrong.
+      /\bdataZoom:(?!\s*rangeBrush\()/.test(line) ||
       // The alternation is the list of helpers the module offers, so a new one
       // has to be added here when it is written — the rule is "go through
       // `chartInteraction`, not "do not write `emphasis`", and only the module
       // knows which of the two a line is doing.
-      /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie|Sankey)\()/.test(line),
+      /\bemphasis:(?!\s*emphasis(?:Line|Bar|Pie|Sankey|Strip|Treemap)\()/.test(line),
   },
   {
     id: "10",

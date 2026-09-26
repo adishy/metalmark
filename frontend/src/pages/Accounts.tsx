@@ -18,10 +18,10 @@ import { useConnections } from "@/api/sync";
 import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
-import { isoDay, todayIso } from "@/lib/dates";
-import { netWorthOption } from "@/lib/netWorthChart";
+import { formatDay, isoDay, todayIso } from "@/lib/dates";
+import { brushWindow, coverageNotes, netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
-import type { ChartBox } from "@/theme/chartInteraction";
+import { brushEvents, type ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -78,21 +78,89 @@ const TABS: { id: TabId; label: string; types: AccountType[] | null }[] = [
 ];
 const VIEW_TESTID = "accounts-view";
 
-/** The hero chart's windows. Calendar-free on purpose: "the last three months"
- *  is the question this chart answers, unlike the reports' calendar presets. */
-type RangeId = "1m" | "3m" | "6m" | "1y" | "all";
-const RANGES: { id: RangeId; label: string; months: number | null }[] = [
-  { id: "1m", label: "1M", months: 1 },
-  { id: "3m", label: "3M", months: 3 },
-  { id: "6m", label: "6M", months: 6 },
-  { id: "1y", label: "1Y", months: 12 },
-  { id: "all", label: "All", months: null },
+/**
+ * The hero chart's windows. Calendar-free on purpose: "the last three months"
+ * is the question this chart answers, unlike the reports' calendar presets.
+ *
+ * The three short ones are the reader's ask — "more varied filters like last
+ * week, last day etc." — because a day and a fortnight are the questions a
+ * household actually asks of a flat line: did the card payment land, did the
+ * paycheck arrive. Eight chips is the whole ladder and still one row on a
+ * desktop, so it is a scale rather than a pile.
+ *
+ * Each row carries the words the change line uses as well as the window, because
+ * those two are one fact. The headline said "over 3 months" from a string beside
+ * the control that set the window; a row cannot state the wrong period for the
+ * window it opens, and a new one cannot be added without saying how the change
+ * over it is described.
+ */
+type RangeId = "1d" | "1w" | "2w" | "1m" | "3m" | "6m" | "1y" | "all";
+
+/**
+ * How far back the window opens, from the reader's own today.
+ *
+ * `days` for the short ranges, `months` for the rest: a fortnight is a count of
+ * days, while "three months" has to mean the same day three months ago and not
+ * ninety days — the reader who opens this on the 31st can see the difference.
+ * `null` is all time, which no client can compute the start of: the server opens
+ * it where the household's data does.
+ */
+type Lookback = { days: number } | { months: number } | null;
+
+const RANGES: ReadonlyArray<{ id: RangeId; label: string; back: Lookback; words: string }> = [
+  { id: "1d", label: "1D", back: { days: 1 }, words: "over the past day" },
+  { id: "1w", label: "1W", back: { days: 7 }, words: "over the past week" },
+  { id: "2w", label: "2W", back: { days: 14 }, words: "over the past 2 weeks" },
+  { id: "1m", label: "1M", back: { months: 1 }, words: "this past month" },
+  { id: "3m", label: "3M", back: { months: 3 }, words: "over 3 months" },
+  { id: "6m", label: "6M", back: { months: 6 }, words: "over 6 months" },
+  { id: "1y", label: "1Y", back: { months: 12 }, words: "over the year" },
+  { id: "all", label: "All", back: null, words: "since you started" },
 ];
 
-function rangeStart(months: number | null): string | null {
-  if (months === null) return null;
+/** What the card opens on. A fortnight is the reader's ask: long enough to hold
+ *  a rent payment and a paycheck, short enough to be about this month's money. */
+const DEFAULT_RANGE: RangeId = "2w";
+
+/**
+ * The window this reader last chose, remembered.
+ *
+ * Per-viewer rather than per-household, like every other remembered choice: two
+ * people looking at the same accounts may watch different windows, and neither
+ * reading should overwrite the other's. Wrapped in try/catch — `localStorage`
+ * throws in a private window, and the fallback is the window the card is built
+ * around, so a throw costs a remembered preference rather than a broken card
+ * (the shape `Allocations.tsx` uses for its include-cash switch).
+ *
+ * A stored value that is not one of today's ranges is ignored rather than
+ * trusted: the ladder changes between releases, and a window from an older build
+ * is one this card cannot draw.
+ */
+const RANGE_PREF_KEY = "metalmark-networth-range";
+
+function readRangePref(): RangeId {
+  try {
+    const raw = localStorage.getItem(RANGE_PREF_KEY);
+    return RANGES.some((r) => r.id === raw) ? (raw as RangeId) : DEFAULT_RANGE;
+  } catch {
+    return DEFAULT_RANGE;
+  }
+}
+
+function writeRangePref(value: RangeId): void {
+  try {
+    localStorage.setItem(RANGE_PREF_KEY, value);
+  } catch {
+    /* Not fatal — the choice just will not survive a reload. */
+  }
+}
+
+/** The day a window opens on, or `null` for all time. */
+function rangeStart(back: Lookback): string | null {
+  if (back === null) return null;
   const d = new Date();
-  d.setMonth(d.getMonth() - months);
+  if ("days" in back) d.setDate(d.getDate() - back.days);
+  else d.setMonth(d.getMonth() - back.months);
   return isoDay(d);
 }
 
@@ -257,30 +325,75 @@ function NetWorthHero({
   ownerLabel: string | null;
   netWorth: ReturnType<typeof useNetWorth>["data"];
 }) {
-  const [range, setRange] = useState<RangeId>("3m");
-  const months = RANGES.find((r) => r.id === range)?.months ?? null;
-  const start = useMemo(() => rangeStart(months), [months]);
+  // The remembered window, or the default. Read once, at mount: a preference
+  // that changed under the reader mid-session would move the ground of the chart
+  // they are looking at.
+  const [range, setRange] = useState<RangeId>(readRangePref);
+  // Total by construction — `RangeId` is this table's own key set, and the table
+  // is the only place one is defined — so the assertion cannot be wrong, and a
+  // fallback row here would be a window no reader could reach or name.
+  const row = RANGES.find((r) => r.id === range)!;
+  const start = useMemo(() => rangeStart(row.back), [row]);
   const series = useNetWorthSeries(start, today(), ownerFilter);
   const t = useChartTokens();
-  // A function of the box: this card is 220 px tall, and how many values the
-  // reader is asked to count off its axis follows from that (`valueTicks`).
+  // A function of the box: this card is 260 px tall, of which the line keeps the
+  // top ~140 px on a wide canvas — how many values the reader is asked to count
+  // off its axis follows from that (`valueTicks`).
+  //
+  // This is the card that asks for the brush, because it is the one that can
+  // state the window: a drag reports back through `brushEvents` below and the
+  // headline above re-scopes to the same span. A card that cannot say which
+  // days its figures cover does not draw one.
   const option = useCallback(
-    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box),
+    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box, { brush: true }),
     [series.data, t],
   );
 
   const points = series.data?.points ?? [];
-  const first = points[0];
-  const last = points[points.length - 1];
+  // Which part of the range the chart is showing, as two points of the series.
+  // The brush belongs to the wide layout — a phone canvas draws no strip and no
+  // brush — so this stays `null` there and the headline keeps its own words.
+  //
+  // The window itself is ECharts' state, not React's: a drag sets it inside the
+  // instance and reports it back through `brushEvents`. Clearing this therefore
+  // does not move the window, and the chart would go on showing a span the
+  // headline no longer states — so a range click clears both, and the chart is
+  // re-mounted by the `key` below rather than re-optioned.
+  const [brushed, setBrushed] = useState<[number, number] | null>(null);
+  // Bumped only when there is a window to hand back: a range click with no brush
+  // on screen re-uses the chart instance, as it always did.
+  const [brushReset, setBrushReset] = useState(0);
+  // A window belongs to the points it was drawn on: a new range or a new owner
+  // filter is a different series, and the old indices would name different days.
+  // Anything that no longer fits is dropped rather than clamped — the chart has
+  // been rebuilt for the new range and shows the whole of it.
+  const win = brushed && brushed[1] < points.length ? brushed : null;
+  // Memoised: the wrapper re-binds its handlers when this prop's value changes.
+  const onEvents = useMemo(
+    () => brushEvents((zoom) => setBrushed(zoom ? brushWindow(points, zoom[0], zoom[1]) : null)),
+    [points],
+  );
+
+  const first = win ? points[win[0]] : points[0];
+  const last = win ? points[win[1]] : points[points.length - 1];
   const change = first && last ? Number(last.net_worth) - Number(first.net_worth) : null;
   const ccy = netWorth?.base_currency ?? series.data?.base_currency ?? "USD";
-  const rangeWords: Record<RangeId, string> = {
-    "1m": "this past month",
-    "3m": "over 3 months",
-    "6m": "over 6 months",
-    "1y": "over the year",
-    all: "since you started",
-  };
+  // What the change is *over*, said in the window's own words. A brush narrows
+  // the line to part of the range, and a headline that still said "over 2 weeks"
+  // would be claiming a figure the chart above it is not showing — so the brush
+  // names its two days and the range states the period its row was built with.
+  const spanWords = win
+    ? `from ${formatDay(points[win[0]].date)} to ${formatDay(points[win[1]].date)}`
+    : row.words;
+  // What the line cannot count, in the same sentences the Insights card prints
+  // under its own: an account counted partway through, or one the ledger cannot
+  // value. The chart marks both on the canvas and withholds the bar it cannot
+  // draw, but a mark is silent at rest — ADR-0045 wants the words as well, and
+  // they belong to whichever span is on screen, so a brushed window gets its own.
+  const notes = useMemo(
+    () => coverageNotes(win ? points.slice(win[0], win[1] + 1) : points),
+    [points, win],
+  );
 
   return (
     <section className="rounded-card bg-surface-raised p-4 sm:p-6" data-testid="net-worth" aria-label="Net worth">
@@ -298,24 +411,26 @@ function NetWorthHero({
         >
           <span aria-hidden="true">{change >= 0 ? "▲ " : "▼ "}</span>
           {change >= 0 ? "Up " : "Down "}
-          {formatMoney(Math.abs(change), ccy)} {rangeWords[range]}
+          {formatMoney(Math.abs(change), ccy)} {spanWords}
         </p>
       )}
 
       <div className="mt-4">
         {points.length > 1 ? (
           <Chart
+            key={brushReset}
             option={option}
-            height={220}
+            onEvents={onEvents}
+            height={260}
             testid="accounts-net-worth-chart"
             label={
               change === null
                 ? "Net worth over time"
-                : `Net worth went ${change >= 0 ? "up" : "down"} ${formatMoney(Math.abs(change), ccy)} ${rangeWords[range]}, to ${formatMoney(last.net_worth, ccy)}.`
+                : `Net worth went ${change >= 0 ? "up" : "down"} ${formatMoney(Math.abs(change), ccy)} ${spanWords}, to ${formatMoney(last.net_worth, ccy)}.`
             }
           />
         ) : series.isLoading ? (
-          <div className="flex h-56 items-center justify-center text-sm text-fg-muted">
+          <div className="flex h-64 items-center justify-center text-sm text-fg-muted">
             <Spinner /> Loading your history
           </div>
         ) : (
@@ -326,6 +441,17 @@ function NetWorthHero({
         )}
       </div>
 
+      {points.length > 1 && notes.length > 0 && (
+        <div className="mt-2 space-y-1 text-xs text-fg-muted" data-testid="accounts-net-worth-coverage">
+          {notes.map((note) => (
+            <p key={note}>
+              <span aria-hidden="true">⚠ </span>
+              {note}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-4 text-sm text-fg-muted">
           {netWorth && (
@@ -335,13 +461,30 @@ function NetWorthHero({
             </>
           )}
         </div>
-        <div className="flex gap-1" role="group" aria-label="Chart range">
+        {/* Eight chips, so they wrap on a phone rather than spill: `flex-wrap`
+            and a right edge, because the row lives at the end of a row that
+            already holds the assets (§5 — nothing scrolls sideways, and chips
+            wrap). */}
+        <div className="flex flex-wrap justify-end gap-1" role="group" aria-label="Chart range">
           {RANGES.map((r) => (
             <button
               key={r.id}
               type="button"
               aria-pressed={range === r.id}
-              onClick={() => setRange(r.id)}
+              // A range control states a span, so it takes the brush's own span
+              // away: the window is cleared, and with it the chart instance that
+              // holds it. A new range does both by itself — its option is rebuilt
+              // — but clicking the range already selected has to do it here.
+              onClick={() => {
+                if (brushed) {
+                  setBrushed(null);
+                  setBrushReset((n) => n + 1);
+                }
+                setRange(r.id);
+                // Written on the press, not on the way out: a reader who picks a
+                // window and closes the tab has still chosen it.
+                writeRangePref(r.id);
+              }}
               className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-2 text-sm ${
                 range === r.id ? "bg-accent/20 font-medium text-accent-ink" : "text-fg-muted hover:text-fg"
               }`}

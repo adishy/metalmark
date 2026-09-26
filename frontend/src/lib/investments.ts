@@ -136,6 +136,35 @@ export function formatPrice(price: Money, currency: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Shares
+// ---------------------------------------------------------------------------
+
+/**
+ * A share, at one decimal.
+ *
+ * The API sends four (`percent`), which is noise down a column. A percent is not
+ * money, so the currency's minor unit does not apply — but the §6.5 concern does:
+ * a row that holds value must not display as `0.0%`, so a non-zero share below
+ * the displayed precision is bounded rather than rounded away.
+ *
+ * The bound is on the *magnitude*, and the direction is kept. A group can be
+ * negative — short positions are not rounded away by the valuation (ADR-0032) —
+ * and `(-0.04).toFixed(1)` is `"-0.0%"`: a non-zero share displayed as zero,
+ * which is the exact failure this function exists to prevent. `>-0.1%` says
+ * both that the row holds a little value and which way it points.
+ *
+ * It lives here rather than in the allocation card, because the card is no
+ * longer the only thing that states a share: the treemap labels a tile with the
+ * same figure the row beside it prints (`lib/treemapChart.ts`), and two
+ * renderings of one number is how they drift.
+ */
+export function formatPercent(percent: Money): string {
+  const n = Number(percent);
+  if (n !== 0 && Math.abs(n) < 0.05) return n < 0 ? ">-0.1%" : "<0.1%";
+  return `${n.toFixed(1)}%`;
+}
+
+// ---------------------------------------------------------------------------
 // Staleness
 // ---------------------------------------------------------------------------
 
