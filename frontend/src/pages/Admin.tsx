@@ -347,7 +347,14 @@ export default function Admin() {
         )}
         {(jobs.data?.length ?? 0) > 0 && (
           <div
-            className="overflow-x-auto"
+            // `relative` keeps this scroll container's own box the containing
+            // block for what it holds. Without it the `sr-only` "Actions" label
+            // in the last column header — absolutely positioned, like every
+            // `sr-only` — escapes the clipping and lands at the table's right
+            // edge in document space, which widened the whole page at 360 px
+            // (426 vs 360) while a job was queued. §4.7's scroll container has
+            // to contain what it scrolls.
+            className="relative overflow-x-auto"
             role="region"
             aria-label="Jobs in flight"
             tabIndex={0}
