@@ -5123,6 +5123,11 @@ components:
           - type: string
           - type: 'null'
           title: Org Name
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
         status:
           type: string
           title: Status
@@ -5168,6 +5173,7 @@ components:
       - id
       - provider
       - org_name
+      - display_name
       - status
       - last_synced_at
       - last_error
@@ -5202,18 +5208,24 @@ components:
             minimum: 120.0
           - type: 'null'
           title: Sync Interval Minutes
+        display_name:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+          title: Display Name
       type: object
       title: ConnectionUpdate
-      description: 'The two knobs the control panel turns.
-
-
-        ``is_enabled`` is pause/resume and ``sync_interval_minutes`` is the cadence.
-
-        Absent means no change; neither has a "clear" semantics, because a nullable
-
-        pause flag or a nullable interval would both need a third state to mean
-
-        "inherit", and the columns give each exactly one meaning.'
+      description: "The knobs the control panel turns.\n\n``is_enabled`` is pause/resume and ``sync_interval_minutes``\
+        \ is the cadence.\nAbsent means no change for both; neither has a \"clear\" semantics, because\
+        \ a\nnullable pause flag or a nullable interval would both need a third state to\nmean \"inherit\"\
+        , and the columns give each exactly one meaning.\n\n``display_name`` is different: it *does* have\
+        \ a clear semantics, because\n\"use the bank's name\" is a real, first-class state (NULL) rather\
+        \ than an\nabsence of a decision. So the three states are distinguished at the\n``model_fields_set``\
+        \ level, not by value:\n\n* absent from the request body → no change (checked via ``model_fields_set``,\n\
+        \  never ``is None`` — a client that omits the field must not clear it).\n* present and blank/whitespace-only\
+        \ after trimming → clear back to the bank's\n  name (stored as NULL).\n* present and non-blank\
+        \ → the trimmed value."
     CsvCommitOut:
       properties:
         inserted:

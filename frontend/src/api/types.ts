@@ -350,6 +350,9 @@ export interface Connection {
   /** The institution, from the first successful fetch. Null until then: the
    *  claim endpoint refuses to invent one. */
   org_name: string | null;
+  /** A local name the owner set ("Chase — joint"). Null means "use the bank's
+   *  name" — see `connectionName()` in `lib/bankFreshness`. */
+  display_name: string | null;
   status: ConnectionStatus;
   last_synced_at: string | null;
   last_error: string | null;
@@ -551,6 +554,9 @@ export interface ConnectionClaim {
 export interface ConnectionUpdate {
   is_enabled?: boolean;
   sync_interval_minutes?: number;
+  /** Present-and-blank clears back to the bank's name (server stores NULL);
+   *  omit the field entirely to leave it unchanged. */
+  display_name?: string | null;
 }
 
 export interface SplitIn {

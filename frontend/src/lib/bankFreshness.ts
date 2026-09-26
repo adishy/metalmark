@@ -14,3 +14,13 @@ export function isStalled(c: Connection, now: Date = new Date()): boolean {
   const hours = (now.getTime() - new Date(c.last_new_data_at).getTime()) / 36e5;
   return (c.quiet_syncs ?? 0) >= QUIET_SYNCS && hours >= QUIET_HOURS;
 }
+
+/** What to call a connection: the owner's local name first, then the bank's own
+ *  name, then a generic fallback — the single place this chain lives, so every
+ *  screen that names a connection (Settings, Admin, Accounts) agrees. */
+export function connectionName(
+  c: Pick<Connection, "display_name" | "org_name">,
+  fallback = "Unnamed connection",
+): string {
+  return c.display_name ?? c.org_name ?? fallback;
+}

@@ -152,7 +152,7 @@ def _claim_status(exc: ProviderError) -> int:
 async def update_connection(
     session: AsyncSession, connection_id: uuid.UUID, data: ConnectionUpdate
 ) -> AccountConnection:
-    """Pause/resume, and retune the cadence. Nothing else is editable.
+    """Pause/resume, retune the cadence, and rename. Nothing else is editable.
 
     ``next_sync_at`` is recomputed only when the interval actually changes and the
     connection is enabled: resuming from a long pause must not leave the next run
@@ -161,6 +161,11 @@ async def update_connection(
     """
     connection = await get_connection(session, connection_id)
     now = datetime.now(UTC)
+
+    if "display_name" in data.model_fields_set:
+        # ``ConnectionUpdate`` already trimmed and blanked this to None; here it
+        # is a plain assignment, absent-vs-present having already been resolved.
+        connection.display_name = data.display_name
 
     if data.is_enabled is not None and data.is_enabled != connection.is_enabled:
         connection.is_enabled = data.is_enabled
