@@ -82,6 +82,14 @@ export function chartMotion(reduced: boolean | null): EChartsOption {
 }
 
 /**
+ * The class every tooltip element carries, for the tests that read one.
+ *
+ * Set through ECharts' own `tooltip.className`, so it is the library that puts it
+ * on the element and nothing here reaches into its DOM.
+ */
+export const TOOLTIP_CLASS = "mm-chart-tooltip";
+
+/**
  * The tooltip, and the pointer that anchors it.
  *
  * `confine` keeps it inside the canvas: without it a tooltip on a phone-width
@@ -100,6 +108,12 @@ export function chartMotion(reduced: boolean | null): EChartsOption {
 export interface TooltipPoint {
   name?: string;
   value?: unknown;
+  /** The series a point belongs to. An axis tooltip hands over one point per
+   *  series, and the only way to tell them apart is by name. */
+  seriesName?: string;
+  /** Where the point sits in its series: how a chart whose axis carries bucket
+   *  labels finds the date behind the one under the pointer. */
+  dataIndex?: number;
   /** The data item under the pointer: an edge in a graph series, or nothing at
    *  all. Loosely typed for the same reason as `value`. */
   data?: unknown;
@@ -151,6 +165,11 @@ export function chartTooltip(
     // A tap shows the tooltip where a hover would: on a phone there is no
     // hover, and a chart that answered only to a mouse was a picture.
     triggerOn: "mousemove|click",
+    // A name for the tooltip element, which ECharts otherwise leaves anonymous.
+    // The tooltip is the one part of a chart that is DOM rather than canvas, and
+    // what it *says* — money, formatted in the report's own currency — is
+    // otherwise only checkable by looking at a screenshot.
+    className: TOOLTIP_CLASS,
     // Big enough to read at arm's length, and kept clear of the thumb.
     extraCssText: "border-radius: 12px; padding: 8px 12px; font-size: 14px;",
     backgroundColor: t.surface,

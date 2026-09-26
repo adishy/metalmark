@@ -197,3 +197,53 @@ test("allocations counts bank cash when asked and names its sources on tap", asy
   // money" to the accounts themselves is one tap, not a navigation hunt.
   await expect(page.getByTestId("allocation-detail-close")).toBeVisible();
 });
+
+// A chart's tooltip is the one part of it that is DOM rather than canvas, which makes
+// it the only part of a chart's *content* this suite can read — and it is where a
+// reader gets the exact figures an axis can only abbreviate (§6.5). It used to hand
+// ECharts no formatter at all, so a tap printed `Income 5235`: no currency anywhere on
+// a money chart, and a title of `Sep`, which names a month but not a year.
+test("the cash-flow tooltip reads as money, and names the bucket in full", async ({ page }) => {
+  await login(page);
+  await page.getByTestId("nav-insights").click();
+
+  const chart = page.getByTestId("cash-flow-chart");
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("cash-flow-chart has no bounding box");
+  await expect(chart.locator("canvas").first()).toBeVisible();
+
+  // The class `chartTooltip` sets on ECharts' own tooltip element. Every chart on
+  // the page mounts one of these, empty ones included, so it is scoped to the chart
+  // under test rather than to the page.
+  const tooltip = chart.locator(".mm-chart-tooltip");
+  // Point at the plot until it answers. The chart is drawn from a fetch, and the
+  // pointer arriving before the bars do lands on an empty canvas — a tooltip that
+  // never opened would otherwise read as a tooltip that says nothing, and the two
+  // are not the same failure. `mousemove` is the trigger a desktop reader has;
+  // `click` beside it is what makes the same tooltip reachable on a phone, and the
+  // before/after shots exercise that path.
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+        return (await tooltip.innerText().catch(() => "")).trim();
+      },
+      { timeout: 15_000, message: "the cash-flow tooltip never opened" },
+    )
+    .not.toBe("");
+  await expect(tooltip).toBeVisible();
+  // `innerText`, not `textContent`: the tooltip's lines are separated by `<br/>`,
+  // which carries no text of its own, so textContent would run them together.
+  const lines = (await tooltip.innerText()).split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // The bucket, in full — the axis's `Sep` names a month but not a year, so the
+  // heading carries the year the axis's short form leaves out.
+  expect(lines[0]).toMatch(/\d{4}/);
+  // Then every series at that bucket, each as money in the report's own currency.
+  // The expense is negative because its bars grow downwards.
+  expect(lines.slice(1)).toHaveLength(3);
+  for (const line of lines.slice(1)) {
+    expect(line).toMatch(/^(Income|Expense|Net): [-−]?\$\d[\d,]*\.\d{2}$/);
+  }
+});

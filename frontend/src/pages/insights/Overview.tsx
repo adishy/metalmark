@@ -110,7 +110,25 @@ export default function Overview() {
       // tick gutter is measured from the labels rather than reserved as 60 px of
       // a 310 px-wide canvas.
       grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
-      tooltip: chartTooltip(t),
+      // ECharts' default tooltip template prints the raw numbers — `Income 5235`,
+      // no currency and no thousands separator — on a chart whose whole subject is
+      // money, and it titles itself with the axis label, which names a month but
+      // not a year. Both are the same finding: what a reader taps for is the figure
+      // and the bucket it belongs to.
+      tooltip: chartTooltip(t, {
+        formatter: (param: TooltipPoint) => {
+          // An axis tooltip hands over every series at the pointer, in series order.
+          const points = (Array.isArray(param) ? param : [param]) as TooltipPoint[];
+          const bucket = cashFlow.data?.points[points[0]?.dataIndex ?? 0];
+          const heading = bucket
+            ? formatBucket(bucket.date, cashFlow.data?.granularity ?? "month", "long")
+            : (points[0]?.name ?? "");
+          return [
+            `<strong>${heading}</strong>`,
+            ...points.map((p) => `${p.seriesName}: ${formatMoney(Number(p.value), ccy)}`),
+          ].join("<br/>");
+        },
+      }),
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",

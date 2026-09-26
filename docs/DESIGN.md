@@ -505,6 +505,15 @@ pixels cannot see dimming and must measure intensity.
 **Tooltips are confined** (`confine: true`), or a phone-width chart's tooltip
 overhangs the card it belongs to.
 
+**A tooltip says what the chart could not.** It is the one place in a chart a reader
+gets an exact figure, so on a money chart it prints money at full precision through
+`formatMoney` — a tick's licence to compact (`formatMoneyTick`, §6.5) stops at the
+axis — and it names its bucket in the long form (`Sep 2026`), not the axis's short one
+(`Sep`): the axis abbreviates because it has to fit, and the tooltip has the room to be
+a date a reader can place in a year. A page's formatter goes through `chartTooltip`
+(§8 rule 8) and formats with `formatMoney` and `formatBucket`; it is where the exact
+figure behind every compacted tick lives.
+
 **Motion.** Charts animate in JavaScript onto a canvas, which no CSS rule can reach —
 so, like framer-motion (§2.8), ECharts has to be told about `prefers-reduced-motion`
 explicitly. `<Chart>` does it once for every chart via `useReducedMotion()`; pages do
