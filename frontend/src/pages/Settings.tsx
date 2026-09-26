@@ -51,6 +51,7 @@ import {
 } from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
 import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
@@ -1316,6 +1317,10 @@ function OwnersSection() {
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<{ name: string; counts: OwnerReassignment } | null>(null);
+  // The owner whose income profile / paystubs are open, if any. ADR-0052: this
+  // is data entry, not a settings write — the income API is open to any member
+  // like the ledger itself — so the button is not gated on `canEdit`.
+  const [incomeFor, setIncomeFor] = useState<Owner | null>(null);
   const nameId = useFieldId("owner-name");
 
   return (
@@ -1358,6 +1363,7 @@ function OwnersSection() {
               owner={o}
               owners={owners.data ?? []}
               canEdit={canEdit}
+              onIncome={() => setIncomeFor(o)}
               onDeleted={(counts) => setDeleted({ name: o.name, counts })}
             />
           ))}
@@ -1374,6 +1380,14 @@ function OwnersSection() {
           </p>
         )}
       </Card>
+
+      {incomeFor && (
+        <IncomeDialog
+          owner={incomeFor}
+          householdCurrency={household.data?.base_currency ?? "USD"}
+          onClose={() => setIncomeFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1382,11 +1396,13 @@ function OwnerRow({
   owner,
   owners,
   canEdit,
+  onIncome,
   onDeleted,
 }: {
   owner: Owner;
   owners: Owner[];
   canEdit: boolean;
+  onIncome: () => void;
   onDeleted: (counts: OwnerReassignment) => void;
 }) {
   const update = useUpdateOwner();
@@ -1403,7 +1419,7 @@ function OwnerRow({
 
   return (
     <li className="space-y-2 rounded-control bg-surface-inset/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {canEdit ? (
           <Input
             value={name}
@@ -1425,6 +1441,19 @@ function OwnerRow({
           {owner.kind}
         </span>
         <div className="flex-1" />
+        {/* Income & pay is data entry on this owner, not a settings write:
+            the income API is open to every member, so the button is too. A
+            shared owner is not a person and has no income to record. */}
+        {!isShared && (
+          <Button
+            variant="secondary"
+            className="px-2 py-1 text-xs"
+            onClick={onIncome}
+            data-testid={`owner-income-${owner.id}`}
+          >
+            Income &amp; pay
+          </Button>
+        )}
         {canEdit && (
         <Button
           variant="secondary"

@@ -996,6 +996,58 @@ async def test_a_version_1_backup_restores_to_the_same_net_worth(household_facto
     assert history("Mystery card") == [("2026-02-01", "75.0000")]
 
 
+async def test_owner_income_survives_a_round_trip_and_an_old_document_imports_as_null(
+    household_factory,
+):
+    from app.models import OwnerIncomeProfile, Paystub
+    from app.schemas.income import OwnerIncomeProfileUpdate, PaystubCreate, PaystubLineIn
+    from app.services import income as income_svc
+
+    source = await household_factory(name="Source")
+    target = await household_factory(name="Target")
+    async with scoped_session(household_id=source) as s:
+        alex = await owners_svc.create_owner(s, source, name="Alex")
+        await income_svc.upsert_profile(
+            s, source, alex.id,
+            OwnerIncomeProfileUpdate(annual_gross_income=D("120000"), pay_frequency="biweekly"),
+        )
+        await income_svc.create_paystub(
+            s, source, alex.id,
+            PaystubCreate(
+                pay_date="2026-09-15", employer="Acme", gross=D("1000.00"), net=D("800.00"),
+                lines=[
+                    PaystubLineIn(kind="earning", label="Salary", amount=D("1000.00")),
+                    PaystubLineIn(kind="tax", label="Federal", amount=D("200.00")),
+                ],
+            ),
+        )
+
+    await _roundtrip(source, target)
+
+    async with scoped_session(household_id=target) as s:
+        profile = (await s.execute(select(OwnerIncomeProfile))).scalar_one()
+        assert profile.annual_gross_income == D("120000")
+        assert profile.pay_frequency == "biweekly"
+        paystub = (await s.execute(select(Paystub))).scalar_one()
+        assert paystub.employer == "Acme"
+        full = await income_svc.get_paystub(s, paystub.id)
+        assert sorted(line.label for line in full.lines) == ["Federal", "Salary"]
+
+    # A document from before this ADR has no owner_income_profiles/paystubs keys
+    # at all — must import cleanly with nothing created, not KeyError.
+    older = await household_factory(name="Older")
+    async with scoped_session(household_id=source) as s:
+        document = await _export(s, source)
+    document.pop("owner_income_profiles")
+    document.pop("paystubs")
+    document.pop("paystub_lines")
+    async with scoped_session(household_id=older) as s:
+        result = await portability.import_document(s, older, portability.dumps(document))
+    assert "owner_income_profiles" not in result.as_dict()["created"]
+    async with scoped_session(household_id=older) as s:
+        assert (await s.execute(select(OwnerIncomeProfile))).scalar_one_or_none() is None
+
+
 async def test_version_2_is_read_as_written(household_factory):
     hh = await household_factory()
     card, snaps = _v1_card("Card", current="-850.0000", snapshots=[("2026-02-01", "-850.0000")])

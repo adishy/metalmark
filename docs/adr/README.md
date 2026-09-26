@@ -147,3 +147,5 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0048](0048-agents-read-an-anonymized-mirror.md) | Agents read an anonymized, read-only mirror of the app's API, by token | Accepted |
 | [0049](0049-transfers-pair-by-date-and-categories-start-typed.md) | Identical transfers pair by date; households start with typed categories and a local categorizer | Accepted |
 | [0050](0050-a-stalled-bank-is-shown-not-silent.md) | A stalled bank is shown, not silent | Accepted |
+| [0051](0051-sync-lands-the-banks-holdings.md) | Sync lands the bank's holdings as positions | Accepted |
+| [0052](0052-owner-income-and-paystubs.md) | Owner income profile and paystubs, as lines that keep a kind | Accepted |

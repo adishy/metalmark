@@ -1014,6 +1014,285 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /owners/{owner_id}/income-profile:
+    get:
+      tags:
+      - income
+      summary: Get Income Profile
+      operationId: get_income_profile_owners__owner_id__income_profile_get
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerIncomeProfileOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - income
+      summary: Put Income Profile
+      operationId: put_income_profile_owners__owner_id__income_profile_put
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerIncomeProfileUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerIncomeProfileOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /owners/{owner_id}/paystubs:
+    get:
+      tags:
+      - income
+      summary: List Paystubs
+      operationId: list_paystubs_owners__owner_id__paystubs_get
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaystubOut'
+                title: Response List Paystubs Owners  Owner Id  Paystubs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - income
+      summary: Create Paystub
+      operationId: create_paystub_owners__owner_id__paystubs_post
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaystubCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaystubOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /owners/{owner_id}/paystubs/{paystub_id}:
+    get:
+      tags:
+      - income
+      summary: Get Paystub
+      operationId: get_paystub_owners__owner_id__paystubs__paystub_id__get
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: paystub_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Paystub Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaystubOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - income
+      summary: Update Paystub
+      operationId: update_paystub_owners__owner_id__paystubs__paystub_id__patch
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: paystub_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Paystub Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaystubPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaystubOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - income
+      summary: Delete Paystub
+      operationId: delete_paystub_owners__owner_id__paystubs__paystub_id__delete
+      parameters:
+      - name: owner_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Owner Id
+      - name: paystub_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Paystub Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /transactions:
     post:
       tags:
@@ -5734,6 +6013,36 @@ components:
         last month is a real, importable document, and refusing the whole file over it
 
         would make an export from a live household un-importable.'
+    IncomeSummaryOut:
+      properties:
+        annualized_gross:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Annualized Gross
+        ytd:
+          items:
+            $ref: '#/components/schemas/YtdKindTotal'
+          type: array
+          title: Ytd
+        effective_tax_rate:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Effective Tax Rate
+      type: object
+      required:
+      - annualized_gross
+      - ytd
+      - effective_tax_rate
+      title: IncomeSummaryOut
+      description: 'Derived at read time from the profile and the owner''s paystubs —
+
+        nothing here is stored, so there is nothing to keep in sync (ADR-0052,
+
+        ADR-0035''s "read once" discipline).'
     InstitutionOut:
       properties:
         name:
@@ -6430,6 +6739,122 @@ components:
       - reassigned_splits
       title: OwnerDeleteResult
       description: How many rows the delete moved onto ``reassign_to``.
+    OwnerIncomeProfileFields:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        currency:
+          type: string
+          title: Currency
+        annual_gross_income:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Annual Gross Income
+        pay_frequency:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pay Frequency
+        filing_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Filing Status
+        tax_region:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tax Region
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - currency
+      - annual_gross_income
+      - pay_frequency
+      - filing_status
+      - tax_region
+      - created_at
+      - updated_at
+      title: OwnerIncomeProfileFields
+      description: 'The profile row itself, as it actually exists. Split out from
+
+        ``OwnerIncomeProfileOut`` so "no profile yet" can be ``profile: null``
+
+        instead of a row of invented zeros and epoch timestamps — an owner with
+
+        nothing stated is a real, first-class state, not an error.'
+    OwnerIncomeProfileOut:
+      properties:
+        owner_id:
+          type: string
+          format: uuid
+          title: Owner Id
+        profile:
+          anyOf:
+          - $ref: '#/components/schemas/OwnerIncomeProfileFields'
+          - type: 'null'
+        summary:
+          $ref: '#/components/schemas/IncomeSummaryOut'
+      type: object
+      required:
+      - owner_id
+      - profile
+      - summary
+      title: OwnerIncomeProfileOut
+    OwnerIncomeProfileUpdate:
+      properties:
+        currency:
+          anyOf:
+          - type: string
+            maxLength: 3
+            minLength: 3
+          - type: 'null'
+          title: Currency
+        annual_gross_income:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Annual Gross Income
+        pay_frequency:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pay Frequency
+        filing_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Filing Status
+        tax_region:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Tax Region
+      type: object
+      title: OwnerIncomeProfileUpdate
+      description: '``PUT /owners/{id}/income-profile``. Every field is optional — a
+
+        household may only want to state some of this — and absent means "leave
+
+        unchanged" on an existing profile (``is_set``), or "leave null" when the
+
+        profile is being created by this same call.'
     OwnerOut:
       properties:
         id:
@@ -6505,6 +6930,267 @@ components:
       - required
       - type
       title: ParamOut
+    PaystubCreate:
+      properties:
+        pay_date:
+          type: string
+          format: date
+          title: Pay Date
+        period_start:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period Start
+        period_end:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period End
+        employer:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Employer
+        currency:
+          anyOf:
+          - type: string
+            maxLength: 3
+            minLength: 3
+          - type: 'null'
+          title: Currency
+        gross:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Gross
+        net:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net
+        lines:
+          items:
+            $ref: '#/components/schemas/PaystubLineIn'
+          type: array
+          title: Lines
+      type: object
+      required:
+      - pay_date
+      - gross
+      - net
+      title: PaystubCreate
+    PaystubLineIn:
+      properties:
+        kind:
+          type: string
+          title: Kind
+        label:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Label
+        amount:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        ytd_amount:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Ytd Amount
+        position:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Position
+      type: object
+      required:
+      - kind
+      - label
+      - amount
+      title: PaystubLineIn
+    PaystubLineOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        kind:
+          type: string
+          title: Kind
+        label:
+          type: string
+          title: Label
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        ytd_amount:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Ytd Amount
+        position:
+          type: integer
+          title: Position
+      type: object
+      required:
+      - id
+      - kind
+      - label
+      - amount
+      - ytd_amount
+      - position
+      title: PaystubLineOut
+    PaystubOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        owner_id:
+          type: string
+          format: uuid
+          title: Owner Id
+        pay_date:
+          type: string
+          format: date
+          title: Pay Date
+        period_start:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period Start
+        period_end:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period End
+        employer:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Employer
+        currency:
+          type: string
+          title: Currency
+        gross:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Gross
+        net:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Net
+        lines:
+          items:
+            $ref: '#/components/schemas/PaystubLineOut'
+          type: array
+          title: Lines
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - owner_id
+      - pay_date
+      - period_start
+      - period_end
+      - employer
+      - currency
+      - gross
+      - net
+      - lines
+      - created_at
+      - updated_at
+      title: PaystubOut
+    PaystubPatch:
+      properties:
+        pay_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Pay Date
+        period_start:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period Start
+        period_end:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Period End
+        employer:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Employer
+        currency:
+          anyOf:
+          - type: string
+            maxLength: 3
+            minLength: 3
+          - type: 'null'
+          title: Currency
+        gross:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Gross
+        net:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Net
+        lines:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/PaystubLineIn'
+            type: array
+          - type: 'null'
+          title: Lines
+      type: object
+      title: PaystubPatch
+      description: 'Absent means unchanged, for every field including ``lines`` — sending
+
+        ``"lines": []`` is a real request ("this paystub has no line detail"),
+
+        which is exactly why omitting the key, not an empty list, is what leaves
+
+        the stored lines alone.'
     PortfolioOut:
       properties:
         as_of:
@@ -8208,3 +8894,17 @@ components:
       - msg
       - type
       title: ValidationError
+    YtdKindTotal:
+      properties:
+        kind:
+          type: string
+          title: Kind
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+      type: object
+      required:
+      - kind
+      - amount
+      title: YtdKindTotal

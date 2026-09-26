@@ -558,3 +558,61 @@ def test_0012_adds_display_name_nullable_and_touches_nothing_else(scratch_db):
         assert conn.execute(
             "SELECT display_name FROM account_connections"
         ).fetchall() == [(None,)]
+
+
+# ---- 0013: owner_income_profiles, paystubs, paystub_lines -------------------
+
+
+def test_0013_adds_the_income_tables_with_rls_and_touches_nothing_else(scratch_db):
+    """Purely additive — three new tables nothing references yet — so the only
+    thing to prove is that they arrive RLS-protected and the rest of the
+    database is untouched, both ways."""
+    _alembic(scratch_db, "upgrade", "0012")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from today's metadata, so undo the tables to be the shape
+        # an install on 0012 actually has.
+        conn.execute("DROP TABLE IF EXISTS paystub_lines")
+        conn.execute("DROP TABLE IF EXISTS paystubs")
+        conn.execute("DROP TABLE IF EXISTS owner_income_profiles")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0013")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        for table in ("owner_income_profiles", "paystubs", "paystub_lines"):
+            assert _has_table(conn, table)
+            assert conn.execute(
+                "SELECT relrowsecurity FROM pg_class WHERE relname = %s", (table,)
+            ).fetchone()[0], table
+        assert _fingerprint(conn) == before
+
+        # What the API would now write: a profile, a paystub with lines.
+        conn.execute(
+            "INSERT INTO owner_income_profiles (household_id, owner_id, currency, "
+            "annual_gross_income, pay_frequency) VALUES (%s, %s, 'USD', 120000, 'biweekly')",
+            (hid, owner),
+        )
+        pay_id = conn.execute(
+            "INSERT INTO paystubs (household_id, owner_id, pay_date, currency, gross, net) "
+            "VALUES (%s, %s, '2026-09-15', 'USD', 4615.38, 3400.00) RETURNING id",
+            (hid, owner),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO paystub_lines (household_id, paystub_id, kind, label, amount, "
+            "position) VALUES (%s, %s, 'earning', 'Salary', 4615.38, 0)",
+            (hid, pay_id),
+        )
+
+    _alembic(scratch_db, "downgrade", "0012")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        for table in ("owner_income_profiles", "paystubs", "paystub_lines"):
+            assert not _has_table(conn, table)
+        assert _fingerprint(conn) == before
+
+    # And back up again: the shape-detecting create is safe to re-run.
+    _alembic(scratch_db, "upgrade", "0013")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "paystub_lines")
