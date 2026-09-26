@@ -18,10 +18,10 @@ import { useConnections } from "@/api/sync";
 import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
-import { isoDay, todayIso } from "@/lib/dates";
-import { netWorthOption } from "@/lib/netWorthChart";
+import { formatDay, isoDay, todayIso } from "@/lib/dates";
+import { brushWindow, netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
-import type { ChartBox } from "@/theme/chartInteraction";
+import { brushEvents, type ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -262,16 +262,46 @@ function NetWorthHero({
   const start = useMemo(() => rangeStart(months), [months]);
   const series = useNetWorthSeries(start, today(), ownerFilter);
   const t = useChartTokens();
-  // A function of the box: this card is 220 px tall, and how many values the
-  // reader is asked to count off its axis follows from that (`valueTicks`).
+  // A function of the box: this card is 260 px tall, of which the line keeps the
+  // top ~140 px on a wide canvas — how many values the reader is asked to count
+  // off its axis follows from that (`valueTicks`).
+  //
+  // This is the card that asks for the brush, because it is the one that can
+  // state the window: a drag reports back through `brushEvents` below and the
+  // headline above re-scopes to the same span. A card that cannot say which
+  // days its figures cover does not draw one.
   const option = useCallback(
-    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box),
+    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box, { brush: true }),
     [series.data, t],
   );
 
   const points = series.data?.points ?? [];
-  const first = points[0];
-  const last = points[points.length - 1];
+  // Which part of the range the chart is showing, as two points of the series.
+  // The brush belongs to the wide layout — a phone canvas draws no strip and no
+  // brush — so this stays `null` there and the headline keeps its own words.
+  //
+  // The window itself is ECharts' state, not React's: a drag sets it inside the
+  // instance and reports it back through `brushEvents`. Clearing this therefore
+  // does not move the window, and the chart would go on showing a span the
+  // headline no longer states — so a range click clears both, and the chart is
+  // re-mounted by the `key` below rather than re-optioned.
+  const [brushed, setBrushed] = useState<[number, number] | null>(null);
+  // Bumped only when there is a window to hand back: a range click with no brush
+  // on screen re-uses the chart instance, as it always did.
+  const [brushReset, setBrushReset] = useState(0);
+  // A window belongs to the points it was drawn on: a new range or a new owner
+  // filter is a different series, and the old indices would name different days.
+  // Anything that no longer fits is dropped rather than clamped — the chart has
+  // been rebuilt for the new range and shows the whole of it.
+  const win = brushed && brushed[1] < points.length ? brushed : null;
+  // Memoised: the wrapper re-binds its handlers when this prop's value changes.
+  const onEvents = useMemo(
+    () => brushEvents((zoom) => setBrushed(zoom ? brushWindow(points, zoom[0], zoom[1]) : null)),
+    [points],
+  );
+
+  const first = win ? points[win[0]] : points[0];
+  const last = win ? points[win[1]] : points[points.length - 1];
   const change = first && last ? Number(last.net_worth) - Number(first.net_worth) : null;
   const ccy = netWorth?.base_currency ?? series.data?.base_currency ?? "USD";
   const rangeWords: Record<RangeId, string> = {
@@ -281,6 +311,10 @@ function NetWorthHero({
     "1y": "over the year",
     all: "since you started",
   };
+  // What the change is *over*. A brush narrows the line to part of the range, and
+  // a headline that still said "over 3 months" would be claiming a figure the
+  // chart above it is not showing.
+  const spanWords = win ? `from ${formatDay(points[win[0]].date)} to ${formatDay(points[win[1]].date)}` : rangeWords[range];
 
   return (
     <section className="rounded-card bg-surface-raised p-4 sm:p-6" data-testid="net-worth" aria-label="Net worth">
@@ -298,24 +332,26 @@ function NetWorthHero({
         >
           <span aria-hidden="true">{change >= 0 ? "▲ " : "▼ "}</span>
           {change >= 0 ? "Up " : "Down "}
-          {formatMoney(Math.abs(change), ccy)} {rangeWords[range]}
+          {formatMoney(Math.abs(change), ccy)} {spanWords}
         </p>
       )}
 
       <div className="mt-4">
         {points.length > 1 ? (
           <Chart
+            key={brushReset}
             option={option}
-            height={220}
+            onEvents={onEvents}
+            height={260}
             testid="accounts-net-worth-chart"
             label={
               change === null
                 ? "Net worth over time"
-                : `Net worth went ${change >= 0 ? "up" : "down"} ${formatMoney(Math.abs(change), ccy)} ${rangeWords[range]}, to ${formatMoney(last.net_worth, ccy)}.`
+                : `Net worth went ${change >= 0 ? "up" : "down"} ${formatMoney(Math.abs(change), ccy)} ${spanWords}, to ${formatMoney(last.net_worth, ccy)}.`
             }
           />
         ) : series.isLoading ? (
-          <div className="flex h-56 items-center justify-center text-sm text-fg-muted">
+          <div className="flex h-64 items-center justify-center text-sm text-fg-muted">
             <Spinner /> Loading your history
           </div>
         ) : (
@@ -341,7 +377,17 @@ function NetWorthHero({
               key={r.id}
               type="button"
               aria-pressed={range === r.id}
-              onClick={() => setRange(r.id)}
+              // A range control states a span, so it takes the brush's own span
+              // away: the window is cleared, and with it the chart instance that
+              // holds it. A new range does both by itself — its option is rebuilt
+              // — but clicking the range already selected has to do it here.
+              onClick={() => {
+                if (brushed) {
+                  setBrushed(null);
+                  setBrushReset((n) => n + 1);
+                }
+                setRange(r.id);
+              }}
               className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-2 text-sm ${
                 range === r.id ? "bg-accent/20 font-medium text-accent-ink" : "text-fg-muted hover:text-fg"
               }`}

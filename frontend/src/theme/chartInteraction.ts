@@ -24,7 +24,7 @@
 // Colours come from `chartTokens()`; nothing here names a colour of its own.
 // See DESIGN.md §2.9 (chart colour) and §2.10 (chart interaction).
 import type { EChartsOption } from "echarts";
-import type { ChartTokens } from "@/theme/chartTokens";
+import { token, type ChartTokens } from "@/theme/chartTokens";
 
 /**
  * How far a non-hovered series fades when another is spotlighted.
@@ -514,5 +514,166 @@ export function emphasisPie(t: ChartTokens) {
     itemStyle: { borderColor: t.surface, borderWidth: 2 },
     scale: true,
     scaleSize: 4,
+  };
+}
+
+/**
+ * A different *measure* sharing the line's grid: no spotlight of its own, but a
+ * legible dim when the series beside it is the one being asked about.
+ *
+ * `disabled` reads like the switch §2.10 warns against, and it is not: there is
+ * no state here to lose, because the resting style already says everything a bar
+ * in this strip has to say. The strip's bars are coloured by their own sign, and
+ * `emphasisBar` states one colour for a whole series — applying it would repaint
+ * a rise as a fall or, at best, as a fourth colour that means nothing.
+ * `blur` still has to be stated: it is what ECharts does to *this* series when
+ * another takes the spotlight, and its own default is low enough to read as
+ * absent (§2.10).
+ *
+ * It takes no tokens, unlike its siblings: there is no colour in it. A
+ * parameter that was accepted and ignored would read as an oversight rather
+ * than as the statement this is.
+ */
+export function emphasisStrip() {
+  return {
+    disabled: true as const,
+    blur: { itemStyle: { opacity: DIM } },
+  };
+}
+
+/** How much of the accent the brush's window is tinted with. Light enough to
+ *  read the day labels through, strong enough to see which span is selected. */
+const BRUSH_FILL = 0.16;
+
+/**
+ * The range brush: ECharts' `dataZoom` slider, at the top of a chart whose
+ * canvas can afford one.
+ *
+ * A slider rather than a drag-on-the-plot (`type: "inside"`): the plot is the
+ * chart's own surface — a drag across it is how a reader taps a point — and a
+ * brush that captured that gesture would make the chart answer "zoom" to a
+ * question about one day. The slider is a control *beside* the data with its own
+ * band, so nothing that used to work stops working.
+ *
+ * It is pointer-only, and that is deliberate: §2.10 says charts are not focusable
+ * and have no keyboard interaction of their own. The brush narrows a view of data
+ * that is already fully readable without it — the page's own range controls are
+ * the operable ones — so nothing is gated behind a gesture.
+ *
+ * `xAxisIndex: [0, 1]` is the part that is easy to miss. A chart with a strip
+ * under its line has two x axes, and a brush that moved only the first would put
+ * the strip's bars over the wrong days.
+ */
+export function rangeBrush(t: ChartTokens, { top, height }: { top: number; height: number }) {
+  return {
+    type: "slider" as const,
+    xAxisIndex: [0, 1],
+    top,
+    height,
+    // The window's tint, the handles, and the ghost of the full series behind
+    // them: the theme's own roles, no colour of this module's own.
+    //
+    // The tint is the one alpha in this module, which is why it is read through
+    // `token()` rather than off `t`: `ChartTokens` holds the solid roles, and a
+    // half-transparent accent is not one of them — adding a twelth field for the
+    // one caller that wants it would put a colour in `chartTokens()` that no
+    // chart paints with.
+    fillerColor: token("accent", BRUSH_FILL),
+    borderColor: t.border,
+    backgroundColor: "transparent",
+    handleStyle: { color: t.surface, borderColor: t.axis, borderWidth: 1 },
+    moveHandleStyle: { color: t.axis, opacity: 0.4 },
+    dataBackground: { lineStyle: { color: t.split }, areaStyle: { color: t.split, opacity: 0.3 } },
+    selectedDataBackground: { lineStyle: { color: t.axis }, areaStyle: { color: t.split } },
+    // The window is stated by the axis under the strip, in days rather than in
+    // timestamps; the handle's own readout would print a raw epoch and sit on top
+    // of the thing being dragged.
+    showDetail: false,
+    // Off, which is *not* ECharts' default for a slider, and the reason is the
+    // target rather than the look. With `brushSelect` on, the library draws a
+    // grip below the band — a three-dot glyph it paints in a colour of its own
+    // that no option here can set — and hangs a drag zone 7 px past the band into
+    // the gap under it. With it off the *window itself* is the drag handle: the
+    // tinted band is draggable the length of the selected span (verified on the
+    // built chart: dragging the band moves the window, dragging either handle
+    // resizes it), which is the same gesture with a target as wide as the span
+    // instead of a 3 px edge. §2.10's charts are pointer-only, so the edges are
+    // for adjusting and the band is for moving.
+    brushSelect: false,
+  };
+}
+
+/**
+ * Link the axis pointers of a chart's grids.
+ *
+ * Two grids are two x axes, and ECharts points at one axis at a time: without
+ * this the crosshair stops at the boundary between the line and the strip, so a
+ * reader tracing a day sees the line marked and the bar under it not. `link` is
+ * the top-level axisPointer component's own key, which is why it is built here
+ * rather than in the option (§2.10: no page writes an axisPointer of its own).
+ */
+export function linkedPointer() {
+  return { axisPointer: { link: [{ xAxisIndex: "all" as const }] } };
+}
+
+/**
+ * An axis that carries the pointer's line and not its chip — for the second of
+ * two grids, where the dates belong to the axis below.
+ *
+ * With `linkedPointer()` the pointer crosses both grids, and each axis draws its
+ * own chip: the line's grid, which shows no day labels, would float a second,
+ * identical date in the middle of the chart. The chip is the *axis's*, so the
+ * suppression is too — stated on the axis that must not draw one, from here,
+ * because §2.10 gives every page the same module for this.
+ *
+ * `label.show` is explicitly true on the axis that keeps its chip (see
+ * `chartTooltip`): ECharts only defaults it on for a `cross` pointer, so the
+ * axis this is *not* applied to has already stated its own.
+ */
+export function pointerLineOnly() {
+  return { axisPointer: { label: { show: false } } };
+}
+
+/**
+ * The window an ECharts `dataZoom` event names, as the two percentages a chart
+ * maps back onto its own points — or `null` if the event carries no window.
+ *
+ * The library's payload is a plain object for a slider drag (the documented
+ * `{ start, end }`, in percent) and a `batch` array when an action dispatched
+ * several zooms at once, so both shapes are read here rather than in each page
+ * that listens. `unknown` in, because an event handler's parameter is the
+ * library's to describe and this is the one place in the app that narrows it.
+ */
+export function zoomWindow(params: unknown): [number, number] | null {
+  const window = (p: unknown): [number, number] | null => {
+    if (!p || typeof p !== "object") return null;
+    const { start, end } = p as { start?: unknown; end?: unknown };
+    return typeof start === "number" &&
+      typeof end === "number" &&
+      Number.isFinite(start) &&
+      Number.isFinite(end)
+      ? [start, end]
+      : null;
+  };
+  if (Array.isArray(params)) return params.length ? window(params[0]) : null;
+  const batch = (params as { batch?: unknown } | null)?.batch;
+  if (Array.isArray(batch)) return batch.length ? window(batch[0]) : null;
+  return window(params);
+}
+
+/**
+ * The event map for `Chart`'s `onEvents`, for a chart with a brush: the handler
+ * is called with the window the brush is showing, in the percentages a chart
+ * maps back onto its own points.
+ *
+ * The event's *name* is the reason this is here rather than in the page. §2.10
+ * gives the pages one module for chart interaction, and the string ECharts
+ * listens for is part of that vocabulary — a page that wrote `dataZoom` itself
+ * could as easily have written its own `tooltip`, and the next chart would spell
+ * it `datazoom` and quietly never fire.
+ */
+export function brushEvents(handler: (window: [number, number] | null) => void) {
+  return {
+    dataZoom: (params: unknown) => handler(zoomWindow(params)),
   };
 }

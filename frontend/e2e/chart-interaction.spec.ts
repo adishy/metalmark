@@ -135,6 +135,44 @@ async function hoverAt(
 const centre = (b: Box) => [b.x + b.width / 2, b.y + b.height / 2] as [number, number];
 
 /**
+ * Where the brush band starts, as an x on the page.
+ *
+ * The band is drawn across the top of the canvas and begins where the plot does,
+ * so the leftmost column of ink in the band's own rows *is* its edge, and the
+ * handle is centred on it. Read from the canvas rather than assumed: the gutter
+ * is a reserved width that follows the value labels, and a test that hardcoded
+ * it would point at empty space the next time a label got wider — which is a
+ * test that passes by dragging nothing.
+ *
+ * The band's height is `BRUSH_H` in `lib/netWorthChart.ts` (20 css px at the top
+ * of the canvas); the row range is scaled to the canvas's backing store.
+ */
+async function bandLeft(
+  page: import("@playwright/test").Page,
+  testid: string,
+): Promise<number> {
+  const el = page.getByTestId(testid);
+  await el.scrollIntoViewIfNeeded();
+  const box = await el.boundingBox();
+  if (!box) throw new Error(`${testid} has no bounding box`);
+
+  const found = await el.locator("canvas").first().evaluate((c: HTMLCanvasElement) => {
+    const ctx = c.getContext("2d");
+    if (!ctx) return null;
+    const rows = Math.max(1, Math.round((20 / c.clientHeight) * c.height));
+    const { data } = ctx.getImageData(0, 0, c.width, rows);
+    for (let x = 0; x < c.width; x++) {
+      for (let y = 0; y < rows; y++) {
+        if (data[(y * c.width + x) * 4 + 3] > 8) return { x, width: c.width };
+      }
+    }
+    return null;
+  });
+  if (!found) throw new Error(`${testid} drew no brush band`);
+  return box.x + (found.x / found.width) * box.width;
+}
+
+/**
  * A point on the donut's ring, not in its hole.
  *
  * The ring runs from 45% to 70% of the smaller dimension, centred at (50%, 45%);
@@ -202,6 +240,61 @@ test("cash flow: the legend spotlights a series without erasing the rest", async
   // The legend must genuinely dim the other series. Measured at full strength,
   // because dimming leaves the pixels in place — see `pixelsAbove`.
   expect(dimmest, `legend hover dimmed nothing: stayed at ${rest}`).toBeLessThan(rest * 0.8);
+});
+
+/**
+ * The range brush has to re-scope the whole card, not just the picture.
+ *
+ * The window lives inside the ECharts instance (a drag is the library's state,
+ * not React's), so the headline above the chart is what makes it real: it has to
+ * name the same days the plot is showing. A brush that moved the plot while the
+ * headline went on stating "over 3 months" is the failure this exists for — and
+ * the range button is how a reader gives the window back, which only works if a
+ * click on it also clears the window (the chart is re-mounted for it; see the
+ * `brushReset` epoch in `Accounts.tsx`).
+ */
+test("net worth: the range brush re-scopes the headline, and the range gives it back", async ({
+  page,
+}) => {
+  await page.goto("/accounts");
+  const chart = page.getByTestId("accounts-net-worth-chart");
+  await chart.scrollIntoViewIfNeeded();
+  await expect(chart).toBeVisible();
+  await page.waitForTimeout(1600); // the entry animation, then quiet
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("accounts-net-worth-chart has no bounding box");
+
+  const headline = page.getByTestId("net-worth-change");
+  const whole = await headline.textContent();
+  expect(whole, "the card should start on the whole range").toContain("over 3 months");
+
+  // The brush is the band across the top of the canvas. The window opens on the
+  // whole range, where a *translation* has nowhere to go — so the gesture that
+  // narrows it is a pull on the left handle, which sits on the band's edge.
+  const band = box.y + 10;
+  const from = await bandLeft(page, "accounts-net-worth-chart");
+  await page.mouse.move(from + 3, band);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.45, band, { steps: 12 });
+  await page.mouse.up();
+
+  const brushed = await headline.textContent();
+  expect(brushed, "the brush did not narrow the window").not.toBe(whole);
+  // The window's own words: two named days, in the same sentence the range uses.
+  expect(brushed).toMatch(/ from [A-Z][a-z]{2} \d{2} to [A-Z][a-z]{2} \d{2}$/);
+
+  // Choosing the range it is already on is how a reader takes the window back,
+  // and it has to restore the headline the card opened with.
+  await page.getByTestId("net-worth-range-3m").click();
+  await expect(headline).toContainText("over 3 months");
+
+  // A drag across the plot is *not* a brush: that is where the pointer reads a
+  // point, which is the gesture the tooltip and tap-to-tooltip are built on.
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5, { steps: 12 });
+  await page.mouse.up();
+  await expect(headline).toContainText("over 3 months");
 });
 
 /**

@@ -38,12 +38,28 @@ export default function Chart({
   label,
   height = 280,
   testid,
+  onEvents,
 }: {
   option: EChartsOption | ((box: ChartBox) => EChartsOption);
   /** The finding, in a sentence. Read aloud in place of the canvas. */
   label: string;
   height?: number;
   testid?: string;
+  /**
+   * ECharts' own events, as `echarts-for-react` takes them: one handler per
+   * event name (`dataZoom`, `legendselectchanged`). The parameter is the
+   * library's payload — `unknown`, so each handler narrows what it reads
+   * (`zoomWindow()` in `theme/chartInteraction.ts` does that narrowing for the
+   * one event this app listens to).
+   *
+   * **Memoise it at the call site.** The wrapper compares this prop by value on
+   * every update and corrects the bindings when it differs: an object literal of
+   * fresh arrow functions is a different value on every render, so the handler
+   * would be unbound and rebound each time. That is not a leak — the library
+   * unbinds by name — but it is churn the chart does not need, and the same
+   * `useMemo`/`useCallback` the options already use costs one line.
+   */
+  onEvents?: Record<string, (params: unknown, instance: unknown) => void>;
 }) {
   const { resolved } = useTheme();
   const reduced = useReducedMotion();
@@ -120,6 +136,7 @@ export default function Chart({
           style={{ height, touchAction: "pan-y" }}
           opts={{ renderer: "canvas" }}
           notMerge
+          onEvents={onEvents}
         />
       )}
     </div>
