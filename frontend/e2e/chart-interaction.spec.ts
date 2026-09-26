@@ -203,3 +203,76 @@ test("cash flow: the legend spotlights a series without erasing the rest", async
   // because dimming leaves the pixels in place — see `pixelsAbove`.
   expect(dimmest, `legend hover dimmed nothing: stayed at ${rest}`).toBeLessThan(rest * 0.8);
 });
+
+/**
+ * A chart's entry animation plays **once**.
+ *
+ * The complaint this pins: "charts blink twice when it loads instead of loading
+ * a smooth animation". It was real, and `Chart.tsx` carries the trace — the box
+ * is measured one render after the chart mounts, the option is a function of that
+ * measurement, and the library's `echarts.init` is asynchronous, so the second
+ * option landed on the throwaway instance `echarts-for-react` builds and discards.
+ * That instance's animation *finished* was the signal to dispose it, so the real
+ * instance then animated the same data in from nothing: two complete entry
+ * animations, and a canvas wiped clean between them.
+ *
+ * Counting animations is not something the option can be asked about, so this
+ * measures the symptom directly. `pixelsAbove` already reads "how much chart is on
+ * screen" for the hover tests; sampled frame by frame through the entrance, the
+ * defective version is unmistakable — ink climbs to the full 35,785 px, falls to
+ * 1,788 (5% of the peak) and climbs again. A single animation is monotonic until
+ * it settles.
+ *
+ * The recorder is installed with `addInitScript`, so it is running before the app
+ * renders and catches the very first frame the canvas exists. Reading `max` from
+ * the same samples is what makes the bound honest: the peak is this run's own peak,
+ * not a constant that a different viewport or dataset would invalidate.
+ */
+test("net worth: the entry animation plays once, with no blink", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __inkSamples: number[] };
+    w.__inkSamples = [];
+    const tick = () => {
+      const canvas = document.querySelector<HTMLCanvasElement>(
+        '[data-testid="accounts-net-worth-chart"] canvas',
+      );
+      if (canvas && canvas.width > 0) {
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          let drawn = 0;
+          for (let i = 3; i < data.length; i += 4) if (data[i] > 8) drawn++;
+          w.__inkSamples.push(drawn);
+        }
+      }
+      if (w.__inkSamples.length < 400) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+  await page.goto("/accounts");
+  await expect(page.getByTestId("accounts-net-worth-chart")).toBeVisible();
+  await page.waitForTimeout(2500);
+
+  const samples = await page.evaluate(
+    () => (window as unknown as { __inkSamples: number[] }).__inkSamples,
+  );
+  expect(samples.length, "no frame of the chart was sampled").toBeGreaterThan(10);
+
+  const peak = Math.max(...samples);
+  expect(peak, "the chart never drew anything").toBeGreaterThan(1000);
+  const peakAt = samples.indexOf(peak);
+  expect(peakAt, "the chart was already at rest when sampling began").toBeGreaterThan(0);
+
+  // Everything from the peak on. An entry animation ramps up and stays there; a
+  // *second* animation ramps up, is wiped, and ramps up again — so the samples
+  // after the first peak are where the two are told apart. Bounded below the peak
+  // rather than above zero, because the ramp's own early frames are legitimately
+  // near empty and a floor of "> 0" would pass on a chart that never drew at all.
+  const floor = Math.min(...samples.slice(peakAt));
+  expect(
+    floor,
+    `the chart was wiped and redrawn after it had finished loading — the peak was ` +
+      `${peak} px and the canvas later fell to ${floor} (the entry animation ran twice)`,
+  ).toBeGreaterThan(peak * 0.9);
+});
