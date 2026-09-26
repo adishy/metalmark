@@ -6,12 +6,26 @@ import { login } from "./helpers";
 // horizontally, and a transactions screen wider than the phone. Both are
 // failures of the same rule, so one test holds every route to it at the two
 // widths DESIGN.md §5 names.
+// ROUTES is every page a phone can reach, plus the redirects it can arrive
+// through. `/insights` itself redirects to Overview, and `/reports` is kept
+// deliberately as the legacy-redirect case: Insights' old address, which a
+// bookmark still hits, and whose redirect has no more licence to spill
+// sideways than a real page does.
+//
+// The Insights tabs are the union of the branches that carry them:
+// `/insights/allocations` renders the placeholder on `feat/recurring` and the
+// real tab on `feat/insights-allocations` (stacked on it) — so whichever of
+// the two lands last leaves this list holding the full coverage rather than
+// losing a tab to the merge.
 const ROUTES = [
   "/accounts",
   "/transactions",
   "/review",
+  "/insights",
   "/insights/overview",
   "/insights/allocations",
+  "/insights/recurring",
+  "/reports",
   "/settings",
   "/admin",
 ];
