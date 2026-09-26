@@ -149,3 +149,5 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0050](0050-a-stalled-bank-is-shown-not-silent.md) | A stalled bank is shown, not silent | Accepted |
 | [0051](0051-sync-lands-the-banks-holdings.md) | Sync lands the bank's holdings as positions | Accepted |
 | [0052](0052-owner-income-and-paystubs.md) | Owner income profile and paystubs, as lines that keep a kind | Accepted |
+| [0054](0054-allocation-counts-bank-cash.md) | Allocation counts bank cash | Accepted |
+| [0056](0056-a-split-is-exact-in-both-modes.md) | A split is exact in both modes | Accepted |

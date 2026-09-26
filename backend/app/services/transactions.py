@@ -350,6 +350,15 @@ async def delete_transaction(session: AsyncSession, txn_id: uuid.UUID) -> None:
 #: split is final" a provenance lookup rather than a new mechanism.
 SPLITS_FIELD = "splits"
 
+#: How far a pct set's weights may sit from 100 and still be the set the user
+#: meant (ADR-0056). Percentages arrive as typed decimals, and a UI offering three
+#: equal thirds sends 33.33 three times — 99.99 — so an exact test would refuse the
+#: most ordinary three-way split there is. ``allocate`` divides by the weight sum,
+#: so a set inside this window still splits the parent in the proportions the user
+#: meant; what the window must *not* admit is a typo. A sum of 60 or 250 is a
+#: different split, not a rounding of this one, and both are far outside 0.01.
+PCT_SUM_TOLERANCE = Decimal("0.01")
+
 
 async def ensure_splits_loaded(session: AsyncSession, txn: Transaction) -> None:
     """Load ``txn.splits`` if whoever fetched the row did not.
@@ -400,12 +409,44 @@ async def set_splits(
         return
 
     await require_owners(session, [s.owner_id for s in splits])
-    use_pct = any(s.pct is not None for s in splits)
-    if use_pct:
-        if not all(s.pct is not None for s in splits):
-            raise LedgerError("Mix of pct and amount splits is not allowed", 400)
-        weights = [s.pct for s in splits]
-        native = allocate(txn.amount, weights, currency=txn.currency)
+
+    # Which mode the set is in is a property of the *set*, and a leg carries one
+    # share or the other, never both — the same rule ``RuleSplitLeg`` states for a
+    # rule's legs, and the only reading under which neither number is ignored. The
+    # test this replaces was ``any(s.pct is not None)``, under which a single leg
+    # carrying both fields switched the whole set to pct mode and every *other*
+    # leg's ``amount`` was dropped on the floor; its twin, an all-amount set where
+    # one leg also carried a stray pct, went the wrong way for the same reason.
+    # Neither is recoverable by guessing — a leg with two shares has no reading
+    # that honours both — so the leg is refused and the caller is told.
+    shares = [(s.amount is not None, s.pct is not None) for s in splits]
+    if any(has_amount and has_pct for has_amount, has_pct in shares):
+        raise LedgerError("A split leg takes an amount or a pct, never both", 400)
+    if any(not has_amount and not has_pct for has_amount, has_pct in shares):
+        # Reachable from the API, where a leg with neither field is a well-formed
+        # body; it used to reach ``sum()`` and raise TypeError, i.e. a 500.
+        raise LedgerError("Every split leg needs an amount or a pct", 400)
+    # Every leg now carries exactly one shape, so one flag per leg decides the
+    # set's mode — and a set that disagrees with itself is refused rather than
+    # read as whichever mode the first leg happened to be in.
+    modes = {s.pct is not None for s in splits}
+    if len(modes) > 1:
+        raise LedgerError("Mix of pct and amount splits is not allowed", 400)
+
+    if modes == {True}:
+        pcts = [s.pct for s in splits]
+        if any(p is not None and p <= 0 for p in pcts):
+            raise LedgerError("Split percentages must be greater than 0", 400)
+        # The amount branch below is exact and this one is not, deliberately: an
+        # amount is a number the user typed and can be added up to the cent, while
+        # a percentage is a share and the tolerance is what the arithmetic of a
+        # round hundred allows (see PCT_SUM_TOLERANCE). The sum is named in the
+        # message because "must sum to 100" without it leaves the user hunting for
+        # which leg moved.
+        total = sum(pcts, Decimal(0))
+        if abs(total - 100) > PCT_SUM_TOLERANCE:
+            raise LedgerError(f"Split percentages must sum to 100, got {total}", 400)
+        native = allocate(txn.amount, pcts, currency=txn.currency)
     else:
         native = [s.amount for s in splits]
         if sum(native, Decimal(0)) != txn.amount:

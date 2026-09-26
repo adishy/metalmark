@@ -462,12 +462,174 @@ async def test_split_base_allocation_no_drift(household_factory):
         assert parent.base_amount is not None
 
         result = await txns.replace_splits(s, txn.id, [
-            SplitIn(pct=D("1")), SplitIn(pct=D("1")), SplitIn(pct=D("1")),
+            SplitIn(pct=D("25")), SplitIn(pct=D("25")), SplitIn(pct=D("50")),
         ])
         native_sum = sum((sp.amount for sp in result.splits), Decimal(0))
         base_sum = sum((sp.base_amount for sp in result.splits), Decimal(0))
     assert native_sum == D("-100.0000")
     assert base_sum == parent.base_amount  # exact, no convert-then-round drift
+
+
+async def _split_parent(session, hh, amount=D("-100"), currency="USD"):
+    acct = await ledger.create_account(
+        session, hh, AccountCreate(name="Checking", type="depository", currency=currency))
+    return await txns.create_transaction(session, hh, TransactionCreate(
+        account_id=acct.id, amount=amount, transacted_at=_dt(2026, 1, 5)))
+
+
+@pytest.mark.parametrize("pcts", [("60",), ("50", "60"), ("90", "20"), ("40", "20", "20")])
+async def test_split_percentages_must_sum_to_100(household_factory, pcts):
+    """``allocate`` divides by the weight sum, so an unvalidated set is not
+    refused — it silently allocates 100% of the parent in the wrong proportions,
+    and 60 and 110 both look like a working split to every report downstream."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh)
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [SplitIn(pct=D(p)) for p in pcts])
+        assert exc.value.status == 400
+        # The message names the sum, so the user can see which way the set is off
+        # without re-adding their own numbers.
+        assert str(sum(D(p) for p in pcts)) in str(exc.value)
+        after = await txns.get_transaction(s, txn.id)
+    assert after.splits == [] and after.is_split_parent is False
+
+
+async def test_a_pct_above_100_still_cannot_be_part_of_a_whole(household_factory):
+    """``SplitIn.pct`` bounds a leg at 100, so this leg cannot arrive over the API
+    — but the service is what every other caller goes through, and the sum rule
+    has to hold there too (ADR-0056 §3-4)."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh)
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [
+                SplitIn.model_construct(pct=D("150")),
+                SplitIn.model_construct(pct=D("50")),
+            ])
+        assert exc.value.status == 400
+        assert "got 200" in str(exc.value)
+
+
+async def test_split_percentages_inside_the_tolerance_still_sum_to_the_parent(household_factory):
+    """Three equal thirds typed as decimals come to 99.99, and that is the split
+    the user meant. ``allocate`` normalises by the weight sum, so the legs land in
+    the right proportions *and* still sum exactly to the parent (ADR-0056)."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh, amount=D("-100"))
+        result = await txns.replace_splits(s, txn.id, [
+            SplitIn(pct=D("33.33")), SplitIn(pct=D("33.33")), SplitIn(pct=D("33.33")),
+        ])
+        # 33.33 three times cannot reach 100, so the rounding cent lands on one leg
+        # (``allocate``'s rule: the largest) and the set is still exact.
+        amounts = [sp.amount for sp in result.splits]
+    assert sorted(amounts) == [D("-33.3400"), D("-33.3300"), D("-33.3300")]
+    assert sum(amounts, Decimal(0)) == D("-100.0000")
+
+
+async def test_split_percentage_must_be_positive(household_factory):
+    """A non-positive share is not a share: a zero leg moves nothing and a negative
+    one points the wrong way, which ADR-0018 models as a transfer, not a split.
+
+    The leg is built with ``model_construct`` on purpose — ``SplitIn`` bounds
+    ``pct`` at the schema too, and this asserts the service's own check, which is
+    the one every caller passes through (ADR-0056 §3).
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh)
+        for bad in (D("-20"), D("0")):
+            with pytest.raises(LedgerError) as exc:
+                await txns.replace_splits(s, txn.id, [
+                    SplitIn.model_construct(pct=bad),
+                    SplitIn.model_construct(pct=D("100") - bad),
+                ])
+            assert exc.value.status == 400
+            assert "greater than 0" in str(exc.value)
+        after = await txns.get_transaction(s, txn.id)
+    assert after.splits == []
+
+
+def test_split_pct_schema_rejects_out_of_range_shares():
+    """The per-leg half of the same invariant, refused before the service is
+    reached — and the reason a ``pct`` outside ``0 < p <= 100`` never arrives."""
+    from pydantic import ValidationError
+
+    for bad in (D("-1"), D("0"), D("100.01")):
+        with pytest.raises(ValidationError):
+            SplitIn(pct=bad)
+    assert SplitIn(pct=D("100")).pct == D("100")  # a lone leg may take all of it
+
+
+async def test_split_leg_carries_an_amount_or_a_pct_never_both(household_factory):
+    """One leg carrying both used to decide the mode for the whole set, and every
+    *other* leg's ``amount`` was dropped without a word — accepted, stored, and
+    never read again. The leg is refused instead, because neither number can be
+    honoured over the other and the caller has a bug worth hearing about."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh)
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [
+                SplitIn(amount=D("-40"), pct=D("40")),
+                SplitIn(amount=D("-60")),
+            ])
+        assert exc.value.status == 400
+        assert "never both" in str(exc.value)
+
+        # The all-amount set with one stray pct — the other direction the old
+        # ``any(...)`` went wrong — is the same refusal, not a silent re-mode.
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [
+                SplitIn(amount=D("-40")), SplitIn(amount=D("-40"), pct=D("60")),
+            ])
+        assert exc.value.status == 400
+
+        # And a genuine mix, one leg of each shape, is refused too: the mode is a
+        # property of the set, and there is no set with two modes.
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [
+                SplitIn(amount=D("-40")), SplitIn(pct=D("60")),
+            ])
+        assert exc.value.status == 400
+        assert "Mix of pct and amount" in str(exc.value)
+        after = await txns.get_transaction(s, txn.id)
+    assert after.splits == [] and after.is_split_parent is False
+
+
+async def test_split_leg_with_neither_field_is_a_400_not_a_500(household_factory):
+    """A leg with no share at all is a well-formed API body. It used to reach
+    ``sum()`` with a ``None`` in the list and come back as a TypeError."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh)
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [SplitIn(amount=D("-40")), SplitIn()])
+        assert exc.value.status == 400
+        assert "needs an amount or a pct" in str(exc.value)
+
+
+async def test_an_amount_set_that_is_a_cent_out_is_refused(household_factory):
+    """The amount branch is exact, and says so in its message. The split sheet's
+    own "balanced" gate used to allow half a cent of drift, so a set the UI
+    called balanced came back as this 400 — the two rules are one rule
+    (ADR-0056), and the client now applies this one."""
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        txn = await _split_parent(s, hh, amount=D("-0.30"))
+        with pytest.raises(LedgerError) as exc:
+            await txns.replace_splits(s, txn.id, [
+                SplitIn(amount=D("-0.15")), SplitIn(amount=D("-0.149")),
+            ])
+        assert exc.value.status == 400
+        assert "must sum to the transaction amount" in str(exc.value)
+        # Within a cent is still exact-or-nothing: the same set written to the
+        # cent is accepted, and allocates to the parent exactly.
+        ok = await txns.replace_splits(s, txn.id, [
+            SplitIn(amount=D("-0.15")), SplitIn(amount=D("-0.15")),
+        ])
+    assert sum((sp.amount for sp in ok.splits), Decimal(0)) == D("-0.3000")
 
 
 async def test_transfer_excluded_from_cash_flow(household_factory):
@@ -687,7 +849,7 @@ async def test_moving_a_split_parent_reallocates_child_base_amounts(household_fa
         txn = await txns.create_transaction(s, hh, TransactionCreate(
             account_id=acct.id, amount=D("-100"), transacted_at=_dt(2026, 1, 5)))
         parent = await txns.get_transaction(s, txn.id)
-        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("1")), SplitIn(pct=D("1"))])
+        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("50")), SplitIn(pct=D("50"))])
         base_on_the_5th = parent.base_amount
 
         await txns.update_transaction(

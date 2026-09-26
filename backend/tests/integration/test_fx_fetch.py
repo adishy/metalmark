@@ -228,7 +228,7 @@ async def test_a_rate_that_arrives_later_reaches_split_children(household_factor
         txn = await txns.create_transaction(s, hid, TransactionCreate(
             account_id=acct.id, amount=D("-100"),
             transacted_at=datetime(2026, 3, 2, 12, tzinfo=UTC)))
-        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("1")), SplitIn(pct=D("3"))])
+        await txns.replace_splits(s, txn.id, [SplitIn(pct=D("25")), SplitIn(pct=D("75"))])
         parent = await txns.get_transaction(s, txn.id)
         assert [sp.base_amount for sp in parent.splits] == [None, None]
     await _run(hid, [], {"RON": D("4")})
