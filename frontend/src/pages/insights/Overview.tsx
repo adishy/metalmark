@@ -63,6 +63,23 @@ function bucketLabels(
   return data?.points.map((p) => formatBucket(p.date, data.granularity)) ?? [];
 }
 
+/**
+ * How big the donut's centre figure is set.
+ *
+ * The hole's width is a fact of the canvas — `radius: 45%` of a 310 × 280 phone
+ * chart leaves about 126 px across — and an amount's width is a fact of the
+ * figure: "$5,063.70" is nine characters, "$1,234,567.89" is thirteen and would
+ * run over the ring. §6.5 says never round a figure to make it fit, and the
+ * alternative it names is to shrink the type, so the *size* is chosen from the
+ * string rather than the string being cut short. `text-base` is the floor for an
+ * amount (§2.4), and the returned names are literals so Tailwind keeps them.
+ */
+function centreSize(amount: string): string {
+  if (amount.length <= 9) return "text-xl";
+  if (amount.length <= 13) return "text-lg";
+  return "text-base";
+}
+
 export default function Overview() {
   const range = useReportRange();
   const owners = useOwners();
@@ -548,7 +565,27 @@ export default function Overview() {
         ) : (
           <>
             {hasSpending ? (
-              <Chart option={donutOption} label={donutLabel} testid="spending-donut" />
+              <div className="relative">
+                <Chart option={donutOption} label={donutLabel} testid="spending-donut" />
+                {/* The hole in the ring is the one part of the chart carrying
+                    nothing, and the total is the figure the picture is about.
+                    DOM text over the canvas rather than a canvas `graphic`
+                    (§2.9): it is real text for a screen reader, it is selectable,
+                    and it takes its colour from the tokens — so a theme flip
+                    repaints it with no second palette to keep in step.
+                    `top-[45%]` is the pie's own `center` y, so the two cannot
+                    drift apart; `pointer-events-none` keeps it out of the
+                    chart's own tap handling. */}
+                <div
+                  className="pointer-events-none absolute left-1/2 top-[45%] -translate-x-1/2 -translate-y-1/2 text-center"
+                  data-testid="spending-total"
+                >
+                  <p className="text-sm text-fg-muted">Total</p>
+                  <p className={`font-semibold tabular-nums ${centreSize(formatMoney(spendTotal, ccy))}`}>
+                    {formatMoney(spendTotal, ccy)}
+                  </p>
+                </div>
+              </div>
             ) : (
               <p className="text-sm text-fg-muted">No spending in range.</p>
             )}

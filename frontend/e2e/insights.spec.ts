@@ -44,6 +44,16 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await expect(page.getByTestId("sankey-attribution")).toBeHidden();
   await expect(page.getByTestId("spending-attribution")).toBeHidden();
 
+  // The donut's centre figure (§2.9) is DOM text, not canvas pixels — which is
+  // exactly what makes it checkable here, and why it is an element over the chart
+  // rather than a canvas `graphic`. It has to be the sum of the rows printed
+  // beside it, or the ring's hole says something the list does not.
+  const centre = page.getByTestId("spending-total");
+  await expect(centre).toBeVisible();
+  const spendRows = page.getByTestId("report-spending").locator("ul").first().locator("li");
+  const rowSum = (await spendRows.allTextContents()).reduce((a, row) => a + parseMoney(row), 0);
+  expect(parseMoney((await centre.textContent()) ?? "")).toBeCloseTo(rowSum, 2);
+
   // The graph's text equivalent, which is the part a canvas cannot carry (§2.9):
   // both sides listed with a total each, and both totals the same figure — the
   // property the picture is drawn on, asserted where a reader can see it.

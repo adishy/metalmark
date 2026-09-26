@@ -415,13 +415,21 @@ The mapping, per chart:
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
-Three further chart rules:
+Four further chart rules:
 
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
   category + amount under the spending donut (already correct in `insights/Overview.tsx` —
   it is now required, not incidental), and give the `<Chart>` wrapper
   `role="img"` with an `aria-label` that states the finding.
+- **A ring states its total in its own centre.** A donut's hole is the one piece of
+  space on the chart that carries nothing, and the figure the ring is *about* — what
+  the slices add up to — is otherwise only in the `aria-label` and the `<ul>`. It is
+  **DOM text over the canvas**, not a canvas `graphic` and not a second pie series:
+  real text is selectable and readable to assistive technology, and it takes its
+  colour from the tokens, so a theme flip repaints it with nothing to keep in step.
+  A figure too long for the hole steps **down** the type scale (§6.5 — shrink the
+  type, never round it in the display), floored at `text-base font-semibold`.
 - **Re-render on theme change.** `ReactECharts` will not notice a CSS variable
   change. Key the chart on the resolved theme (`key={theme}`) so it re-mounts.
 - **Colour is a secondary channel in charts too** — the cash-flow chart's income and
