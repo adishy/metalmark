@@ -35,6 +35,10 @@ async function sidewaysOffenders(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
     const vw = document.documentElement.clientWidth;
+    // The page's own width is never exempt — a sanctioned region still may not
+    // push the document wide, and this is the check that catches it when one
+    // does (a positioned descendant escaping the region, as the jobs card once
+    // did before it was given `relative`).
     if (document.documentElement.scrollWidth > vw + 1) {
       out.push(`page scrollWidth ${document.documentElement.scrollWidth} > ${vw}`);
     }
@@ -46,6 +50,13 @@ async function sidewaysOffenders(page: Page): Promise<string[]> {
       if (el.closest("canvas, svg")) continue;
       // The one strip allowed to swipe (DESIGN §5), and whatever it holds.
       if (el.closest("[data-scroll-x-ok]")) continue;
+      // DESIGN §5's other exception: a data table whose columns are the point,
+      // kept in a labelled scroll region (§4.7). It covers the table, what the
+      // table holds, and the region that scrolls it — the table is the whole of
+      // the exemption, so a labelled region with no table in it is still an
+      // offender. (The `closest` below matches the region itself too.)
+      const region = el.closest('[role="region"][aria-label]');
+      if (region && region.querySelector("table")) continue;
       const scrolls = /(auto|scroll)/.test(style.overflowX);
       if (scrolls && el.scrollWidth > el.clientWidth + 1) {
         out.push(`scrolls sideways: ${el.tagName.toLowerCase()}${el.dataset.testid ? `[${el.dataset.testid}]` : ""} ${el.scrollWidth}>${el.clientWidth}`);
