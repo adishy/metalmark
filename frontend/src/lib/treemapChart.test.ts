@@ -29,8 +29,25 @@ const ROWS = [
   { key: "sec-short", label: "SHORT", value_base: "-1000.0000", percent: "-3.3333", holdings: 1, sources: [] },
 ] as unknown as AllocationRow[];
 
-/** The same shape under `group by account`, where the names are long. */
-const ACCOUNTS = [
+/**
+ * The same rows with the figures the server actually sends.
+ *
+ * `percent` is `value_base / total_base` (`services/investments.py`), so the six
+ * shares sum to 100 over all six rows and the short's is negative — and the five
+ * tiles sum to $29,990.00 while the allocation's total is $28,990.00. That gap is
+ * the whole point of the fixture: it is where a share of the allocation and a
+ * share of the ink stop being the same number.
+ */
+const CONSISTENT = [
+  { key: "cash", label: "Cash", value_base: "12000.0000", percent: "41.3936", holdings: 2, sources: [] },
+  { key: "sec-vti", label: "VTI", value_base: "9000.0000", percent: "31.0452", holdings: 1, sources: [] },
+  { key: "sec-bnd", label: "BND", value_base: "6000.0000", percent: "20.6968", holdings: 1, sources: [] },
+  { key: "sec-aapl", label: "AAPL", value_base: "2990.0000", percent: "10.3139", holdings: 1, sources: [] },
+  { key: "sec-dust", label: "DUST", value_base: "10.0000", percent: "0.0345", holdings: 1, sources: [] },
+  { key: "sec-short", label: "SHORT", value_base: "-1000.0000", percent: "-3.4495", holdings: 1, sources: [] },
+] as unknown as AllocationRow[];
+
+/** The same shape under `group by account`, where the names are long. */const ACCOUNTS = [
   { key: "acc-1", label: "Report Acct 1790445900682", value_base: "18000", percent: "60", holdings: 3, sources: [] },
   { key: "acc-2", label: "Report Acct 1790449427616", value_base: "9000", percent: "30", holdings: 2, sources: [] },
   { key: "acc-3", label: "Brokerage", value_base: "2900", percent: "9.67", holdings: 1, sources: [] },
@@ -180,10 +197,41 @@ describe("treemapFinding", () => {
   it("states the total, the count, the largest by name, and what it left out", () => {
     const finding = treemapFinding(treemapData(ROWS), "29290.0000", "security", "Sep 20", "USD");
     expect(finding).toContain("Allocation by security, as of Sep 20");
-    // The figure is the allocation's own total, not a sum taken here.
-    expect(finding).toContain("$29,290.00 across 5 groups");
+    // The figure is the allocation's own total, not a sum taken here — and the
+    // count is the six rows that total is made of, of which five are drawn.
+    expect(finding).toContain("$29,290.00 across 6 groups, 5 of them drawn");
     expect(finding).toContain("Cash is the largest at $12,000.00 (40.0%)");
     expect(finding).toContain("SHORT (−$1,000.00)");
+  });
+
+  it("counts the groups the total is made of, and says how many of them it drew", () => {
+    // Six rows and one total: five with area, and the short the picture cannot
+    // draw. A count of the tiles alone would be a sentence whose own figures do
+    // not add up to the total in front of them — the five tiles sum to $29,990
+    // while the allocation is $28,990 — so the count is the rows the total is
+    // made of, and the sentence says how much of that count is in the picture.
+    const finding = treemapFinding(treemapData(CONSISTENT), "28990.0000", "security", "Sep 20", "USD");
+    expect(finding).toContain("$28,990.00 across 6 groups, 5 of them drawn");
+    expect(finding).toContain("SHORT (−$1,000.00)");
+  });
+
+  it("says nothing about drawing when it drew every group it counted", () => {
+    const finding = treemapFinding(treemapData(ROWS.slice(0, 5)), "29990.0000", "security", "Sep 20", "USD");
+    expect(finding).toContain("$29,990.00 across 5 groups.");
+    expect(finding).not.toContain("of them drawn");
+  });
+
+  it("prints each share against the allocation's total, not against the ink", () => {
+    // The tiles sum to $29,990.00, so Cash covers 40.0% of the drawn area and is
+    // 41.4% of the allocation. The printed share is the one a reader can check
+    // against the list under the chart, the detail sheet and the total beside
+    // them; the ink is a shape, and the row the picture cannot draw is named
+    // rather than folded into a denominator of its own.
+    expect(label(CONSISTENT, WIDE).formatter({ name: "cash" })).toBe("Cash\n41.4%");
+    const tooltip = treemapOption(treemapData(CONSISTENT), T, "USD", WIDE).tooltip as {
+      formatter: (p: { name: string }) => string;
+    };
+    expect(tooltip.formatter({ name: "cash" })).toBe("Cash: $12,000.00 (41.4%)");
   });
 
   it("finds the largest rather than trusting the order it was handed", () => {
