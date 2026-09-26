@@ -165,6 +165,17 @@ test.describe("target size (SC 2.5.8)", () => {
     await expect(page.getByTestId("import-cancel")).toBeVisible();
     await measure("/transactions (import dialog)");
 
+    // The filter panel is the third overlay on this route and the one a person
+    // opens most (#26: every category filter now lives behind a pill). Its rows
+    // are §4.14 checkbox rows, so what this measures is the label — the target —
+    // rather than the 20px box. An overlay nobody opens is an overlay nobody has
+    // measured, which is how the detail sheet's tag chips went out at 26px.
+    await page.goto("/transactions");
+    await expect(page.getByTestId("txn-filter-bar")).toBeVisible();
+    await page.getByTestId("filter-categories").click();
+    await expect(page.getByTestId("filter-categories-done")).toBeVisible();
+    await measure("/transactions (filter panel)");
+
     // The Insights window is the same gap one level down. The route sweep above
     // measures the range and granularity chips, but the custom range's two date
     // inputs are in the DOM only once Custom is picked — and date inputs are

@@ -365,6 +365,79 @@ for (const vp of VIEWPORTS) {
       await row.locator("p").first().click();
       await expect(page.getByTestId("txn-detail")).toBeVisible();
     });
+
+    // #26. Each filter is now one pill that opens a panel, and §9.6 is the
+    // reason a pill is the right shape for it: a Dialog is a bottom sheet under
+    // 640 px and a centred modal above it, and at `lg:` it is "never a bottom
+    // sheet". That is a geometric claim about one component — the sheet and the
+    // modal are the same element with the same classes, differing only by the
+    // overlay's `items-end sm:items-center` — so it cannot be read off the
+    // markup, and a screenshot cannot fail it. It is measured here.
+    test("a filter panel is a centred dialog at lg:, and its picks outlive it (#26)", async ({
+      page,
+    }) => {
+      await login(page);
+      await settle(page, "/transactions");
+
+      const pill = page.getByTestId("filter-categories");
+      await expect(pill).toHaveAttribute("aria-expanded", "false");
+      await pill.click();
+      await expect(pill).toHaveAttribute("aria-expanded", "true");
+      const panel = page.getByTestId("filter-categories-sheet");
+      await expect(panel).toBeVisible();
+
+      // A sheet is full-bleed and hangs off the bottom edge; a centred modal
+      // floats with equal space above and below. Both are `w-full max-w-lg`.
+      const vp = page.viewportSize()!;
+      const box = (await panel.boundingBox())!;
+      expect(box.width, "a bottom sheet would span the viewport").toBeLessThan(vp.width * 0.6);
+      expect(
+        Math.abs(box.y - (vp.height - box.y - box.height)),
+        `a bottom sheet would sit at the bottom edge (y=${Math.round(box.y)})`,
+      ).toBeLessThan(8);
+
+      // §4.14's control, not a listbox: more than one answer is true at once,
+      // and `role="option"` + `aria-selected` cannot say that (§4.5). The
+      // checkboxes are the selection itself, not a proxy for it.
+      const options = panel.locator('input[type="checkbox"]');
+      await expect(options.nth(1), "the seeded household must have categories").toBeVisible();
+      await expect(panel.locator('[role="option"]')).toHaveCount(0);
+
+      // Two picks, two values on the wire. The API takes `category_id` as a
+      // list, so a filter that quietly collapsed to one value would still look
+      // right on screen — the request is what says it did not.
+      await options.nth(0).click();
+      const both = page.waitForResponse((r) => {
+        const url = new URL(r.url());
+        return url.pathname.endsWith("/transactions") && url.searchParams.getAll("category_id").length === 2;
+      });
+      await options.nth(1).click();
+      expect((await both).status()).toBe(200);
+
+      // Still open, and already applied: a multi-select that shut on the first
+      // tick would be a single-select with extra steps.
+      await expect(panel).toBeVisible();
+      await expect(options.nth(0)).toBeChecked();
+      await expect(options.nth(1)).toBeChecked();
+
+      // The model, stated in the UI: picks are applied as they are made, so the
+      // pill has the answer before the panel closes — closing it cannot lose a
+      // selection, which is the failure "live" filters are prone to.
+      await page.getByTestId("filter-categories-done").click();
+      await expect(panel).toHaveCount(0);
+      await expect(pill).toContainText("2 selected");
+      await expect(pill).toHaveAttribute("aria-expanded", "false");
+      // The values are named in the panel, which reopens holding them.
+      await pill.click();
+      await expect(options.nth(0)).toBeChecked();
+      await expect(options.nth(1)).toBeChecked();
+      // Clear is offered only while the filter is doing something, and it is
+      // the panel's own Clear: the pill's value, not the whole bar's.
+      await page.getByTestId("filter-categories-clear").click();
+      await expect(pill).toContainText("All");
+      await page.getByTestId("filter-categories-done").click();
+      await expect(page.getByTestId("filter-clear"), "an unused Clear is clutter").toHaveCount(0);
+    });
   });
 }
 

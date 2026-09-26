@@ -27,7 +27,8 @@ import {
   type ComboboxOption,
 } from "@/components/form";
 import OwnerSelect from "@/components/OwnerSelect";
-import OwnerFilterChips from "@/components/OwnerFilterChips";
+import SheetSelect from "@/components/SheetSelect";
+import SheetMultiSelect from "@/components/SheetMultiSelect";
 import { ChevronDownIcon, FilterIcon, PlusIcon, SearchIcon, UploadIcon } from "@/components/icons";
 import TxnPhoneList from "@/components/TxnPhoneList";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
@@ -73,6 +74,14 @@ function isFiltered(f: TxnFilter): boolean {
  */
 const ROW_COLUMNS =
   "lg:grid-cols-[1.75rem_minmax(0,1fr)_5rem_7rem_5.5rem_7rem] lg:gap-x-3 lg:gap-y-1";
+
+/**
+ * The Owner pill's "no owner filter" option. A sentinel rather than `""`,
+ * because the id is also the option's testid: an empty one would leave a test
+ * reading `filter-owner-option-`. It also keeps "not filtering" as a value the
+ * pill holds, instead of an absence the `onChange` below has to invent.
+ */
+const ALL_OWNERS = "all";
 
 export default function Transactions() {
   const accounts = useAccounts();
@@ -835,71 +844,85 @@ function FilterBar({
   filter: TxnFilter;
   onChange: (f: TxnFilter) => void;
 }) {
-  const catId = useFieldId("filter-category");
   const startId = useFieldId("filter-start");
   const endId = useFieldId("filter-end");
   const searchId = useFieldId("filter-search");
 
-  const selectedAccounts = new Set(filter.account_id ?? []);
-  const toggleAccount = (id: string) => {
-    const next = new Set(selectedAccounts);
+  // One toggle per type, each a set, because "which accounts?" and "which
+  // categories?" are questions with more than one right answer and the API
+  // takes both as lists (`?account_id=…&account_id=…`). The sets live in the
+  // filter, not in a panel's local state, so a pick cannot be lost by closing
+  // anything.
+  const toggle = (key: "account_id" | "category_id", id: string) => {
+    const next = new Set(filter[key] ?? []);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    onChange({ ...filter, account_id: next.size ? Array.from(next) : undefined });
+    onChange({ ...filter, [key]: next.size ? Array.from(next) : undefined });
   };
 
   return (
     <div className="space-y-3 rounded-card bg-surface-raised p-4" data-testid="txn-filter-bar">
-      <OwnerFilterChips
-        owners={owners}
-        value={filter.owner_id ?? null}
-        onChange={(id) => onChange({ ...filter, owner_id: id ?? undefined })}
-      />
+      {/* One pill per filter *type*, not one chip per value (#26).
 
-      <div>
-        <p className="mb-1 text-xs font-medium text-fg-muted">Accounts</p>
-        <div className="flex flex-wrap gap-2" data-testid="filter-accounts">
-          {accounts.map((a) => {
-            const on = selectedAccounts.has(a.id);
-            // Same geometry as OwnerFilterChips: `px-3 py-1 text-xs` computes to
-            // 24px, and a chip is a thumb target (§4.5).
-            return (
-              <button
-                key={a.id}
-                type="button"
-                onClick={() => toggleAccount(a.id)}
-                aria-pressed={on}
-                className={`inline-flex min-h-11 max-w-full items-center rounded-full border px-4 text-sm ${
-                  on
-                    ? "border-accent bg-accent/20 font-medium text-accent-ink"
-                    : "border-border-strong text-fg-muted hover:text-fg"
-                }`}
-                data-testid={`filter-account-${a.id}`}
-              >
-                {a.name}
-              </button>
-            );
-          })}
-          {accounts.length === 0 && <span className="text-xs text-fg-muted">No accounts</span>}
-        </div>
+          The chip rows this replaces were honest but unusable: a household with
+          twenty-eight accounts and seventy categories got two walls of chips
+          above the ledger, wrapping to half the screen at 360 px, and the
+          category row could not say "Groceries and Gas" at all — it was a
+          single-choice Combobox. A pill per type is one 44 px target each, it
+          names its own state ("Accounts 2 selected"), and the values it holds
+          are a panel away instead of on screen.
+
+          Pills and not a `<select>`: §5 settles it — "a filter or view switch
+          that is page chrome rather than a form field is a `SheetSelect`" — and
+          they wrap, so 360 px has nothing to scroll sideways. */}
+      <div className="flex flex-wrap items-center gap-2" data-testid="txn-filter-types">
+        {/* Owner is a *view*, and the API takes one (`owner_id`): the household
+            picks "mine" or "my partner's", and a union of two owners is a
+            different question than the one this control asks. So it is the
+            single-select pill, which is honest about taking one value. */}
+        <SheetSelect
+          label="Owner"
+          value={filter.owner_id ?? ALL_OWNERS}
+          options={[
+            { id: ALL_OWNERS, label: "All owners" },
+            ...owners.map((o) => ({ id: o.id, label: o.name })),
+          ]}
+          onChange={(id) =>
+            onChange({ ...filter, owner_id: id === ALL_OWNERS ? undefined : id })
+          }
+          testid="filter-owner"
+        />
+        <SheetMultiSelect
+          label="Accounts"
+          values={filter.account_id ?? []}
+          options={accounts.map((a) => ({ id: a.id, label: a.name }))}
+          onToggle={(id) => toggle("account_id", id)}
+          onClear={() => onChange({ ...filter, account_id: undefined })}
+          emptyNote="Add an account first."
+          testid="filter-accounts"
+        />
+        <SheetMultiSelect
+          label="Categories"
+          values={filter.category_id ?? []}
+          options={categories.map((c) => ({ id: c.id, label: categoryLabel(c) }))}
+          onToggle={(id) => toggle("category_id", id)}
+          onClear={() => onChange({ ...filter, category_id: undefined })}
+          testid="filter-categories"
+        />
+        {/* §4.10's escape hatch, beside the controls that made the mess, and
+            the *only* one in this bar: it is here exactly when something is
+            narrowing the list, so it is never a button that does nothing. (A
+            second Clear used to sit under the date fields — two buttons with
+            one job, and on a phone the lower one was a screen away from the
+            pills whose state it resets.) */}
+        {isFiltered(filter) && (
+          <Button variant="ghost" onClick={() => onChange({})} data-testid="filter-clear">
+            Clear filters
+          </Button>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label="Category" htmlFor={catId}>
-          <Combobox
-            id={catId}
-            listLabel="Filter by category"
-            value={filter.category_id?.[0] ?? ""}
-            onChange={(v) => onChange({ ...filter, category_id: v ? [v] : undefined })}
-            options={[
-              // The "all" row is an option like any other: the control has one
-              // shape, and an empty value is a value.
-              { value: "", label: "All categories" },
-              ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
-            ]}
-            data-testid="filter-category"
-          />
-        </Field>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field label="From" htmlFor={startId}>
           <Input
             id={startId}
@@ -939,16 +962,6 @@ function FilterBar({
           />
         </Field>
       </div>
-
-      {isFiltered(filter) && (
-        <Button
-          variant="ghost"
-          onClick={() => onChange({})}
-          data-testid="filter-clear"
-        >
-          Clear filters
-        </Button>
-      )}
     </div>
   );
 }
