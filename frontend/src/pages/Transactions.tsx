@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { categoryLabel } from "@/components/CategoryPicker";
 import {
   useAccounts,
@@ -7,6 +7,7 @@ import {
   useInfiniteTransactions,
   useOwners,
   useTags,
+  useUpdateTransaction,
   type TxnFilter,
 } from "@/api/hooks";
 import type { Account, Category, Owner, Transaction, TransactionCreate } from "@/api/types";
@@ -23,10 +24,11 @@ import {
   requiredText,
   useFieldId,
   validAmount,
+  type ComboboxOption,
 } from "@/components/form";
 import OwnerSelect from "@/components/OwnerSelect";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
-import { FilterIcon, PlusIcon, SearchIcon, UploadIcon } from "@/components/icons";
+import { ChevronDownIcon, FilterIcon, PlusIcon, SearchIcon, UploadIcon } from "@/components/icons";
 import TxnPhoneList from "@/components/TxnPhoneList";
 import TxnDetailSheet from "@/components/TxnDetailSheet";
 import ImportDialog from "@/components/ImportDialog";
@@ -131,6 +133,37 @@ export default function Transactions() {
     tags.data?.forEach((t) => m.set(t.id, t.name));
     return m;
   }, [tags.data]);
+
+  // The picker's list, built the way the detail sheet builds the same field's
+  // (#28): the categories the household has, in the server's order, with
+  // "Uncategorized" first as the way back to no category at all. One list for
+  // both means the two editors cannot offer different choices for one field.
+  const categoryOptions: ComboboxOption[] = useMemo(
+    () => [
+      { value: "", label: categoryLabel(null) },
+      ...(categories.data ?? []).map((c) => ({ value: c.id, label: categoryLabel(c) })),
+    ],
+    [categories.data],
+  );
+
+  /** What the row prints in its category column — include the emoji, or the
+   *  inline editor's name would describe a different value than the cell shows. */
+  const categoryText = (t: Transaction) =>
+    t.category_id ? (catName.get(t.category_id) ?? "") : categoryLabel(null);
+
+  // One mutation and one error for the whole list: only one row can be edited at
+  // a time, so a per-row copy of either would be state that can disagree with
+  // itself. The failure is reported once, above the list, rather than silently
+  // leaving the row as it was.
+  const updateTxn = useUpdateTransaction();
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const setCategory = (t: Transaction, categoryId: string) => {
+    setCategoryError(null);
+    updateTxn.mutate(
+      { id: t.id, body: { category_id: categoryId || null } },
+      { onError: (e) => setCategoryError((e as Error).message) },
+    );
+  };
 
   const items = txns.data?.pages.flatMap((p) => p.items) ?? [];
   const filtered = isFiltered(filter);
@@ -270,6 +303,17 @@ export default function Transactions() {
           )}
         </div>
 
+        {/* A failed inline edit, said out loud (#28). The row stays as it was —
+            an optimistic repaint would be a lie about what the server holds —
+            so without this the only signal would be "nothing happened", which
+            reads as a broken control rather than a rejected request. The API's
+            own sentence is the message (§4.11); the remedy is to pick again. */}
+        {categoryError && (
+          <p role="alert" className="text-sm text-negative" data-testid="txn-category-error">
+            {`The category could not be changed: ${categoryError}`}
+          </p>
+        )}
+
         <div className="hidden sm:block">
           {/* A real header row, and `lg:` only: below that the row is a phone row
               with no columns to name. `aria-hidden` because it is a *second*
@@ -295,17 +339,53 @@ export default function Transactions() {
           <ul className="divide-y divide-border rounded-card bg-surface-raised" data-testid="txn-list">
             {items.map((t) => (
               <li key={t.id}>
-                <button
-                  type="button"
-                  // `flex` is the phone row; `lg:grid` is §9.4's row that gains
-                  // columns. One element, one set of children, two layouts — the
-                  // `min-h-12` at `lg:` is a floor of 48 px, and §5's 44 px target
-                  // rule still applies above it, which is why the row gets shorter
-                  // on a desktop but never short.
-                  className={`flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-surface-inset/60 lg:min-h-12 lg:grid ${ROW_COLUMNS}`}
-                  onClick={() => setSelected(t)}
-                  data-testid={`txn-row-${t.id}`}
-                >
+                {/* The row's grid lives on this wrapper, not on the button, and
+                    that is what makes the inline category control possible at
+                    all (#28).
+
+                    The row is one target — a `<button>` that opens the detail
+                    pane — and the category cell now holds a control of its own.
+                    Nesting one inside the other is invalid HTML and a keyboard
+                    trap (a button's descendants are not focusable, and its own
+                    children cannot be clicked without clicking it), so the two
+                    have to be *siblings*. Two siblings cannot share a grid the
+                    button itself defines, so the grid moves out one level: the
+                    wrapper is §9.4's six columns, the button spans all six, and
+                    the cell takes column 4 of the same grid, painted over it.
+
+                    The wrapper is what the metrics are measured from, so it
+                    carries the `px-4` the button used to carry at `lg:` (the
+                    button keeps `px-4` below `lg:`, where the wrapper is a plain
+                    block and the phone row is unchanged). Both grids resolve to
+                    the same content box, so every column lands within a pixel of
+                    where it always did — the header row above the list included,
+                    which is a separate element with its own copy of the
+                    template.
+
+                    The hover highlight sits here rather than on the button for
+                    the same reason: the cell's control is painted over the
+                    button, and a highlight that belongs to the button would
+                    leave a hole exactly where the new control is. `group` is for
+                    the control's chevron, which appears when the pointer is
+                    anywhere on the row. */}
+                <div className={`group hover:bg-surface-inset/60 lg:grid lg:px-4 ${ROW_COLUMNS}`}>
+                  <button
+                    type="button"
+                    // `flex` is the phone row; `lg:grid` is §9.4's row that gains
+                    // columns. One element, one set of children, two layouts — the
+                    // `min-h-12` at `lg:` is a floor of 48 px, and §5's 44 px target
+                    // rule still applies above it, which is why the row gets shorter
+                    // on a desktop but never short.
+                    //
+                    // `lg:col-start-1 lg:col-span-6 lg:row-start-1` places it over
+                    // the wrapper's six columns explicitly: left to auto-placement,
+                    // the category cell below would be pushed into a second grid
+                    // row (auto-placement never overlaps) and the row would double
+                    // in height.
+                    className={`flex w-full items-center gap-2 px-4 py-3 text-left lg:col-span-6 lg:col-start-1 lg:row-start-1 lg:min-h-12 lg:grid lg:px-0 ${ROW_COLUMNS}`}
+                    onClick={() => setSelected(t)}
+                    data-testid={`txn-row-${t.id}`}
+                  >
                   {/* The mark leads the row because it answers the question the
                       description cannot: a ledger running several accounts shows
                       "Coffee" three times, and which one it came out of is the
@@ -462,7 +542,22 @@ export default function Transactions() {
                   >
                     {formatMoney(t.amount, t.currency)}
                   </span>
-                </button>
+                  </button>
+
+                  {/* A split's category is the legs', and the row says so by
+                      showing nothing in this column — so a split with no
+                      category of its own gets no control, rather than one
+                      offering to file the parent of a split. */}
+                  {(t.category_id || !t.is_split_parent) && (
+                    <TxnCategoryCell
+                      rowId={t.id}
+                      label={categoryText(t)}
+                      value={t.category_id ?? ""}
+                      options={categoryOptions}
+                      onPick={(id) => setCategory(t, id)}
+                    />
+                  )}
+                </div>
               </li>
             ))}
             {items.length === 0 && !txns.isLoading && (
@@ -585,6 +680,144 @@ export default function Transactions() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The category column at `lg:`, made editable in place (#28).
+ *
+ * Three constraints shape this, and they are the whole component:
+ *
+ * **It is a sibling of the row's button, never a child.** The row is one
+ * `<button>` that opens the detail pane. A picker nested in it would be invalid
+ * HTML, unreachable by keyboard (a button's descendants are not focusable) and
+ * unclickable without also firing the row's own click. The wrapper's grid (see
+ * the row's markup) is what lets the two be siblings *and* share the layout:
+ * this cell is column 4 of the same six columns the row is drawn in, painted
+ * over the button's own cell.
+ *
+ * **The value stays where it is.** The label in that cell is rendered by the
+ * row's button and belongs to it — that is what makes the row's accessible name
+ * the same at every width. So this control holds no text: when it is not
+ * editing, it is a transparent 44 px target lying over the label, with a
+ * chevron that fades in on the row's hover (the wrapper is the `group`) and a
+ * ring on hover and on `focus-visible` (§9.5 — nothing here is reachable only by
+ * hovering). At `lg:` the row is 48 px tall, so a 44 px cell target is the floor
+ * §9.4 keeps for rows, and it fits without growing the row by a pixel: the
+ * wrapper's single grid row is sized by the row's button, and this cell centres
+ * inside it rather than contributing its own height.
+ *
+ * **One of these is open at a time, and focus comes back.** Clicking the cell
+ * swaps it for the `Combobox` — the same control the detail sheet uses for the
+ * same field, spanning two columns because a searchable input in 112 px shows
+ * nothing but an ellipsis. Committing, cancelling and clicking away all close
+ * it; Escape closes the list first and the cell second, which is what the
+ * Combobox's own handoff gives us for free (it stops the key only while its list
+ * is open, so the closed-list Escape reaches the cell's handler).
+ */
+function TxnCategoryCell({
+  rowId,
+  label,
+  value,
+  options,
+  onPick,
+}: {
+  /** The row's transaction id — the testids and the picker's id hang off it. */
+  rowId: string;
+  /** What the row prints in this cell, so the control can say what it changes. */
+  label: string;
+  /** `""` for "no category", which is also what the picker offers for it. */
+  value: string;
+  options: readonly ComboboxOption[];
+  onPick: (categoryId: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const cell = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const refocus = useRef(false);
+  const id = useFieldId(`txn-category-${rowId}`);
+
+  // Focus goes back to the cell the edit started from, or a keyboard user lands
+  // on `<body>` after every pick. In an effect, because React has not committed
+  // the DOM when the handler returns — and only when the edit *ended* (a click
+  // away has put focus somewhere the user chose, and taking it back would be
+  // rude).
+  useEffect(() => {
+    if (editing || !refocus.current) return;
+    refocus.current = false;
+    trigger.current?.focus();
+  }, [editing]);
+
+  // The editor opens *open*: the Combobox shows its listbox on a click, and a
+  // programmatic focus alone would hand the user a closed picker with the
+  // current value highlighted in it. Focus first, then the click, so the list is
+  // measured against the input the user is about to type into.
+  useEffect(() => {
+    if (!editing) return;
+    const input = cell.current?.querySelector("input");
+    input?.focus();
+    input?.click();
+  }, [editing]);
+
+  const close = (restoreFocus: boolean) => {
+    refocus.current = restoreFocus;
+    setEditing(false);
+  };
+
+  return (
+    <div
+      ref={cell}
+      // `self-start` plus 2px, not `self-center`: the row grows to two lines when
+      // it carries a "needs review" badge (or tags), and centred on the *box* the
+      // control drifts down beside the badge instead of sitting on the category
+      // text it edits. The arithmetic is the row's own: `py-3` (12) + half the
+      // 24px line box = the first line's centre at 24 from the top, so a 44px
+      // control centred on it starts at 2 (`mt-0.5`). One line or three, the
+      // control stays on the line it belongs to.
+      className={`hidden lg:col-start-4 lg:row-start-1 lg:mt-0.5 lg:block lg:self-start ${
+        editing ? "lg:col-span-2" : ""
+      }`}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          close(true);
+        }
+      }}
+      onBlur={(e) => {
+        if (editing && !e.currentTarget.contains(e.relatedTarget)) close(false);
+      }}
+    >
+      {editing ? (
+        <Combobox
+          id={id}
+          listLabel="Category"
+          aria-label="Category"
+          value={value}
+          options={options}
+          onChange={(next) => {
+            close(true);
+            onPick(next);
+          }}
+          data-testid={`${id}-input`}
+        />
+      ) : (
+        <button
+          ref={trigger}
+          type="button"
+          onClick={() => setEditing(true)}
+          aria-label={`Change category, currently ${label}`}
+          className="flex h-11 w-full cursor-pointer items-center justify-end rounded-control px-2 hover:ring-1 hover:ring-border-strong"
+          data-testid={`txn-category-${rowId}`}
+        >
+          {/* Decorative and revealed on the row's hover: the cell is a target
+              whether or not the pointer is on it, and the ring says so. Focus
+              needs no ring of its own here — §2.7's global `:focus-visible`
+              outline in index.css is one treatment for the whole app, and the
+              trigger is a real `<button>` that gets it by being focusable. */}
+          <ChevronDownIcon className="size-4 shrink-0 text-fg-muted opacity-0 transition-opacity group-hover:opacity-100" />
+        </button>
+      )}
     </div>
   );
 }

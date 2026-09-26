@@ -275,6 +275,96 @@ for (const vp of VIEWPORTS) {
       // either way is not the point; 900 rows of travel is.)
       expect(Math.abs(pane.scrollY - scrolled), "the click must not move the page").toBeLessThan(2);
     });
+
+    // #28. The row is one target (§4.6) and now carries a second control. The
+    // failure this test exists for is not "the category did not change" — it is
+    // "clicking the category opened the detail pane", which is exactly what a
+    // *nested* control does: the browser hands a click inside a button to the
+    // button, and no amount of styling changes that. Nothing else can see it.
+    // The unit tests cannot (jsdom computes no `lg:` layout, so the cell is
+    // reachable at every width there), and no screenshot can (both trees look
+    // identical). It is a claim about the DOM tree and about which control a
+    // click belongs to, so it is asserted here, in a browser, with a real API.
+    test("a category is changed from its row without opening the editor (#28)", async ({ page }) => {
+      await login(page);
+      await settle(page, "/transactions");
+
+      const row = page.locator('[data-testid^="txn-row-"]').nth(2);
+      const cell = row.locator("xpath=..").locator('[data-testid^="txn-category-"]');
+      await expect(cell, "a seeded row must offer the inline category control").toHaveCount(1);
+
+      // Siblings, never nested: the row's button must not contain the control.
+      const tree = await page.evaluate(() => {
+        const rowButton = document.querySelectorAll('[data-testid^="txn-row-"]')[2];
+        const parent = rowButton.parentElement!;
+        const control = parent.querySelector('[data-testid^="txn-category-"]')!;
+        return {
+          nested: rowButton.contains(control),
+          children: [...parent.children].map((c) => c.tagName),
+        };
+      });
+      expect(tree.nested, "the control is inside the row's button (§4.6)").toBe(false);
+      expect(tree.children, "the row button and its second control are siblings").toEqual([
+        "BUTTON",
+        "DIV",
+      ]);
+
+      const height = () =>
+        row.locator("xpath=..").evaluate((el) => Math.round(el.getBoundingClientRect().height));
+      const before = await height();
+      const label = (await cell.getAttribute("aria-label")) ?? "";
+      expect(label, "the control must say what it changes").toContain("Change category, currently");
+
+      // Open it. §9.4's row gains columns, not height — and the pane stays shut.
+      await cell.click();
+      const options = page.locator('[role="listbox"] [role="option"]');
+      await expect(options.first()).toBeVisible();
+      await expect(page.getByTestId("txn-detail")).toHaveCount(0);
+
+      const texts = (await options.allInnerTexts()).map((t) => t.trim());
+      // Skip index 0: that row is the picker's own "no category" entry
+      // (`categoryOptions[0]` in the page), and picking it is a *clearing* —
+      // `category_id: null` on the wire — which is not the change this test is
+      // about. The label check below only skips it when the row being edited has
+      // no category already, and which row of the ledger sits at index 2 depends
+      // on what the rest of the suite has added, so without the index guard this
+      // passes on an uncategorised row and fails on a categorised one.
+      const pick = texts.findIndex((t, i) => i > 0 && t && !label.endsWith(t));
+      expect(
+        pick,
+        "the picker must offer a category the row does not already say",
+      ).toBeGreaterThan(0);
+
+      // A real pick, over the wire: the row repaints from the server's answer
+      // rather than from the click, so the request is the evidence.
+      const patched = page.waitForResponse(
+        (r) => r.request().method() === "PATCH" && r.url().includes("/transactions/"),
+      );
+      await options.nth(pick).click();
+      const response = await patched;
+      expect(response.status()).toBe(200);
+      const body = JSON.parse(response.request().postData() ?? "{}");
+      expect(body.category_id, "the pick travels as a category change").toEqual(expect.any(String));
+
+      await expect(cell).toHaveAttribute("aria-label", `Change category, currently ${texts[pick]}`);
+      expect(await height(), "the row must not grow to fit its control").toBe(before);
+      await expect(page.getByTestId("txn-detail"), "picking must not open the pane").toHaveCount(0);
+
+      // ...and back, so the next run of this test starts where this one did.
+      const original = label.slice("Change category, currently ".length);
+      await cell.click();
+      await expect(options.first()).toBeVisible();
+      const back = (await options.allInnerTexts()).map((t) => t.trim()).indexOf(original);
+      expect(back, "the row's own category must be offered again").toBeGreaterThanOrEqual(0);
+      await options.nth(back).click();
+      await expect(cell).toHaveAttribute("aria-label", label);
+      expect(await height()).toBe(before);
+
+      // And the row is still the target it was: away from the cell, it opens the
+      // editor it always did.
+      await row.locator("p").first().click();
+      await expect(page.getByTestId("txn-detail")).toBeVisible();
+    });
   });
 }
 
