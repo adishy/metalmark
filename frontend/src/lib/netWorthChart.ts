@@ -132,6 +132,46 @@ export function changesPerPoint(points: Point[]): (ChangeNote | null)[] {
 }
 
 /**
+ * The span a headline may state, as the indices of the first and last point in
+ * it.
+ *
+ * A headline sits above this chart and states one figure, so it has to be a
+ * figure the chart below it draws — and the strip draws nothing across two
+ * points that do not count the same accounts (`changesPerPoint`). So the delta
+ * a headline may print is the change over a *run of intervals the strip does
+ * draw*: the latest such run in the window, which is the run ending at the
+ * window's own last point unless that point has just started counting an
+ * account. The two ends of a run count the same accounts, so one subtraction of
+ * them is a movement of money by this module's own definition, and it is what
+ * the bars between them add up to.
+ *
+ * Most windows are one run and this returns the window itself, which is why a
+ * headline keeps the window's own words there. Where a window opens on points
+ * that count fewer accounts — the usual shape when the household's history is
+ * younger than the window, ADR-0045 — the run is shorter than the window and
+ * the words have to name it: the alternative is a card whose headline claims a
+ * change the picture under it declines to draw.
+ *
+ * `[to, to]` is reported when no interval in the window is drawn at all: there
+ * is no span to state, and a caller must not invent one. `from`/`to` bound the
+ * search to the part of the series on screen, so a brushed window never reports
+ * a span outside the brush.
+ */
+export function measuredSpan(points: Point[], from: number, to: number): [number, number] {
+  const changes = changesPerPoint(points);
+  const drawn = (i: number) => changes[i]?.kind === "value";
+  for (let end = to; end > from; end--) {
+    if (!drawn(end)) continue;
+    // Inside a run every interval is drawn, so walking back from the end is
+    // what finds its first point.
+    let start = end;
+    while (start > from && drawn(start)) start -= 1;
+    return [start, end];
+  }
+  return [to, to];
+}
+
+/**
  * The sentences under the chart: which accounts the line cannot fully count and
  * why, and which start partway through. Empty when every point counts everything.
  */

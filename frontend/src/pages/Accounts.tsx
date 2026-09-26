@@ -19,7 +19,7 @@ import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { formatDay, isoDay, todayIso } from "@/lib/dates";
-import { brushWindow, coverageNotes, netWorthOption } from "@/lib/netWorthChart";
+import { brushWindow, coverageNotes, measuredSpan, netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
 import { brushEvents, type ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
@@ -374,17 +374,42 @@ function NetWorthHero({
     [points],
   );
 
-  const first = win ? points[win[0]] : points[0];
-  const last = win ? points[win[1]] : points[points.length - 1];
+  // The window on screen, as indices: the whole range, or the brushed part of it.
+  const winFrom = win ? win[0] : 0;
+  const winTo = win ? win[1] : points.length - 1;
+  // The figure the headline may state, over the span the chart will draw it
+  // over — `measuredSpan` is this chart's own rule (a change is only a change
+  // where both ends count the same accounts) applied to a span instead of one
+  // interval. On a window whose first points count fewer accounts than its last
+  // — the household's history being younger than the window — the span is the
+  // part the chart can measure, and the words below name that part rather than
+  // the window: a headline reading "up $X over the year" while the bars beneath
+  // it sum to something else is the card contradicting itself.
+  const [firstIdx, lastIdx] = measuredSpan(points, winFrom, winTo);
+  const first = points[firstIdx];
+  const last = points[lastIdx];
   const change = first && last ? Number(last.net_worth) - Number(first.net_worth) : null;
   const ccy = netWorth?.base_currency ?? series.data?.base_currency ?? "USD";
-  // What the change is *over*, said in the window's own words. A brush narrows
-  // the line to part of the range, and a headline that still said "over 2 weeks"
-  // would be claiming a figure the chart above it is not showing — so the brush
-  // names its two days and the range states the period its row was built with.
-  const spanWords = win
-    ? `from ${formatDay(points[win[0]].date)} to ${formatDay(points[win[1]].date)}`
-    : row.words;
+  // What the change is *over*, said in the window's own words when the figure
+  // does cover the whole window. A brush narrows the line to part of the range,
+  // and a headline that still said "over 2 weeks" would be claiming a figure
+  // the chart above it is not showing — so the brush names its two days and the
+  // range states the period its row was built with. A figure narrower than
+  // either names its own two days, in the same words, because it is the same
+  // kind of statement; a window with no drawable interval at all names the one
+  // day it has.
+  const spanWords =
+    firstIdx < 0
+      ? // An empty series: no points, so no span, and the change line is not
+        // drawn either. `measuredSpan` reports `[-1, -1]` for it.
+        row.words
+      : firstIdx === winFrom && lastIdx === winTo
+        ? win
+          ? `from ${formatDay(points[win[0]].date)} to ${formatDay(points[win[1]].date)}`
+          : row.words
+        : firstIdx === lastIdx
+          ? `on ${formatDay(points[lastIdx].date)}`
+          : `from ${formatDay(points[firstIdx].date)} to ${formatDay(points[lastIdx].date)}`;
   // What the line cannot count, in the same sentences the Insights card prints
   // under its own: an account counted partway through, or one the ledger cannot
   // value. The chart marks both on the canvas and withholds the bar it cannot
