@@ -170,9 +170,15 @@ test("review: editing a card from the deck files nothing (§4.17)", async ({ pag
   // read off the option rather than hard-coded: the demo ledger's categories are
   // seed data, and a spec that names one is a spec that breaks when the seed
   // changes for reasons that have nothing to do with this page.
+  //
+  // The picker is a `Combobox`, so "the second option" is the second row of the
+  // open listbox and picking it is a click on that row — a `<select>`'s options
+  // do not exist as elements until a browser draws them.
   const select = page.getByTestId("detail-category");
-  const label = await select.locator("option").nth(1).textContent();
-  await select.selectOption({ index: 1 });
+  await select.click();
+  const rows = page.getByRole("option");
+  const label = await rows.nth(1).textContent();
+  await rows.nth(1).click();
   await page.getByTestId("txn-detail-save").click();
   await expect(page.getByTestId("txn-detail")).toHaveCount(0);
 

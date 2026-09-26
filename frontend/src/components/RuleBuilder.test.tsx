@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { Account, Category, Owner, Tag } from "@/api/types";
 import type { Rule } from "@/api/rules";
 import RuleBuilder from "@/components/RuleBuilder";
+import { openPicker, pickOption } from "@/test/pickers";
 
 // The builder owns its data (taxonomy for the pickers) and its two mutations, so
 // stub them rather than standing up a QueryClient and a fetch mock for what is a
@@ -156,7 +157,9 @@ describe("<RuleBuilder />", () => {
     await user.type(screen.getByTestId("rule-name"), "Coffee");
     await user.type(screen.getByTestId("rule-merchant-contains"), "starbucks");
     await user.type(screen.getByTestId("rule-amount-max"), "-10");
-    await user.selectOptions(screen.getByTestId("rule-set-category"), DINING.id);
+    // The category list is a record list, so it is a Combobox, not a <select>.
+    await openPicker(user, "rule-set-category");
+    await pickOption(user, DINING.name);
     await user.click(screen.getByTestId("rule-tag-tag-1"));
     await user.click(screen.getByTestId("rule-save"));
 
@@ -204,7 +207,9 @@ describe("<RuleBuilder />", () => {
     expect(screen.getByTestId("rule-priority")).toHaveValue("5");
     expect(screen.getByTestId("rule-merchant-contains")).toHaveValue("amzn");
     expect(screen.getByTestId("rule-direction")).toHaveValue("out");
-    expect(screen.getByTestId("rule-set-category")).toHaveValue(TRAVEL.id);
+    // A picker shows the label behind its value, which is also what proves the
+    // stored id resolved: an id with no match would render as the placeholder.
+    expect(screen.getByTestId("rule-set-category")).toHaveValue(TRAVEL.name);
     expect(screen.getByTestId("rule-set-hidden")).toHaveValue("true");
     expect(screen.getByTestId("rule-tag-tag-1")).toBeChecked();
     expect(screen.getByTestId("rule-tag-tag-2")).not.toBeChecked();
@@ -298,7 +303,8 @@ describe("<RuleBuilder />", () => {
     expect(screen.getByTestId("rule-split-leg-1-takes")).toHaveTextContent("Takes the rest");
 
     await user.type(screen.getByTestId("rule-split-leg-0-amount"), "-50");
-    await user.selectOptions(screen.getByTestId("rule-split-leg-0-category"), DINING.id);
+    await openPicker(user, "rule-split-leg-0-category");
+    await pickOption(user, DINING.name);
     expect(screen.getByTestId("rule-split-leg-0-takes")).toHaveTextContent("Takes -50");
     await user.click(screen.getByTestId("rule-save"));
 
@@ -314,9 +320,9 @@ describe("<RuleBuilder />", () => {
     render(<RuleBuilder rule={SPLIT_RULE} onClose={vi.fn()} />);
 
     expect(screen.getByTestId("rule-split-leg-0-amount")).toHaveValue("-50.00");
-    expect(screen.getByTestId("rule-split-leg-0-category")).toHaveValue(DINING.id);
+    expect(screen.getByTestId("rule-split-leg-0-category")).toHaveValue(DINING.name);
     expect(screen.getByTestId("rule-split-leg-1-rest")).toBeChecked();
-    expect(screen.getByTestId("rule-split-leg-1-owner")).toHaveValue(SHARED.id);
+    expect(screen.getByTestId("rule-split-leg-1-owner")).toHaveValue(SHARED.name);
     expect(screen.getByTestId("rule-split-leg-1-takes")).toHaveTextContent("Takes the rest");
 
     await userEvent.setup().click(screen.getByTestId("rule-save"));
@@ -348,7 +354,8 @@ describe("<RuleBuilder />", () => {
     await user.type(screen.getByTestId("rule-name"), "Split by percent");
     await user.click(screen.getByTestId("rule-split-toggle"));
     await user.type(screen.getByTestId("rule-split-leg-0-percent"), "25");
-    await user.selectOptions(screen.getByTestId("rule-split-leg-1-owner"), ALICE.id);
+    await openPicker(user, "rule-split-leg-1-owner");
+    await pickOption(user, ALICE.name);
 
     expect(screen.getByTestId("rule-split-leg-0-takes")).toHaveTextContent("Takes 25%");
     await user.click(screen.getByTestId("rule-save"));

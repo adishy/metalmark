@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { addAccount, addOwner, addTransaction, login, openTxn } from "./helpers";
+import { addAccount, addOwner, addTransaction, login, openTxn, pickOption } from "./helpers";
 
 // Covers the "usable M1a" flows layered on top of the thin ledger: editing a
 // transaction (incl. setting an owner), splitting it, managing categories in
@@ -45,7 +45,7 @@ test("edit a transaction and set an owner", async ({ page }) => {
   await openTxn(page, merchant);
   const edited = `${merchant} EDITED`;
   await page.getByTestId("detail-merchant").fill(edited);
-  await page.getByTestId("detail-owner").selectOption({ label: ownerName });
+  await pickOption(page, "detail-owner", ownerName);
   await page.getByTestId("txn-detail-save").click();
   await expect(page.getByTestId("txn-detail")).toBeHidden();
 
@@ -58,8 +58,9 @@ test("edit a transaction and set an owner", async ({ page }) => {
   // Owner persisted on the server: reopening shows it selected, and the ledger
   // filter for that owner still finds the transaction.
   await openTxn(page, edited);
-  await expect(page.getByTestId("detail-owner")).not.toHaveValue("");
-  await expect(page.getByTestId("detail-owner").locator("option:checked")).toHaveText(ownerName);
+  // The picker shows the label of what is stored, not the id behind it, so the
+  // owner's name in the control *is* the proof that the server sent it back.
+  await expect(page.getByTestId("detail-owner")).toHaveValue(ownerName);
   await page.getByTestId("txn-detail-close").click();
 
   await page.getByTestId("owner-filter").getByRole("button", { name: ownerName, exact: true }).click();

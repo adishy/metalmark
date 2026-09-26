@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Owner } from "@/api/types";
 import OwnerSelect from "@/components/OwnerSelect";
+import { openPicker, pickerOptions, pickOption } from "@/test/pickers";
 
 // The picker owns its data (owners + inline create), so stub the hooks rather
 // than standing up a QueryClient and a fetch mock for a component test.
@@ -25,25 +26,32 @@ beforeEach(() => {
 });
 
 describe("<OwnerSelect />", () => {
-  it("is labelled and lists the owners in server order", () => {
+  it("is labelled and lists the owners in server order", async () => {
+    const user = userEvent.setup();
     render(<OwnerSelect value={null} onChange={vi.fn()} testid="detail-owner" />);
-    const select = screen.getByLabelText("Owner");
-    expect(select).toHaveAttribute("data-testid", "detail-owner");
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Shared", "Alice"]);
+    const box = screen.getByLabelText("Owner");
+    expect(box).toHaveAttribute("data-testid", "detail-owner");
+
+    await openPicker(user, "detail-owner");
+    expect(pickerOptions()).toEqual(["Shared", "Alice"]);
   });
 
   it("offers an Inherit option when nullable and reports null for it", async () => {
+    const user = userEvent.setup();
     const onChange = vi.fn();
     render(
       <OwnerSelect value={ALICE.id} onChange={onChange} nullable testid="detail-owner" />,
     );
+
+    await openPicker(user, "detail-owner");
     expect(screen.getByRole("option", { name: "Inherit (Shared)" })).toBeInTheDocument();
 
-    await userEvent.setup().selectOptions(screen.getByTestId("detail-owner"), "");
+    await pickOption(user, "Inherit (Shared)");
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
-  it("names what an inheriting row inherits from", () => {
+  it("names what an inheriting row inherits from", async () => {
+    const user = userEvent.setup();
     render(
       <OwnerSelect
         value={null}
@@ -53,13 +61,19 @@ describe("<OwnerSelect />", () => {
         testid="split-owner-0"
       />,
     );
+    await openPicker(user, "split-owner-0");
     expect(screen.getByRole("option", { name: "Inherit (Checking)" })).toBeInTheDocument();
   });
 
-  it("has no empty option when not nullable and falls back to Shared", () => {
+  it("has no empty option when not nullable and falls back to Shared", async () => {
+    const user = userEvent.setup();
     render(<OwnerSelect value={null} onChange={vi.fn()} testid="account-owner" />);
+    // The control shows the label of what is stored, so "Shared" is the visible
+    // proof that an unset non-nullable picker resolved to the shared owner.
+    expect(screen.getByTestId("account-owner")).toHaveValue("Shared");
+
+    await openPicker(user, "account-owner");
     expect(screen.queryByRole("option", { name: /Inherit/ })).not.toBeInTheDocument();
-    expect(screen.getByTestId("account-owner")).toHaveValue(SHARED.id);
   });
 
   it("creates an owner inline and selects it", async () => {

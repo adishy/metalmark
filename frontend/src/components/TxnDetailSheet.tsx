@@ -20,7 +20,16 @@ import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
 import OwnerSelect from "@/components/OwnerSelect";
 import { useIsDesktop } from "@/lib/media";
-import { Button, Field, Input, Select, Textarea, useFieldId, validAmount } from "@/components/form";
+import {
+  Button,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Textarea,
+  useFieldId,
+  validAmount,
+} from "@/components/form";
 
 interface TxnDetailSheetProps {
   txn: Transaction;
@@ -179,12 +188,17 @@ function TxnDetailForm({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Category" htmlFor={ids.category}>
-            <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="detail-category">
-              <option value="">Uncategorized</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-              ))}
-            </Select>
+            <Combobox
+              id={ids.category}
+              listLabel="Category"
+              value={categoryId}
+              onChange={setCategoryId}
+              options={[
+                { value: "", label: categoryLabel(null) },
+                ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+              ]}
+              data-testid="detail-category"
+            />
           </Field>
           <OwnerSelect
             value={owner}

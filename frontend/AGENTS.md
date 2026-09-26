@@ -14,8 +14,11 @@ catching.
   that does not fit becomes a `SheetSelect` pill on phones, not a scrolling strip; chips may
   wrap. The one allowed sideways strip is marked `data-scroll-x-ok` (the Settings tabs).
 - **Targets ≥ 44×44**, bottom-bar destinations ≥ 56. Grow hit areas with padding.
-- **Dropdowns:** `Select` from `components/form` (it draws the app's chevron). Filters and view
-  switches on a phone are `SheetSelect`.
+- **Dropdowns:** `Combobox` from `components/form` for a list of records that grows with
+  the household (categories, owners, accounts); `Select` for a closed vocabulary or a list
+  the app bounds (review status, group type, sync interval). A `Combobox` is the platform
+  `<select>` below `sm:` by design, so it is not a thing to re-check per width. Filters and
+  view switches on a phone are `SheetSelect`.
 - **Categories are written with their emoji** — `categoryLabel()` from
   `components/CategoryPicker`.
 - **Money:** amounts are `text-base font-semibold`, never truncated; an expense is not red

@@ -16,9 +16,9 @@ import AccountMark from "@/components/AccountMark";
 import { Day } from "@/components/datetime";
 import {
   Button,
+  Combobox,
   Field,
   Input,
-  Select,
   Spinner,
   requiredText,
   useFieldId,
@@ -613,19 +613,19 @@ function FilterBar({
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Category" htmlFor={catId}>
-          <Select
+          <Combobox
             id={catId}
+            listLabel="Filter by category"
             value={filter.category_id?.[0] ?? ""}
-            onChange={(e) =>
-              onChange({ ...filter, category_id: e.target.value ? [e.target.value] : undefined })
-            }
+            onChange={(v) => onChange({ ...filter, category_id: v ? [v] : undefined })}
+            options={[
+              // The "all" row is an option like any other: the control has one
+              // shape, and an empty value is a value.
+              { value: "", label: "All categories" },
+              ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+            ]}
             data-testid="filter-category"
-          >
-            <option value="">All categories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-            ))}
-          </Select>
+          />
         </Field>
         <Field label="From" htmlFor={startId}>
           <Input
@@ -739,11 +739,14 @@ function AddTxnForm({
       }}
     >
       <Field label="Account" htmlFor={ids.account} required error={errs.account}>
-        <Select id={ids.account} value={accountId} onChange={(e) => setAccountId(e.target.value)} data-testid="txn-account">
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </Select>
+        <Combobox
+          id={ids.account}
+          listLabel="Account"
+          value={accountId}
+          onChange={setAccountId}
+          options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+          data-testid="txn-account"
+        />
       </Field>
       <Field label="Date" htmlFor={ids.date}>
         <Input id={ids.date} type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="txn-date" />
@@ -755,12 +758,17 @@ function AddTxnForm({
         <Input id={ids.amount} value={amount} inputMode="decimal" onChange={(e) => setAmount(e.target.value)} data-testid="txn-amount" />
       </Field>
       <Field label="Category" htmlFor={ids.category}>
-        <Select id={ids.category} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} data-testid="txn-category">
-          <option value="">Uncategorized</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-          ))}
-        </Select>
+        <Combobox
+          id={ids.category}
+          listLabel="Category"
+          value={categoryId}
+          onChange={setCategoryId}
+          options={[
+            { value: "", label: categoryLabel(null) },
+            ...categories.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+          ]}
+          data-testid="txn-category"
+        />
       </Field>
       <OwnerSelect
         value={owner}

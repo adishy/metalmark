@@ -3,7 +3,7 @@
 // owner" affordance creates one inline rather than sending the user to Settings.
 import { useState } from "react";
 import { useCreateOwner, useOwners } from "@/api/hooks";
-import { Button, Field, Input, Select, requiredText, useFieldId } from "@/components/form";
+import { Button, Combobox, Field, Input, requiredText, useFieldId } from "@/components/form";
 
 export default function OwnerSelect({
   label = "Owner",
@@ -62,21 +62,19 @@ export default function OwnerSelect({
 
   return (
     <Field label={label} htmlFor={id} className={className}>
-      <Select
+      <Combobox
         id={id}
+        listLabel={label}
         value={shown}
-        onChange={(e) => onChange(e.target.value || null)}
+        onChange={(v) => onChange(v || null)}
+        options={[
+          ...(nullable
+            ? [{ value: "", label: `Inherit (${inheritFrom ?? shared?.name ?? "Shared"})` }]
+            : []),
+          ...list.map((o) => ({ value: o.id, label: o.name })),
+        ]}
         data-testid={testid}
-      >
-        {nullable && (
-          <option value="">Inherit ({inheritFrom ?? shared?.name ?? "Shared"})</option>
-        )}
-        {list.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name}
-          </option>
-        ))}
-      </Select>
+      />
 
       {/* Ghost, not a raw <button>: `text-xs` with no padding computed to
           68x16. `underline` goes with it — the ghost variant's muted colour and

@@ -12,7 +12,18 @@ import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Button, Checkbox, Field, Input, Select, Spinner, Textarea, useFieldId } from "@/components/form";
+import {
+  Button,
+  Checkbox,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  Textarea,
+  useFieldId,
+  type ComboboxOption,
+} from "@/components/form";
 import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
 import { token, useChartTokens } from "@/theme/chartTokens";
@@ -127,6 +138,23 @@ const DEMO_OWNERS: Owner[] = [
   { id: "o3", name: "Shared", kind: "shared", sort: 99 },
 ];
 
+/** A list long enough that the native picker stops being the right control. */
+const DEMO_CATEGORIES: ComboboxOption[] = [
+  { value: "", label: "Uncategorized" },
+  { value: "c1", label: "🛒 Groceries" },
+  { value: "c2", label: "🍽 Dining out" },
+  { value: "c3", label: "☕ Coffee" },
+  { value: "c4", label: "🚆 Transit" },
+  { value: "c5", label: "⛽ Fuel" },
+  { value: "c6", label: "💊 Pharmacy" },
+  { value: "c7", label: "✈️ Travel" },
+  { value: "c8", label: "🏠 Rent" },
+  { value: "c9", label: "🔌 Utilities" },
+  { value: "c10", label: "🎬 Streaming" },
+  { value: "c11", label: "🎁 Gifts" },
+  { value: "c12", label: "💵 Paycheck" },
+];
+
 /** The reference clock the elapsed-time gallery is pinned to. */
 const DEMO_NOW = new Date("2026-09-20T12:00:00Z");
 
@@ -208,6 +236,8 @@ export default function DesignSystem() {
   const [chips, setChips] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
   const [checks, setChecks] = useState({ a: true, b: false });
+  const [picked, setPicked] = useState("");
+  const [pickedErr, setPickedErr] = useState("");
   const ids = {
     text: useFieldId("ds-text"),
     money: useFieldId("ds-money"),
@@ -216,6 +246,8 @@ export default function DesignSystem() {
     req: useFieldId("ds-req"),
     sel: useFieldId("ds-sel"),
     area: useFieldId("ds-area"),
+    pick: useFieldId("ds-pick"),
+    pickErr: useFieldId("ds-pick-err"),
   };
 
   const lineOption = useCallback(
@@ -445,6 +477,44 @@ export default function DesignSystem() {
             <Textarea id={ids.area} rows={3} placeholder="Optional" />
           </Field>
         </div>
+      </Section>
+
+      <Section
+        title="Searchable pickers"
+        note="A record list (a category, an account, an owner) is a Combobox above 640px: type to narrow, arrows and Enter to pick. On a phone it hands the job back to the platform's own picker rather than drawing a list of its own."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="Category" htmlFor={ids.pick} hint="Type to narrow: “cof” finds ☕ Coffee.">
+            <Combobox
+              id={ids.pick}
+              listLabel="Category"
+              value={picked}
+              onChange={setPicked}
+              options={DEMO_CATEGORIES}
+              data-testid="ds-combobox"
+            />
+          </Field>
+          <Field
+            label="With an error"
+            htmlFor={ids.pickErr}
+            error="Pick a category for this row."
+          >
+            <Combobox
+              id={ids.pickErr}
+              listLabel="Category"
+              value={pickedErr}
+              onChange={setPickedErr}
+              options={DEMO_CATEGORIES}
+              data-testid="ds-combobox-error"
+            />
+          </Field>
+        </div>
+        <p className="text-xs text-fg-muted">
+          A closed vocabulary — review status, group type, sync interval — stays a native{" "}
+          <code>Select</code>: the component writes the options out, there is nothing to search, and
+          the platform draws the picker. The rule is where the list comes from, not how long it is.
+          §4.4.
+        </p>
       </Section>
 
       <Section title="Checkboxes" note="The label is the target — a native box is ~13px, the row is 44px.">

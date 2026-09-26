@@ -61,6 +61,7 @@ import { todayIso } from "@/lib/dates";
 import {
   Button,
   Checkbox,
+  Combobox,
   Field,
   Input,
   Select,
@@ -626,11 +627,14 @@ function CategoriesSection() {
             <Input id={ids.cName} value={cName} onChange={(e) => setCName(e.target.value)} data-testid="category-name" />
           </Field>
           <Field label="Group" htmlFor={ids.cGroup}>
-            <Select id={ids.cGroup} value={cGroup || defaultGroup} onChange={(e) => setCGroup(e.target.value)} data-testid="category-group">
-              {groups.data?.map((g) => (
-                <option key={g.id} value={g.id}>{g.name}</option>
-              ))}
-            </Select>
+            <Combobox
+              id={ids.cGroup}
+              listLabel="Category group"
+              value={cGroup || defaultGroup}
+              onChange={setCGroup}
+              options={(groups.data ?? []).map((g) => ({ value: g.id, label: g.name }))}
+              data-testid="category-group"
+            />
           </Field>
           <Field label="Emoji" htmlFor={ids.cIcon} hint="Optional, e.g. 🛒">
             <Input id={ids.cIcon} value={cIcon} maxLength={16} onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
@@ -1056,18 +1060,14 @@ function DataSection() {
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Account" htmlFor={accountField} className="w-56">
-            <Select
+            <Combobox
               id={accountField}
+              listLabel="Account"
               value={chosen}
-              onChange={(e) => setAccountId(e.target.value)}
+              onChange={setAccountId}
+              options={(accounts.data ?? []).map((a) => ({ value: a.id, label: a.name }))}
               data-testid="export-csv-account"
-            >
-              {accounts.data?.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </Select>
+            />
           </Field>
           <Button
             variant="secondary"
@@ -1429,18 +1429,16 @@ function OwnerRow({
           </p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <Field label="Reassign to" htmlFor={reassignId} className="w-48">
-              <Select
+              <Combobox
                 id={reassignId}
+                listLabel="Reassign to"
                 value={reassignTo ?? shared?.id ?? ""}
-                onChange={(e) => setReassignTo(e.target.value)}
-                data-testid={`owner-reassign-${owner.id}`}
-              >
-                {owners
+                onChange={setReassignTo}
+                options={owners
                   .filter((o) => o.id !== owner.id)
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-              </Select>
+                  .map((o) => ({ value: o.id, label: o.name }))}
+                data-testid={`owner-reassign-${owner.id}`}
+              />
             </Field>
             <Button variant="secondary" className="px-2 py-1 text-xs" onClick={() => setConfirming(false)}>
               Cancel

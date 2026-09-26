@@ -808,16 +808,35 @@ Checkboxes are covered separately in §4.14.
 
 ### 4.4 Selects and pickers
 
-- **Native `<select>` under ~15 options.** It gets the platform's own accessible
-  picker on mobile for free and costs nothing to maintain. Most of this app's lists
-  (owners, account types, currencies) qualify.
-- **A searchable `<select>`-like control only above ~15 options.** The category list
-  is the one that will grow past that.
+The question is not how many options a list has but **where the list comes from**. A
+list the component writes out itself is a `<select>`; a list the household fills with
+its own rows is a `Combobox`.
+
+- **Native `<select>` for a closed vocabulary, and for a list the app itself bounds.**
+  Review status, category-group type, sync interval, account type, token expiry, the
+  CSV import's column meanings: the component writes the options out, there is nothing
+  in them to search, and the platform draws the popup, the keyboard model and the
+  screen-reader semantics for free.
+- **`Combobox` (`components/form.tsx`) for a list of records that grows with the
+  household** — categories, owners, accounts, category groups, a rule's category and
+  owner. It is a text input with a listbox under it: typing narrows the list, and the
+  value, the search and the keyboard all live in the one control. A `<select>` over a
+  list that grows with the data is a list nobody can search.
+- **A `Combobox` renders the native `<select>` below `sm:`**, deliberately: the platform
+  picker is the right control for a thumb, a screen reader and the device's own zoom,
+  and a popover that hijacks it is a downgrade. The switch is by behaviour
+  (`useIsPhone`), never by a `sm:` class — a phone must not get the custom popup, and a
+  desktop must not get the OS list. Where a long list still needs a phone answer, that
+  answer is a **sheet with a search field** — the category picker below — not a taller
+  popup.
 - A custom picker must implement the APG combobox/listbox pattern in full:
   `role="combobox"` + `aria-expanded` + `aria-controls` on the input,
   `role="listbox"`/`role="option"` + `aria-selected` on the list, arrow keys to move,
   Enter to commit, Escape to dismiss, `aria-activedescendant` kept on the highlighted
-  option. Home/End jump to the ends. Type-ahead filters.
+  option, Home/End jump to the ends, Tab leaves without committing. Type-ahead filters.
+  `aria-activedescendant` only works while focus stays on the input, so the popup's rows
+  are not focusable and the popup prevents `mousedown` — a picker that moves focus into
+  its own list has already broken the pattern it claims to implement.
 - **The category picker specifically** (see §4.5 for the "New category" affordance):
   on phones, a bottom sheet containing a search field, a "Recently used" group of up
   to 5, then the grouped list. Never a modal `<select>` clone with no search.
@@ -1230,9 +1249,11 @@ element past the edge or any container that scrolls sideways. Date inputs carry
 `min-width: 0` in `index.css`, because iOS gives them an intrinsic width wider than a
 phone column.
 
-**Dropdowns.** The native `<select>` keeps its platform picker (it is the right one
-on a phone) but not its platform arrow: `Select` draws the app's chevron. A filter or
-view switch on a phone is a `SheetSelect`, not a `<select>`.
+**Dropdowns.** `Select` keeps the native `<select>` but not its platform arrow: it draws
+the app's chevron. A record picker (`Combobox`, §4.4) is the native `<select>` on a
+phone anyway — that is what it renders below `sm:` — so the two agree about what a phone
+gets. A filter or view switch that is page chrome rather than a form field is a
+`SheetSelect`, not a `<select>`.
 
 **The bottom bar is 64 px tall** and each destination is the whole fifth of it; the
 active one's icon sits in a pill, so it is a shape change and never colour alone.

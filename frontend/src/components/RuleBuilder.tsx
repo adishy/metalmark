@@ -33,7 +33,18 @@ import {
   type RuleSplitLeg,
 } from "@/api/rules";
 import Dialog from "@/components/Dialog";
-import { Button, Checkbox, Field, Input, Select, Spinner, requiredText, useFieldId, validAmount } from "@/components/form";
+import {
+  Button,
+  Checkbox,
+  Combobox,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  requiredText,
+  useFieldId,
+  validAmount,
+} from "@/components/form";
 
 type Tri = "" | "true" | "false";
 
@@ -313,17 +324,17 @@ export default function RuleBuilder({
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Category is" htmlFor={ids.category}>
-              <Select
+              <Combobox
                 id={ids.category}
+                listLabel="Category is"
                 value={d.categoryId}
-                onChange={(e) => set({ categoryId: e.target.value })}
+                onChange={(v) => set({ categoryId: v })}
+                options={[
+                  { value: "", label: "Any category" },
+                  ...(categories.data ?? []).map((c) => ({ value: c.id, label: categoryLabel(c) })),
+                ]}
                 data-testid="rule-category"
-              >
-                <option value="">Any category</option>
-                {categories.data?.map((c) => (
-                  <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-                ))}
-              </Select>
+              />
             </Field>
             <Field label="Pending" htmlFor={ids.pending}>
               <Select
@@ -351,30 +362,30 @@ export default function RuleBuilder({
         <Section title="…do this">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Set category" htmlFor={ids.setCategory}>
-              <Select
+              <Combobox
                 id={ids.setCategory}
+                listLabel="Set category"
                 value={d.setCategoryId}
-                onChange={(e) => set({ setCategoryId: e.target.value })}
+                onChange={(v) => set({ setCategoryId: v })}
+                options={[
+                  { value: "", label: "Leave unchanged" },
+                  ...(categories.data ?? []).map((c) => ({ value: c.id, label: categoryLabel(c) })),
+                ]}
                 data-testid="rule-set-category"
-              >
-                <option value="">Leave unchanged</option>
-                {categories.data?.map((c) => (
-                  <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-                ))}
-              </Select>
+              />
             </Field>
             <Field label="Set owner" htmlFor={ids.owner}>
-              <Select
+              <Combobox
                 id={ids.owner}
+                listLabel="Set owner"
                 value={d.ownerId}
-                onChange={(e) => set({ ownerId: e.target.value })}
+                onChange={(v) => set({ ownerId: v })}
+                options={[
+                  { value: "", label: "Leave unchanged" },
+                  ...(owners.data ?? []).map((o) => ({ value: o.id, label: o.name })),
+                ]}
                 data-testid="rule-set-owner"
-              >
-                <option value="">Leave unchanged</option>
-                {owners.data?.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </Select>
+              />
             </Field>
           </div>
           <Checks
@@ -519,30 +530,33 @@ export default function RuleBuilder({
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <Field label="Category" htmlFor={legId(i, "category")}>
-                        <Select
+                        <Combobox
                           id={legId(i, "category")}
+                          listLabel="Category"
                           value={leg.categoryId}
-                          onChange={(e) => setLeg(i, { categoryId: e.target.value })}
+                          onChange={(v) => setLeg(i, { categoryId: v })}
+                          options={[
+                            { value: "", label: categoryLabel(null) },
+                            ...(categories.data ?? []).map((c) => ({
+                              value: c.id,
+                              label: categoryLabel(c),
+                            })),
+                          ]}
                           data-testid={`rule-split-leg-${i}-category`}
-                        >
-                          <option value="">Uncategorized</option>
-                          {categories.data?.map((c) => (
-                            <option key={c.id} value={c.id}>{categoryLabel(c)}</option>
-                          ))}
-                        </Select>
+                        />
                       </Field>
                       <Field label="Owner" htmlFor={legId(i, "owner")}>
-                        <Select
+                        <Combobox
                           id={legId(i, "owner")}
+                          listLabel="Owner"
                           value={leg.ownerId}
-                          onChange={(e) => setLeg(i, { ownerId: e.target.value })}
+                          onChange={(v) => setLeg(i, { ownerId: v })}
+                          options={[
+                            { value: "", label: "Same as the transaction" },
+                            ...(owners.data ?? []).map((o) => ({ value: o.id, label: o.name })),
+                          ]}
                           data-testid={`rule-split-leg-${i}-owner`}
-                        >
-                          <option value="">Same as the transaction</option>
-                          {owners.data?.map((o) => (
-                            <option key={o.id} value={o.id}>{o.name}</option>
-                          ))}
-                        </Select>
+                        />
                       </Field>
                     </div>
                     {/* What the leg will take, on the row that also removes it.
