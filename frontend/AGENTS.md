@@ -46,17 +46,31 @@ OUT=/tmp/shots node scripts/review-shots.mjs
 ```
 
 and run the e2e specs that cover the change, in the pinned Playwright image (the version must
-match `@playwright/test` in `package.json`, or the visual baselines will not match):
+match `@playwright/test` in `package.json`, or the visual baselines will not match). Two things
+bite here, and neither one fails as a *config* error:
 
 ```bash
+# From the repository root. `frontend/node_modules` is not usable on the host — the dev
+# stack mounts it from a container volume, so a fresh worktree has an empty directory
+# there and `npx playwright` cannot resolve `@playwright/test` at all. Copy the
+# container's real install out, once per worktree:
+mkdir -p /tmp/mm-nm && docker cp mm-dev-web-1:/app/node_modules /tmp/mm-nm
+#   → /tmp/mm-nm/node_modules
+
 docker run --rm --network mm-dev_default -e E2E_BASE_URL=http://web:5173 \
-  -v "$PWD":/work -w /work mcr.microsoft.com/playwright:v1.63.0-noble \
+  -v "$PWD":/work -v /tmp/mm-nm/node_modules:/work/frontend/node_modules \
+  -w /work/frontend mcr.microsoft.com/playwright:v1.63.0-noble \
   sh -c "npx playwright test e2e/mobile.spec.ts e2e/review.spec.ts"
 ```
 
+`-w /work/frontend` is load-bearing: `playwright.config.ts` lives in `frontend/`, and run from
+`/work` Playwright silently falls back to its own defaults — no `baseURL` — so every test dies
+with "Cannot navigate to invalid URL" rather than saying the config was not found.
+
 `e2e/mobile.spec.ts` fails on anything past the edge at 360/390 px — run it for any layout
 change. After an intentional change to the login page, regenerate its baselines with
-`--update-snapshots e2e/visual.spec.ts` in the same image and commit the `*-linux.png` files.
+`--update-snapshots=all e2e/visual.spec.ts` in the same image and commit the `*-linux.png`
+files (Playwright 1.63 requires a value for that flag; the bare form is a usage error).
 `bank sync` specs need the fake provider (CI has it; `verify.sh e2e` sets it up).
 
 README screenshots come from the demo household only (`scripts/readme-screenshots.mjs`) —
