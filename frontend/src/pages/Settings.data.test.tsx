@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import type { Account } from "@/api/types";
 import type { ImportResult } from "@/api/portability";
 import Settings from "@/pages/Settings";
@@ -75,6 +76,11 @@ const FILE = new File(["{}"], "metalmark-export-2026-09-20.json", { type: "appli
  * through `useMutation`, and stubbing that would leave the button's own wiring —
  * the part a user actually touches — untested. What the mutations *call* is
  * stubbed, so nothing leaves the process.
+ *
+ * The router is real because the tab *is* a URL since issue #35: the open tab
+ * lives in `?tab=`, which is what lets the command palette name one of Settings'
+ * eleven sections as a destination. A `MemoryRouter` is enough — the page reads
+ * and writes the query string and never renders a `<Route>`.
  */
 async function openData() {
   const client = new QueryClient({
@@ -82,7 +88,9 @@ async function openData() {
   });
   render(
     <QueryClientProvider client={client}>
-      <Settings />
+      <MemoryRouter>
+        <Settings />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   await userEvent.click(screen.getByTestId("settings-tab-data"));
