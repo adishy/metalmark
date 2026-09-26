@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.deps import RequestContext, get_context, require_admin
 from app.schemas.ledger import (
     AutoCategorizeResult,
     CategoryCreate,
+    CategoryDeleteResult,
     CategoryGroupCreate,
     CategoryGroupOut,
     CategoryOut,
     CategoryUpdate,
+    CategoryUsageOut,
     TagCreate,
     TagOut,
 )
@@ -78,9 +80,27 @@ async def create_tag(data: TagCreate, ctx: RequestContext = Depends(get_context)
     return TagOut.model_validate(t)
 
 
-@router.delete("/categories/{category_id}", status_code=204)
-async def delete_category(category_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
-    await ledger.delete_category(ctx.session, category_id)
+@router.delete("/categories/{category_id}", response_model=CategoryDeleteResult)
+async def delete_category(
+    category_id: uuid.UUID,
+    reassign_to: uuid.UUID | None = Query(default=None),
+    ctx: RequestContext = Depends(get_context),
+) -> CategoryDeleteResult:
+    """Delete a category, moving its entries to ``reassign_to`` or to none.
+
+    ``reassign_to`` absent — or absent because the reader chose "Uncategorized" —
+    means the entries end up with no category at all, which is what the reports
+    already show as their Uncategorized bucket. The counts come back so the
+    caller can say what moved.
+    """
+    counts = await ledger.delete_category(ctx.session, category_id, reassign_to=reassign_to)
+    return CategoryDeleteResult(**counts)
+
+
+@router.get("/categories/{category_id}/usage", response_model=CategoryUsageOut)
+async def category_usage(category_id: uuid.UUID, ctx: RequestContext = Depends(get_context)):
+    """How many rows are filed under a category: what a delete would move."""
+    return CategoryUsageOut(**(await ledger.category_usage(ctx.session, category_id)))
 
 
 @router.delete("/category-groups/{group_id}", status_code=204)

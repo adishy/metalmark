@@ -243,6 +243,17 @@ function ComboboxListbox({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const [drop, setDrop] = useState<"down" | "up">("down");
+  /*
+   * How tall the list may be where it opens, when that is less than
+   * `max-h-72`. A `Dialog` body scrolls, and `overflow-y-auto` clips what
+   * overflows it *above* the scroll origin with no way to scroll back to it:
+   * a 288 px list flipped up inside a 140 px body is a list whose upper rows
+   * cannot be reached at all, by mouse or by keyboard. Bounding the popup to
+   * the room it actually has turns that into a list that scrolls inside
+   * itself. `null` means "not measured" — jsdom has no layout, and the class
+   * alone is the bound there.
+   */
+  const [room, setRoom] = useState<number | null>(null);
 
   /*
    * The highlight as the keyboard handlers have to see it.
@@ -300,7 +311,11 @@ function ComboboxListbox({
       }
     }
     const below = bottom - rect.bottom;
-    setDrop(below < LISTBOX_MAX_PX && rect.top - top > below ? "up" : "down");
+    const up = below < LISTBOX_MAX_PX && rect.top - top > below;
+    setDrop(up ? "up" : "down");
+    // The room on the side it just chose, less the 4 px gap the list keeps
+    // from the control (`mt-1` / `mb-1`).
+    setRoom(Math.min(LISTBOX_MAX_PX, Math.max((up ? rect.top - top : below) - 4, 0)));
   };
 
   const show = (edge: "first" | "last" | "selected") => {
@@ -467,6 +482,7 @@ function ComboboxListbox({
           // keyboard and `aria-activedescendant` names the highlighted row, which
           // is exactly why these rows are not buttons.
           onMouseDown={(e) => e.preventDefault()}
+          style={room === null ? undefined : { maxHeight: room }}
           className={`absolute left-0 right-0 z-50 max-h-72 overflow-y-auto rounded-control border border-border-strong bg-surface-raised py-1 shadow-lg ${
             drop === "up" ? "bottom-full mb-1" : "top-full mt-1"
           }`}

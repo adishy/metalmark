@@ -9,8 +9,10 @@ import type {
   CashFlowSankey,
   CashFlowSeries,
   Category,
+  CategoryDeleteResult,
   CategoryGroup,
   CategoryUpdate,
+  CategoryUsage,
   FxRate,
   GranularityParam,
   Household,
@@ -368,11 +370,38 @@ export function useCreateCategory() {
   });
 }
 
+/** What a delete would move. Fetched only when a confirmation is about to be
+ *  shown, so the counts are read at the moment they are promised — and read from
+ *  the server, which is the only side that can count them without pulling the
+ *  transactions into the browser. */
+export function useCategoryUsage(id: string | null) {
+  return useQuery({
+    queryKey: ["category-usage", id],
+    queryFn: () => api.get<CategoryUsage>(`/categories/${id}/usage`),
+    enabled: id !== null,
+  });
+}
+
+/** Delete a category, filing its entries under `reassignTo` — or, when that is
+ *  absent, under nothing at all: "Uncategorized" is the *absence* of a category,
+ *  so the request carries no target and the column comes back null. It is a
+ *  change to rows, not to the taxonomy, so the ledger is invalidated with the
+ *  taxonomy — otherwise the sankey and the spending donut would keep counting
+ *  entries the delete just moved. */
 export function useDeleteCategory() {
   const invalidate = useInvalidateTaxonomy();
+  const invalidateLedger = useInvalidateLedger();
   return useMutation({
-    mutationFn: (id: string) => api.del<void>(`/categories/${id}`),
-    onSuccess: invalidate,
+    mutationFn: (v: { id: string; reassignTo?: string | null }) =>
+      api.del<CategoryDeleteResult>(
+        `/categories/${v.id}${
+          v.reassignTo ? `?reassign_to=${encodeURIComponent(v.reassignTo)}` : ""
+        }`,
+      ),
+    onSuccess: () => {
+      invalidate();
+      invalidateLedger();
+    },
   });
 }
 

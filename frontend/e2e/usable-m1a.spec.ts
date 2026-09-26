@@ -101,9 +101,17 @@ test("add, rename and delete a category in settings", async ({ page }) => {
   await expect(page.getByTestId("settings-panel-categories")).toBeVisible();
 
   const name = `Bikes ${run}`;
+  // A second category to move things *to*. Both are created through the same
+  // form, so both land in the same group — and a replacement has to share the
+  // group's type, because a category's type is its group's and the reports read
+  // it. Anything else would be a list of one.
+  const spare = `Pumps ${run}`;
   await page.getByTestId("category-name").fill(name);
   await page.getByTestId("category-save").click();
   await expect(page.getByTestId("category-list")).toContainText(name);
+  await page.getByTestId("category-name").fill(spare);
+  await page.getByTestId("category-save").click();
+  await expect(page.getByTestId("category-list")).toContainText(spare);
 
   // Rename it from its own row: Edit opens a dialog over the list, so the tab
   // you were on is still the tab you are on — no full-page context switch.
@@ -113,12 +121,65 @@ test("add, rename and delete a category in settings", async ({ page }) => {
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("category-list")).toContainText(`${name} renamed`);
 
-  // Delete it from that same dialog: the row carries one action (§4.6), and
-  // the destructive one lives where the full-page context already is.
-  const renamed = page.locator('[data-testid="category-list"] li', { hasText: `${name} renamed` }).last();
+  // File something under it, so the delete has a count to state and something
+  // to move. Reassigned to another category rather than left uncategorized:
+  // an uncategorized transaction lands in the needs_review queue, and this spec
+  // must not leave a backlog behind for review.spec.ts.
+  const accountName = `Bikes Acct ${run}`;
+  const merchant = `Bike pump ${run}`;
+  await page.getByTestId("nav-accounts").click();
+  await addAccount(page, { name: accountName, balance: "300", currency: "USD" });
+  await page.getByTestId("nav-transactions").click();
+  await addTransaction(page, {
+    accountName,
+    amount: "-24.00",
+    merchant,
+    category: `${name} renamed`,
+  });
+
+  // Delete it from the same dialog the rename happened in: the row carries one
+  // action (§4.6), and the destructive one lives behind its own step (§4.12).
+  await page.getByTestId("nav-settings").click();
+  const renamed = page
+    .locator('[data-testid="category-list"] li', { hasText: `${name} renamed` })
+    .last();
   await renamed.getByRole("button", { name: "Edit" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const dialogTestId = (await dialog.getAttribute("data-testid")) ?? "";
+  const catId = dialogTestId.replace("edit-category-dialog-", "");
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+  // How much is at stake, said before anything is destroyed — and the focus is
+  // on the safe option, never on the red one.
+  await expect(dialog.getByTestId(`category-usage-${catId}`)).toHaveText(
+    "1 transaction is filed under it.",
+  );
+  await expect(dialog.getByTestId(`category-keep-${catId}`)).toBeFocused();
+
+  // Default target: the sentinel. "Uncategorized" is the absence of a category
+  // rather than a row, so the option is the empty value and reads as its own
+  // thing — a household category really called "Uncategorized" is a different
+  // option with a different value.
+  await expect(dialog.getByTestId(`category-target-${catId}`)).toHaveValue(
+    "No category (Uncategorized)",
+  );
+
+  // Move it to a real category instead, and the confirmation says which.
+  await pickOption(dialog, `category-target-${catId}`, new RegExp(`${spare}$`));
+  await dialog.getByTestId(`category-delete-confirm-btn-${catId}`).click();
+
   await expect(page.getByTestId("category-list")).not.toContainText(name);
+  // The row is gone, so this line is what says where its entries went.
+  const result = page.getByTestId("category-delete-result");
+  await expect(result).toContainText(`Deleted “${name} renamed”`);
+  await expect(result).toContainText("moved 1 transaction to");
+  await expect(result).toContainText(spare);
+
+  // No orphan: the transaction is still there and now reads the new category.
+  await page.getByTestId("nav-transactions").click();
+  await expect(page.getByTestId("txn-list").locator("li", { hasText: merchant })).toContainText(
+    spare,
+  );
 });
 
 test("add an FX rate in settings", async ({ page }) => {

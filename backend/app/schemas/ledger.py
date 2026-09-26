@@ -155,6 +155,27 @@ class CategoryGroupOut(BaseModel):
     sort: int
 
 
+class CategoryUsageOut(BaseModel):
+    """What is filed under one category — the rows a delete would move.
+
+    Returned rather than implied, exactly like ``OwnerDeleteResult``: the count is
+    what the confirmation says *before* anything is destroyed, and it is a query
+    the reader cannot do from the browser without pulling the transactions
+    themselves. Two numbers and not one, because the two live in different tables
+    and "42 transactions" would under-count a split parent by its legs.
+    """
+
+    transactions: int
+    splits: int
+
+
+class CategoryDeleteResult(BaseModel):
+    """How many rows the delete moved onto ``reassign_to`` (``null`` = none)."""
+
+    reassigned_transactions: int
+    reassigned_splits: int
+
+
 class TagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     color: str | None = None

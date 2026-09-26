@@ -670,6 +670,16 @@ paths:
       tags:
       - categories
       summary: Delete Category
+      description: 'Delete a category, moving its entries to ``reassign_to`` or to none.
+
+
+        ``reassign_to`` absent — or absent because the reader chose "Uncategorized" —
+
+        means the entries end up with no category at all, which is what the reports
+
+        already show as their Uncategorized bucket. The counts come back so the
+
+        caller can say what moved.'
       operationId: delete_category_categories__category_id__delete
       parameters:
       - name: category_id
@@ -679,6 +689,15 @@ paths:
           type: string
           format: uuid
           title: Category Id
+      - name: reassign_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Reassign To
       - name: metalmark_session
         in: cookie
         required: false
@@ -688,8 +707,12 @@ paths:
           - type: 'null'
           title: Metalmark Session
       responses:
-        '204':
+        '200':
           description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryDeleteResult'
         '422':
           description: Validation Error
           content:
@@ -790,6 +813,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /categories/{category_id}/usage:
+    get:
+      tags:
+      - categories
+      summary: Category Usage
+      description: 'How many rows are filed under a category: what a delete would move.'
+      operationId: category_usage_categories__category_id__usage_get
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryUsageOut'
         '422':
           description: Validation Error
           content:
@@ -5207,6 +5266,20 @@ components:
       - group_id
       - name
       title: CategoryCreate
+    CategoryDeleteResult:
+      properties:
+        reassigned_transactions:
+          type: integer
+          title: Reassigned Transactions
+        reassigned_splits:
+          type: integer
+          title: Reassigned Splits
+      type: object
+      required:
+      - reassigned_transactions
+      - reassigned_splits
+      title: CategoryDeleteResult
+      description: How many rows the delete moved onto ``reassign_to`` (``null`` = none).
     CategoryGroupCreate:
       properties:
         name:
@@ -5350,6 +5423,31 @@ components:
           title: Sort
       type: object
       title: CategoryUpdate
+    CategoryUsageOut:
+      properties:
+        transactions:
+          type: integer
+          title: Transactions
+        splits:
+          type: integer
+          title: Splits
+      type: object
+      required:
+      - transactions
+      - splits
+      title: CategoryUsageOut
+      description: 'What is filed under one category — the rows a delete would move.
+
+
+        Returned rather than implied, exactly like ``OwnerDeleteResult``: the count is
+
+        what the confirmation says *before* anything is destroyed, and it is a query
+
+        the reader cannot do from the browser without pulling the transactions
+
+        themselves. Two numbers and not one, because the two live in different tables
+
+        and "42 transactions" would under-count a split parent by its legs.'
     CheckItemOut:
       properties:
         account_id:
