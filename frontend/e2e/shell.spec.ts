@@ -5,14 +5,14 @@ import { login } from "./helpers";
 // renders inside rather than to any one page. One so far — where the page is
 // scrolled to when you arrive at it.
 
-// Transactions to Reports, and the pages are the point: the assertion is that
+// Transactions to Insights, and the pages are the point: the assertion is that
 // the *destination* starts at the top, so a destination that cannot hold a
 // scroll offset would pass whatever the code did. Review is exactly that page at
 // 1280x720 — 720 px tall in a 720 px window, `max scroll 0` — so navigating to
 // it measures nothing, which is what the first version of this test did. Both
 // of these are 2553 and 2306 px at 1280x720 and both scroll at every width.
 const FROM = "transactions";
-const TO = "reports";
+const TO = "insights";
 
 /** Scroll the current page to the bottom and return where that landed. */
 async function scrollToBottom(page: import("@playwright/test").Page): Promise<number> {
@@ -39,7 +39,7 @@ test("a route change starts at the top of the new page", async ({ page }) => {
   await expect(page.getByTestId(`nav-${TO}`)).toHaveAttribute("aria-current", "page");
 
   // Before this, the answer here was 1586 — the offset the ledger was left at,
-  // clamped to what Reports can hold. The header is `sticky`, so navigation
+  // clamped to what Insights can hold. The header is `sticky`, so navigation
   // stays put at any offset and nothing looked wrong until you read the page
   // and found the top of it missing.
   expect(await page.evaluate(() => window.scrollY)).toBe(0);

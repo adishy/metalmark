@@ -353,7 +353,7 @@ style={{ x, rotate: reduce ? 0 : rotate }}
 ### 2.9 Charts (ECharts)
 
 Charts must **read the tokens at runtime**. Hardcoded greys in an option object — the
-current pattern in `Reports.tsx` (`#475569`, `#1e293b`, `#94a3b8`, `#0f172a`) — are
+current pattern in `insights/Overview.tsx` (`#475569`, `#1e293b`, `#94a3b8`, `#0f172a`) — are
 why a chart cannot follow a theme change.
 
 **The module already exists** as `src/theme/chartTokens.ts`. Its architecture is right
@@ -419,7 +419,7 @@ Three further chart rules:
 
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
-  category + amount under the spending donut (already correct in `Reports.tsx` —
+  category + amount under the spending donut (already correct in `insights/Overview.tsx` —
   it is now required, not incidental), and give the `<Chart>` wrapper
   `role="img"` with an `aria-label` that states the finding.
 - **Re-render on theme change.** `ReactECharts` will not notice a CSS variable
@@ -1091,9 +1091,13 @@ default and the design target — build at 360 px first, then widen.
 A row of chips or tabs that does not fit is not made to scroll: below `sm:` a choice
 from a list is a **pill that opens a sheet** (`SheetSelect` — "Range · This year ⌄"),
 and chips that stay are allowed to wrap. Two exceptions, each marked `data-scroll-x-ok`
-or a labelled region: the **Settings section tabs** (eleven sections read better as
-tabs than from a picker — one swipeable row, edges faded, the chosen tab kept in
-view), and a data table whose columns are the point (the CSV import preview). `e2e/mobile.spec.ts` walks every route at 360 and 390 px and fails on any
+or a labelled region: a **`ScrollTabs`** strip (`components/ScrollTabs.tsx` — the
+**Settings section tabs**, eleven sections that read better as tabs than from a picker,
+and **Insights' tabs**; one swipeable row, edges faded, the chosen tab kept in view,
+roving tabindex and arrow keys per §7.4), and a data table whose columns are the point
+(the CSV import preview). `ScrollTabs` is the one sanctioned sideways strip — a new tab
+list goes through it rather than reimplementing the fade mask and the roving-tabindex
+model. `e2e/mobile.spec.ts` walks every route at 360 and 390 px and fails on any
 element past the edge or any container that scrolls sideways. Date inputs carry
 `min-width: 0` in `index.css`, because iOS gives them an intrinsic width wider than a
 phone column.
@@ -1424,7 +1428,7 @@ grep -rn 'outline-none' src/ | grep -v 'ring-'
 #    Scoped to the files that build chart options rather than all of src/pages/:
 #    Settings.tsx holds hex legitimately, as the *default colour of a new
 #    category* — user data, not a theme value.
-grep -rn '#[0-9a-fA-F]\{6\}' src/pages/Reports.tsx src/pages/DesignSystem.tsx src/components/Chart.tsx
+grep -rn '#[0-9a-fA-F]\{6\}' src/pages/insights/Overview.tsx src/pages/DesignSystem.tsx src/components/Chart.tsx
 
 # 6. A background token on an inline text element. A `bg-*` here is a text
 #    colour that got machine-substituted: it either paints a box where a colour
@@ -1483,7 +1487,7 @@ Settings card.
 - DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check
   `text-fg-muted` on `surface-inset`, which is the tightest pair we allow.
 - Lighthouse → Accessibility ≥95 on `/login`, `/accounts`, `/transactions`,
-  `/reports`, `/settings`. Note the score is a floor, not the goal: it does not test
+  `/insights/overview`, `/settings`. Note the score is a floor, not the goal: it does not test
   target size or live regions.
 - axe DevTools for a structural pass.
 - DevTools → Accessibility pane → check the **computed accessible name** of every
@@ -1528,7 +1532,7 @@ One global width is the bug. Width follows what the content *is*:
 | Content | Max width | Why |
 |---|---|---|
 | Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
-| Reports, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
+| Insights, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
 | Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
 
 The shell sets the **widest** case and pages narrow themselves; a page that needs less
@@ -1560,9 +1564,10 @@ Five shapes, and they are the whole of it:
   with the detail panel in the second column, shown when a row is selected and a quiet
   empty state otherwise. This is the single biggest win: the phone's row → sheet → back
   loop becomes one click with no navigation.
-- **Reports — two-up.** KPI row spans both columns; the charts pair two per row above
-  `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their meaning when
-  squeezed.
+- **Insights (Overview) — two-up.** KPI row spans both columns; the charts pair two per
+  row above `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their
+  meaning when squeezed. The tab strip above it is `ScrollTabs` (§5), not part of this
+  shape.
 - **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
   their internal layout and simply stop being full-width.
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first

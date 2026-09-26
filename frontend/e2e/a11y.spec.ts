@@ -35,7 +35,14 @@ const MIN = 44;
 /** Routes that render their whole content on load. `/admin` is in here rather
  *  than reached through the settings walk because it is a route of its own —
  *  and a route nobody measures is a route nobody has measured. */
-const ROUTES = ["/accounts", "/transactions", "/review", "/reports", "/admin"] as const;
+const ROUTES = [
+  "/accounts",
+  "/transactions",
+  "/review",
+  "/insights/overview",
+  "/insights/allocations",
+  "/admin",
+] as const;
 
 /** Only one Settings tab is mounted at a time; the default is "categories". */
 const SETTINGS_TABS = [
@@ -158,15 +165,15 @@ test.describe("target size (SC 2.5.8)", () => {
     await expect(page.getByTestId("import-cancel")).toBeVisible();
     await measure("/transactions (import dialog)");
 
-    // The reports window is the same gap one level down. The route sweep above
+    // The Insights window is the same gap one level down. The route sweep above
     // measures the range and granularity chips, but the custom range's two date
     // inputs are in the DOM only once Custom is picked — and date inputs are
     // exactly where a native control's own height can win over the padding that
     // was supposed to set it.
-    await page.goto("/reports");
+    await page.goto("/insights/overview");
     await page.getByTestId("range-custom").click();
     await expect(page.getByTestId("range-start")).toBeVisible();
-    await measure("/reports#custom-window");
+    await measure("/insights/overview#custom-window");
 
     expect(failures, `undersized targets:\n${failures.join("\n")}`).toEqual([]);
   });

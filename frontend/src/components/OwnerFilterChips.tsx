@@ -1,4 +1,4 @@
-// Owner scope selector shared by Transactions, Accounts and Reports, so the
+// Owner scope selector shared by Transactions, Accounts and Insights, so the
 // three pages filter the same way (and the same owner stays selected as the
 // user moves between them by convention, not by shared state).
 import type { Owner } from "@/api/types";
