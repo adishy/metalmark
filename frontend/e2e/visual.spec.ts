@@ -64,7 +64,7 @@ test.describe("theme resolution", () => {
       // The meta theme-color drives mobile browser chrome; it must track the
       // resolved theme, not the choice.
       const meta = await page.getAttribute('meta[name="theme-color"]', "content");
-      expect(meta).toBe(c.expect === "dark" ? "#020617" : "#f8fafc");
+      expect(meta).toBe(c.expect === "dark" ? "#020617" : "#f0f4f8");
     });
   }
 

@@ -17,7 +17,7 @@ export const THEME_KEY = "metalmark-theme";
 
 /** Mobile browser chrome / iOS status bar. Mirrors `--surface` in each theme. */
 const THEME_COLOR: Record<ResolvedTheme, string> = {
-  light: "#f8fafc",
+  light: "#f0f4f8",
   dark: "#020617",
 };
 

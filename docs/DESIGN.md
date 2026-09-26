@@ -38,35 +38,48 @@ Scope: the `frontend/` React app. Not the API, not the finance rules.
 Seventeen tokens: the nine content roles, five support tokens
 (`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`), and three `-ink`
 variants for text on a tint (below the table). Contrast ratios
-below are computed against the surface each token is actually used on, and the
-**worst case in each theme** is the number shown.
+below are computed against the surface each token is actually used on — `fg`,
+`fg-muted` and `border-strong` on all three levels, the role colours on the page and on
+a card, `border` where a divider is drawn (a card), `accent-fg` on `accent` — and the
+**worst case in each theme** is the number shown. Every figure here is measured with the
+WCAG 2.x relative-luminance formula rather than estimated, and every figure that a change
+moves is re-measured in the same commit — re-deriving one takes five lines of any language
+with `Math.pow`.
 
 | Role | Light | Dark | Verified contrast (worst case) |
 |---|---|---|---|
-| `surface` — page background | `#f8fafc` | `#020617` | — (base) |
-| `surface-raised` — cards, rows, sheets | `#ffffff` | `#0f172a` | — (base) |
-| `surface-inset` — inputs, wells, chips | `#f1f5f9` | `#1e293b` | — (base) |
-| `border` — dividers, decorative only | `#e2e8f0` | `#1e293b` | 1.23:1 light / 1.13:1 dark (no requirement) |
-| `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.34:1** light / **3.07:1** dark (needs 3:1) |
-| `fg` — primary text | `#0f172a` | `#f1f5f9` | **16.30:1** light / **13.35:1** dark (needs 4.5:1) |
-| `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.92:1** light / **5.71:1** dark (needs 4.5:1) |
-| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **5.23:1** light / **9.59:1** dark (needs 4.5:1) |
+| `surface` — page background | `#f0f4f8` | `#020617` | — (base) |
+| `surface-raised` — cards, rows, sheets | `#ffffff` | `#131b2b` | — (base) |
+| `surface-inset` — inputs, wells, chips | `#e8eef5` | `#1e293b` | — (base) |
+| `border` — dividers, decorative only | `#cbd5e1` | `#2e394b` | 1.48:1 light / 1.47:1 dark on a card (no requirement) |
+| `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.07:1** light / **3.07:1** dark (needs 3:1) |
+| `fg` — primary text | `#0f172a` | `#f1f5f9` | **15.28:1** light / **13.35:1** dark (needs 4.5:1) |
+| `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.49:1** light / **5.71:1** dark (needs 4.5:1) |
+| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **4.95:1** light / **9.59:1** dark (needs 4.5:1) |
 | `accent-fg` — label on `accent` fill | `#ffffff` | `#020617` | **5.47:1** light / **10.84:1** dark (needs 4.5:1) |
-| `positive` — income, gain | `#047857` | `#34d399` | **5.24:1** light / **9.29:1** dark (needs 4.5:1) |
-| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **6.18:1** light / **6.45:1** dark (needs 4.5:1) |
-| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.80:1** light / **10.69:1** dark (needs 4.5:1) |
+| `positive` — income, gain | `#047857` | `#34d399` | **4.96:1** light / **9.29:1** dark (needs 4.5:1) |
+| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **5.85:1** light / **6.45:1** dark (needs 4.5:1) |
+| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.54:1** light / **10.69:1** dark (needs 4.5:1) |
 | `danger` — destructive button fill | `#b91c1c` | `#b91c1c` | **6.47:1** with `#ffffff` label, both themes |
-| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **5.23:1** light / **9.59:1** dark (needs 3:1) |
+| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **4.95:1** light / **10.84:1** dark (needs 3:1) |
 
 **Ink tokens — text on a tint.** A selected chip (`bg-accent/20`), a "needs review"
 badge (`bg-warning/20`) and an error pill (`bg-negative/20`) put the role colour on a
-20 % wash of itself, and in light mode that fails 4.5:1 — measured 3.96:1 (accent),
-3.80:1 (warning), 4.4:1 (negative, on the page). Each role has an **`-ink`** token for
-exactly this: one step darker in light mode (teal-800 5.9:1, amber-800 5.8:1, red-800
-6.4:1), and equal to the role in dark mode, where it already clears 6.3:1. Rule: **text
-on a `bg-{role}/N` tint is `text-{role}-ink`**, never `text-{role}`.
+20 % wash of itself, and in light mode that fails 4.5:1 — measured on the page 3.77:1
+(accent), 3.47:1 (warning) and 4.17:1 (negative), and on a well 3.59 / 3.31 / 3.97. The
+one pairing that clears the floor is the negative pill on a card, at 4.57:1, which is not
+margin to build on. Each role has an **`-ink`** token for exactly this: one step darker in
+light mode (teal-800 5.23:1, amber-800 4.91:1, red-800 5.36:1 on the page; 4.98 / 4.67 /
+5.09 on a well), and equal to the role in dark mode, where a card gives 6.04:1 (accent),
+6.61:1 (warning) and 4.61:1 (negative). Rule: **text on a `bg-{role}/N` tint is
+`text-{role}-ink`**, never `text-{role}`.
 
-Three rules that follow from the table and are not negotiable:
+`negative-ink` on `bg-negative/20` over a *dark well* is 3.93:1 — a known gap that
+predates this table, unchanged by it, and not fixed here because no call site puts those
+two together (every `bg-negative/20` pill sits on a card or the page). Closing it means
+changing `negative` itself — a content role — so it is left alone deliberately.
+
+Four rules that follow from the table and are not negotiable:
 
 - **`fg-muted` is the floor.** There is no third, lighter text colour. The current
   `text-slate-500` on `bg-slate-900` is 3.75:1 and fails WCAG 1.4.3; deleting that
@@ -77,6 +90,40 @@ Three rules that follow from the table and are not negotiable:
   choice but computes to 2.56:1 and fails.
 - **`danger` is theme-independent.** `#b91c1c` works on both surfaces, so a
   destructive button is the same red in every theme and never has to be re-reasoned.
+- **The three surfaces are a ramp with a ceiling in each theme, and a content role sets
+  it.** In light, the page cannot go darker than `#f0f4f8`: `warning` (`#b45309`, the
+  weakest content role, 5.02:1 on white) is used *on the page* (`NoticePermission`), so a
+  darker page drops it under 4.5:1 — and the well cannot go darker than `#e8eef5`, because the
+  two translucent wells that carry warning text measure 4.58:1 at `bg-surface-inset/60`
+  over a card and 4.72:1 at `/40`. In dark, `border-strong` at 3.07:1 on the well is the
+  ceiling for the well; with `page → inset` therefore fixed at 1.38:1, the two adjacent
+  steps trade off exactly against each other, so they are equalised at 1.17:1 rather than
+  the 1.13/1.22 split they replaced. `border` is the one role in the ramp with no
+  requirement on it, and in dark it needed the room: the well was painted in the *same
+  value* as the border, so a border drawn on a well was invisible (1.00:1).
+
+The ramp, measured (this is what "more contrast between the three levels" means, and it
+is the only place these three pairs are stated):
+
+| Adjacent step | Light | Dark |
+|---|---|---|
+| page → card | 1.05:1 → **1.11:1** | 1.13:1 → **1.17:1** |
+| card → well | 1.10:1 → **1.17:1** | 1.22:1 → **1.18:1** |
+| page → well | 1.05:1 → **1.06:1** | 1.38:1 → 1.38:1 |
+| border on a card | 1.23:1 → **1.48:1** | 1.22:1 → **1.47:1** |
+| border on a well | 1.13:1 → **1.22:1** | 1.00:1 → **1.26:1** |
+
+Light's two adjacent pairs both improve (1.05 → 1.11 and 1.10 → 1.17) and neither is
+bounded, so they could go further only by moving the page or the well past a content
+role. Dark's weakest adjacent pair rises from 1.13:1 to 1.17:1, which is the most the
+ceiling allows: the well is already at the value `border-strong` permits, so the two
+steps trade off exactly, and dark's `card → well` sheds 0.04 to buy the weaker step up.
+
+The two *ends* of the ramp are a different story: `page → well` is 1.06:1 in light and
+1.38:1 in dark, and light's cannot improve without one of the two bounds above breaking.
+A well sitting directly on the page — the active nav pill, an input outside a card — is
+identified by its `border-strong` outline (4.07:1 light against the well, 4.55:1 against
+the page), which is exactly the job §2.1 gives that token.
 
 ### 2.2 Wiring into Tailwind v3
 
@@ -168,10 +215,10 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
 /* Light is the default; .dark on <html> overrides it. Every value is
    "R G B" so Tailwind's /opacity modifier works. */
 :root {
-  --surface: 248 250 252;        /* #f8fafc */
-  --surface-raised: 255 255 255; /* #ffffff */
-  --surface-inset: 241 245 249;  /* #f1f5f9 */
-  --border: 226 232 240;         /* #e2e8f0 */
+  --surface: 240 244 248;        /* #f0f4f8 — the page */
+  --surface-raised: 255 255 255; /* #ffffff — cards */
+  --surface-inset: 232 238 245;  /* #e8eef5 — wells */
+  --border: 203 213 225;         /* #cbd5e1 — slate-300 */
   --border-strong: 100 116 139;  /* #64748b */
   --fg: 15 23 42;                /* #0f172a */
   --fg-muted: 71 85 105;         /* #475569 */
@@ -187,7 +234,8 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --focus: 15 118 110;           /* #0f766e */
 
   /* Categorical series, ordered so neighbouring slices differ in lightness.
-     All >= 5.02:1 on light surface (WCAG 1.4.11 needs 3:1). */
+     Worst series: 5.02:1 on a card, 4.54:1 on the page, 4.30:1 on a well
+     (WCAG 1.4.11 needs 3:1). */
   --chart-1: 15 118 110;   --chart-2: 3 105 161;
   --chart-3: 79 70 229;    --chart-4: 190 24 93;
   --chart-5: 180 83 9;     --chart-6: 4 120 87;
@@ -196,10 +244,10 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
 }
 
 .dark {
-  --surface: 2 6 23;             /* #020617 */
-  --surface-raised: 15 23 42;    /* #0f172a */
-  --surface-inset: 30 41 59;     /* #1e293b */
-  --border: 30 41 59;            /* #1e293b */
+  --surface: 2 6 23;             /* #020617 — slate-950 */
+  --surface-raised: 19 27 43;    /* #131b2b — slate-900 lifted one step */
+  --surface-inset: 30 41 59;     /* #1e293b — at the border-strong ceiling */
+  --border: 46 57 75;            /* #2e394b — slate-800 toward slate-700 */
   --border-strong: 100 116 139;  /* #64748b */
   --fg: 241 245 249;             /* #f1f5f9 */
   --fg-muted: 148 163 184;       /* #94a3b8 */
@@ -214,7 +262,8 @@ Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`
   --danger: 185 28 28;           /* #b91c1c — same fill in both themes */
   --focus: 45 212 191;           /* #2dd4bf */
 
-  /* Same ten hues, lifted for a dark surface. All >= 6.76:1. */
+  /* Same ten hues, lifted for a dark surface. Worst series: 6.76:1 on the
+     page, 5.77:1 on a card, 4.90:1 on a well. */
   --chart-1: 20 184 166;   --chart-2: 56 189 248;
   --chart-3: 129 140 248;  --chart-4: 244 114 182;
   --chart-5: 251 191 36;   --chart-6: 52 211 153;
@@ -410,7 +459,7 @@ The mapping, per chart:
 | `axisLabel.color`, `legend.textStyle.color` | `fg-muted` |
 | `tooltip.backgroundColor` / `borderColor` | `surface-raised` / `border` |
 | `tooltip.textStyle.color` | `fg` |
-| `pie.itemStyle.borderColor` | `surface-raised` (currently `#0f172a`) |
+| `pie.itemStyle.borderColor` | `surface-raised` (currently `#131b2b` dark) |
 | series colours | `chart-1` … `chart-10` in order |
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
@@ -608,9 +657,10 @@ default, and it is what a user with JS disabled or still loading gets. The scrip
 job is to *remove* it when the resolution is light, and `classList.toggle` does that in
 one line. Remove it and the no-JS state becomes light-on-a-dark-app instead.
 
-**Mobile browser chrome.** The static `<meta name="theme-color" content="#0f172a">`
-must be updated from JS on theme change (`#f8fafc` light, `#020617` dark) or the
-phone's toolbar stays dark over a light page.
+**Mobile browser chrome.** The static `<meta name="theme-color" content="#f0f4f8">` in
+`index.html` is the pre-JS value and mirrors the light `--surface`; JS must update it on
+theme change (`#f0f4f8` light, `#020617` dark — `THEME_COLOR` in `theme.ts`) or the
+phone's toolbar stays dark over a light page. `e2e/visual.spec.ts` asserts both.
 
 **The React side** is one tiny module, `src/theme/theme.ts`:
 
@@ -633,7 +683,7 @@ export function apply(pref: Theme) {
   try { localStorage.setItem(KEY, pref); } catch {}
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", dark ? "#020617" : "#f8fafc");
+    ?.setAttribute("content", dark ? "#020617" : "#f0f4f8");
 }
 ```
 
@@ -1573,8 +1623,9 @@ Settings card.
 - DevTools → Rendering → *Emulate CSS `prefers-color-scheme`* — flip both ways with no
   reload; the page must not flash on load (hard-reload with cache disabled to test the
   blocking script).
-- DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check
-  `text-fg-muted` on `surface-inset`, which is the tightest pair we allow.
+- DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check the
+  two tightest pairs: `text-warning` on the page (4.54:1 light, the floor the palette is
+  built from) and `text-fg-muted` on `surface-inset` (6.49:1 light, 5.71:1 dark).
 - Lighthouse → Accessibility ≥95 on `/login`, `/accounts`, `/transactions`,
   `/insights/overview`, `/settings`. Note the score is a floor, not the goal: it does not test
   target size or live regions.

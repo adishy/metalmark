@@ -14,40 +14,47 @@
  * Every value is picked against the *worst* background it is actually used on,
  * not its typical one. Ratios are tabulated in docs/DESIGN.md §2.1. The three
  * that are easy to get wrong:
- *   - `fg-muted` is the floor. Slate-500 fails in both themes (3.07 light /
+ *   - `fg-muted` is the floor. Slate-500 fails in both themes (4.31 light /
  *     3.75 dark), which is what this replaced.
  *   - `border-strong` is a control boundary, so it must clear 3:1 (1.4.11) —
- *     4.34:1 light, 3.07:1 dark. `border` is decorative and has no minimum.
+ *     4.07:1 light, 3.07:1 dark. `border` is decorative and has no minimum.
  *   - `accent` flips *value*, not just shade: teal-500 is 7.17:1 on the dark
  *     surface but 2.49:1 on white, so light uses teal-700.
+ *
+ * The three surfaces are one ramp, and it is bounded in both themes. Light:
+ * `warning` is 4.54:1 on the page and 4.30:1 on a well, so the page cannot go
+ * below this value without a content role changing. Dark: `border-strong` is
+ * 3.07:1 on the well, so the well is at its ceiling. See §2.1.
  */
 :root {
-  --surface: 248 250 252; /* slate-50   */
-  --surface-raised: 255 255 255; /* white      */
-  --surface-inset: 241 245 249; /* slate-100  */
-  --border: 226 232 240; /* slate-200  */
+  --surface: 240 244 248; /* the page — a step below slate-100 */
+  --surface-raised: 255 255 255; /* cards — white */
+  --surface-inset: 232 238 245; /* wells — a step below the page */
+  --border: 203 213 225; /* slate-300  */
   --border-strong: 100 116 139; /* slate-500  */
   --fg: 15 23 42; /* slate-900  */
   --fg-muted: 71 85 105; /* slate-600  */
   --accent: 15 118 110; /* teal-700   */
   --accent-fg: 255 255 255;
   /* Text on an accent *tint* (a selected chip, bg-accent/20). The accent itself
-     is 3.96:1 there; one step darker is 5.9:1. */
+     is 4.12:1 on a card and 3.59:1 on a well; one step darker is 5.71:1 and
+     4.98:1 there. */
   --accent-ink: 17 94 89; /* teal-800   */
   --positive: 4 120 87; /* emerald-700 */
   --negative: 185 28 28; /* red-700    */
-  /* Text on a negative tint: red-700 on bg-negative/20 is 4.57:1 on white and
-     under 4.5 on the page; red-800 is 6.4:1. */
+  /* Text on a negative tint: red-700 on bg-negative/20 is 4.57:1 on a card but
+     3.97:1 on a well; red-800 is 5.87:1 and 5.09:1 there. */
   --negative-ink: 153 27 27; /* red-800    */
   --warning: 180 83 9; /* amber-700  */
-  /* Text on a warning tint (a "needs review" badge): amber-700 is 3.80:1 on
-     bg-warning/20, amber-800 is 5.8:1. */
+  /* Text on a warning tint (a "needs review" badge): amber-700 is 3.80:1 on a
+     card and 3.31:1 on a well; amber-800 is 5.37:1 and 4.67:1 there. */
   --warning-ink: 146 64 14; /* amber-800  */
   --danger: 185 28 28; /* red-700    */
   --focus: 15 118 110; /* teal-700   */
 
   /* Categorical series. Ordered so neighbouring slices differ in lightness as
-     well as hue. All >= 5.02:1 on the light surface (1.4.11 needs 3:1). */
+     well as hue. Worst series: 5.02:1 on a card, 4.54:1 on the page, 4.30:1 on
+     a well (1.4.11 needs 3:1). */
   --chart-1: 15 118 110;
   --chart-2: 3 105 161;
   --chart-3: 79 70 229;
@@ -62,9 +69,10 @@
 
 .dark {
   --surface: 2 6 23; /* slate-950  */
-  --surface-raised: 15 23 42; /* slate-900  */
-  --surface-inset: 30 41 59; /* slate-800  */
-  --border: 30 41 59; /* slate-800  */
+  --surface-raised: 19 27 43; /* cards — slate-900 lifted one step */
+  --surface-inset: 30 41 59; /* wells — slate-800, at the ceiling
+                                 `border-strong` allows (3.07:1) */
+  --border: 46 57 75; /* slate-800 lifted toward slate-700 */
   --border-strong: 100 116 139; /* slate-500  */
   --fg: 241 245 249; /* slate-100  */
   --fg-muted: 148 163 184; /* slate-400  */
@@ -79,7 +87,8 @@
   --danger: 185 28 28; /* same fill in both themes */
   --focus: 45 212 191; /* teal-400   */
 
-  /* Same ten hues, lifted for a dark surface. All >= 6.76:1. */
+  /* Same ten hues, lifted for a dark surface. Worst series: 6.76:1 on the page,
+     5.77:1 on a card, 4.90:1 on a well. */
   --chart-1: 20 184 166;
   --chart-2: 56 189 248;
   --chart-3: 129 140 248;
