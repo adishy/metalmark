@@ -518,6 +518,30 @@ export function emphasisPie(t: ChartTokens) {
 }
 
 /**
+ * Spotlight the hovered tile, dim the rest.
+ *
+ * The same trade as the donut's (`emphasisPie`): a treemap is one series whose
+ * tiles are data items, so `self` is what blurs the siblings, and ECharts'
+ * default blur is low enough that a dimmed tile would read as a missing one —
+ * the failure §2.10 names from the other direction. The label dims with its tile
+ * for the reason the slice's does: a caption at full strength on a dimmed tile
+ * reads as a labelling bug, not a highlight.
+ *
+ * It takes no tokens, like `emphasisStrip`, and for a related reason. Both of
+ * the things an emphasis could add here are already in the resting style: the
+ * tiles are separated by the surface gap (`gapWidth`), so a hovered tile needs no
+ * ring to keep it apart from its neighbours, and ECharts' treemap emphasis adds
+ * no shadow of its own to defeat — only the `upperLabel` of a *parent* node,
+ * which a one-level treemap never has.
+ */
+export function emphasisTreemap() {
+  return {
+    focus: "self" as const,
+    blur: { itemStyle: { opacity: DIM }, label: { opacity: DIM } },
+  };
+}
+
+/**
  * A different *measure* sharing the line's grid: no spotlight of its own, but a
  * legible dim when the series beside it is the one being asked about.
  *

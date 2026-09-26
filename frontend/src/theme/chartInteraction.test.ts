@@ -7,6 +7,7 @@ import {
   chartAxis,
   DIM,
   emphasisStrip,
+  emphasisTreemap,
   linkedPointer,
   pointerLineOnly,
   rangeBrush,
@@ -90,6 +91,22 @@ describe("emphasisStrip", () => {
     // rise as a fall.
     expect(emphasisStrip().disabled).toBe(true);
     expect(emphasisStrip().blur.itemStyle.opacity).toBe(DIM);
+  });
+});
+
+describe("emphasisTreemap", () => {
+  it("spotlights one tile of the single series, dimming the tiles and their captions", () => {
+    expect(emphasisTreemap()).toEqual({
+      // `self`, not `series`: a treemap is one series whose tiles are data
+      // items, so `series` has no sibling to blur — the same reason the pie's
+      // is `self`.
+      focus: "self",
+      blur: {
+        itemStyle: { opacity: DIM },
+        // A caption at full ink on a dimmed tile reads as a labelling bug.
+        label: { opacity: DIM },
+      },
+    });
   });
 });
 

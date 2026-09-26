@@ -10,11 +10,24 @@
 // the group-by switch, the bars-as-percentages rows, and the honest
 // unpriced/FX counts beside the total. What moved is the *shape* — this is now
 // a page-width tab rather than a card squeezed into a two-up grid.
-import { useEffect, useMemo, useState } from "react";
+//
+// Issue #34 adds the treemap as a *view* of the same rows, beside the list
+// rather than instead of it: the picture answers "which group is big" at a
+// glance, and the list under it is still the text equivalent (§2.9) — every
+// group, its figure, its share, and the way into its sources. The list is not
+// hidden in either view; the switch only decides whether the picture is drawn
+// above it.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { EChartsOption } from "echarts";
 import { Link } from "react-router-dom";
 import { useAllocation } from "@/api/investments";
-import type { Allocation, AllocationGroup, AllocationRow, Money } from "@/api/types";
+import type { Allocation, AllocationGroup, AllocationRow } from "@/api/types";
+import { formatDay } from "@/lib/dates";
+import { formatMoney } from "@/lib/format";
+import { STALE_DAYS, excludedSentence, formatPercent, formatPrice, securityTypeLabel, trimDecimal } from "@/lib/investments";
+import { notDrawnSentence, tileColour, treemapData, treemapFinding, treemapOption } from "@/lib/treemapChart";
 import AccountMark from "@/components/AccountMark";
+import Chart from "@/components/Chart";
 import { Day } from "@/components/datetime";
 import Dialog from "@/components/Dialog";
 import { Checkbox } from "@/components/form";
@@ -22,8 +35,8 @@ import { ChevronRightIcon } from "@/components/icons";
 import { QueryError, SkeletonRows } from "@/components/QueryStates";
 import SegmentedControl, { segmentPanelId, segmentTabId, type Segment } from "@/components/SegmentedControl";
 import SheetSelect, { type SheetOption } from "@/components/SheetSelect";
-import { formatMoney } from "@/lib/format";
-import { STALE_DAYS, excludedSentence, formatPrice, securityTypeLabel, trimDecimal } from "@/lib/investments";
+import { useChartTokens } from "@/theme/chartTokens";
+import type { ChartBox } from "@/theme/chartInteraction";
 
 /** `ALLOCATION_GROUPS` in app/schemas/investments.py, in the order the server
  *  lists them. A closed set: the server answers an unknown one with a 422. */
@@ -39,6 +52,26 @@ const GROUP_OPTIONS: readonly SheetOption<AllocationGroup>[] = GROUPS.map((g) =>
 }));
 
 const TESTID = "allocation-groupby";
+
+/** How the same rows are shown: as a picture, or as the list alone (issue #34).
+ *  The list is present in both — the treemap has no legend of its own, and §2.9
+ *  requires a chart's text equivalent — so this is a switch about the chart, not
+ *  about the figures. */
+type AllocationView = "treemap" | "list";
+const VIEWS: readonly Segment<AllocationView>[] = [
+  { id: "treemap", label: "Treemap" },
+  { id: "list", label: "List" },
+];
+const VIEW_OPTIONS: readonly SheetOption<AllocationView>[] = VIEWS.map((v) => ({
+  id: v.id,
+  label: String(v.label),
+}));
+const VIEW_TESTID = "allocation-view";
+
+/** The treemap is a picture of several groups, so it is given a page-width card's
+ *  height on every canvas: squarify splits a canvas's area between the tiles, and
+ *  a short one would hand the smaller groups slivers instead of rectangles. */
+const TREEMAP_HEIGHT = 300;
 
 /** Per-viewer, not per-household: two people looking at the same allocation may
  *  each want a different default, and neither reading should overwrite the
@@ -66,26 +99,6 @@ function writeCashPref(value: boolean): void {
 }
 
 /**
- * A share, at one decimal.
- *
- * The API sends four (`percent`), which is noise down a column. A percent is not
- * money, so the currency's minor unit does not apply — but the §6.5 concern does:
- * a row that holds value must not display as `0.0%`, so a non-zero share below
- * the displayed precision is bounded rather than rounded away.
- *
- * The bound is on the *magnitude*, and the direction is kept. A group can be
- * negative — short positions are not rounded away by the valuation (ADR-0032) —
- * and `(-0.04).toFixed(1)` is `"-0.0%"`: a non-zero share displayed as zero,
- * which is the exact failure this function exists to prevent. `>-0.1%` says
- * both that the row holds a little value and which way it points.
- */
-function formatPercent(percent: Money): string {
-  const n = Number(percent);
-  if (n !== 0 && Math.abs(n) < 0.05) return n < 0 ? ">-0.1%" : "<0.1%";
-  return `${n.toFixed(1)}%`;
-}
-
-/**
  * How a group reads. The server's `label` is right for three of the four groups
  * — a ticker, an account name, a currency code are already the words a person
  * uses — but every `type` row labels itself with the wire token (`mutual_fund`),
@@ -105,6 +118,7 @@ function groupLabel(groupBy: AllocationGroup, key: string, label: string): strin
 
 export default function Allocations() {
   const [groupBy, setGroupBy] = useState<AllocationGroup>("security");
+  const [view, setView] = useState<AllocationView>("treemap");
   const [includeCash, setIncludeCash] = useState<boolean>(readCashPref);
   const [detail, setDetail] = useState<AllocationRow | null>(null);
 
@@ -139,24 +153,47 @@ export default function Allocations() {
         {/* Phone: a pill that opens a sheet — four segments is exactly the case
             §5 calls out (a row of choices that would not comfortably fit at
             360px becomes a picker, not a scrolling strip). Desktop keeps the
-            segmented control, unchanged from the card this replaced. */}
-        <div className="sm:hidden">
-          <SheetSelect
-            label="Group by"
-            value={groupBy}
-            options={GROUP_OPTIONS}
-            onChange={setGroupBy}
-            testid={`${TESTID}-sheet`}
-          />
-        </div>
-        <div className="hidden sm:block">
-          <SegmentedControl
-            label="Group allocation by"
-            segments={GROUPS}
-            value={groupBy}
-            onChange={setGroupBy}
-            testid={TESTID}
-          />
+            segmented control, unchanged from the card this replaced. The view
+            switch follows it: the same two shapes, one row down on a phone,
+            because AGENTS.md's rule is about the *control* ("view switches on a
+            phone are SheetSelect"), not about which switch it is. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="sm:hidden">
+            <SheetSelect
+              label="Group by"
+              value={groupBy}
+              options={GROUP_OPTIONS}
+              onChange={setGroupBy}
+              testid={`${TESTID}-sheet`}
+            />
+          </div>
+          <div className="hidden sm:block">
+            <SegmentedControl
+              label="Group allocation by"
+              segments={GROUPS}
+              value={groupBy}
+              onChange={setGroupBy}
+              testid={TESTID}
+            />
+          </div>
+          <div className="sm:hidden">
+            <SheetSelect
+              label="View"
+              value={view}
+              options={VIEW_OPTIONS}
+              onChange={setView}
+              testid={`${VIEW_TESTID}-sheet`}
+            />
+          </div>
+          <div className="hidden sm:block">
+            <SegmentedControl
+              label="Show the allocation as"
+              segments={VIEWS}
+              value={view}
+              onChange={setView}
+              testid={VIEW_TESTID}
+            />
+          </div>
         </div>
         <Checkbox
           label="Include bank cash"
@@ -177,7 +214,7 @@ export default function Allocations() {
         ) : isPending || !data ? (
           <SkeletonRows what="your allocation" rows={4} testid="allocation-loading" />
         ) : (
-          <AllocationBody data={data} groupBy={groupBy} onSelect={setDetail} />
+          <AllocationBody data={data} groupBy={groupBy} view={view} onSelect={setDetail} />
         )}
       </div>
 
@@ -196,14 +233,35 @@ export default function Allocations() {
 function AllocationBody({
   data,
   groupBy,
+  view,
   onSelect,
 }: {
   data: Allocation;
   groupBy: AllocationGroup;
+  view: AllocationView;
   onSelect: (row: AllocationRow) => void;
 }) {
   const ccy = data.base_currency;
   const excluded = excludedSentence(data.unpriced_positions, data.no_rate_positions);
+  const t = useChartTokens();
+
+  // Split once, at the top: the tiles, the rows that cannot be one, and the
+  // swatch each tile is drawn in. The chart and the list are two renderings of
+  // this one array, which is what keeps a row's colour and its figure agreeing.
+  const tiles = useMemo(() => treemapData(data.rows), [data.rows]);
+  const swatch = useMemo(
+    () => new Map(tiles.tiles.map((r, i) => [r.key, tileColour(t, i)])),
+    [tiles, t],
+  );
+  // The option is a function of the measured box (§2.9), so it is built per
+  // canvas — memoised here as `Chart`'s contract asks, since a fresh object is a
+  // whole option re-derived.
+  const option = useCallback(
+    (box: ChartBox): EChartsOption => treemapOption(tiles, t, ccy, box),
+    [tiles, t, ccy],
+  );
+  const notDrawn = notDrawnSentence(tiles.skipped, ccy);
+  const finding = treemapFinding(tiles, data.total_base, groupBy, formatDay(data.as_of), ccy);
 
   // Nothing to allocate and nothing unpriced: a household with no positions yet
   // (and, with the cash toggle on, no bank cash either).
@@ -238,6 +296,41 @@ function AllocationBody({
 
   return (
     <div className="rounded-card bg-surface-raised p-4">
+      {/* The picture, when the treemap view is on and there is something with
+          area to draw. It goes *above* the list rather than instead of it: the
+          treemap answers "which group is big" at a glance and has no legend of
+          its own, so the list beneath it is both the text equivalent §2.9
+          requires and the chart's key. */}
+      {view === "treemap" && (tiles.tiles.length > 0 || notDrawn) && (
+        <div className="mb-4">
+          {tiles.tiles.length > 0 && (
+            <Chart
+              option={option}
+              label={finding}
+              height={TREEMAP_HEIGHT}
+              testid="allocation-treemap"
+            />
+          )}
+          {/* Under the chart, not in the status block below, because it is a
+              sentence about *this picture*: the rows it names are the ones with
+              no area to draw. It is also inside the chart's own `aria-label`, so
+              it is announced with the chart rather than only read by eye.
+
+              Rendered whenever the treemap view is on rather than only when a
+              picture was drawn: the case with *nothing* to draw is exactly the
+              one where this sentence is the only thing on screen — a selected
+              view with no picture in it and, without this, no reason given. */}
+          {notDrawn && (
+            <p
+              className={`text-xs text-warning ${tiles.tiles.length > 0 ? "mt-1" : ""}`}
+              data-testid="allocation-not-drawn"
+            >
+              {notDrawn}
+            </p>
+          )}
+        </div>
+      )}
+
       <ul data-testid="allocation-rows">
         {data.rows.map((r) => (
           <li key={r.key} className="border-b border-border last:border-b-0">
@@ -251,14 +344,31 @@ function AllocationBody({
               className="flex min-h-11 w-full min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2 text-left hover:bg-surface-inset"
               data-testid={`allocation-row-${r.key}`}
             >
-              <div className="min-w-0">
-                <p className="text-sm">{groupLabel(groupBy, r.key, r.label)}</p>
-                {/* How many positions the line is made of: a 3% line that is
-                    one holding and a 3% line that is thirty read very
-                    differently. */}
-                <p className="text-xs text-fg-muted" data-testid={`allocation-holdings-${r.key}`}>
-                  {r.holdings} {r.holdings === 1 ? "position" : "positions"}
-                </p>
+              <div className="flex min-w-0 items-start gap-2">
+                {/* A row's tile colour, beside the row: it is what makes the
+                    chart's colours *mean* something — identity on a treemap is
+                    otherwise carried by position alone, and a reader with a
+                    greyscale screen or a colour-vision difference gets the name
+                    and the figure out of the same list either way. Only drawn
+                    when a picture is on screen to key it to; a row without a
+                    tile (a short position) has no swatch. */}
+                {view === "treemap" && swatch.get(r.key) && (
+                  <span
+                    aria-hidden="true"
+                    className="mt-1 size-2.5 shrink-0 rounded-sm"
+                    style={{ backgroundColor: swatch.get(r.key) }}
+                    data-testid={`allocation-swatch-${r.key}`}
+                  />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm">{groupLabel(groupBy, r.key, r.label)}</p>
+                  {/* How many positions the line is made of: a 3% line that is
+                      one holding and a 3% line that is thirty read very
+                      differently. */}
+                  <p className="text-xs text-fg-muted" data-testid={`allocation-holdings-${r.key}`}>
+                    {r.holdings} {r.holdings === 1 ? "position" : "positions"}
+                  </p>
+                </div>
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <div className="text-right">

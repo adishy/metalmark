@@ -62,6 +62,17 @@ export const chartTokens = () => ({
   label: token("fg-muted"),
   /** Card and tooltip background — charts sit on raised surfaces. */
   surface: token("surface-raised"),
+  /**
+   * Text drawn **on** a series fill — a treemap tile's name.
+   *
+   * The surface is the right colour for it by construction rather than by taste:
+   * the series slots are picked against the surface (the 600s clear 3:1 on white
+   * in light mode, the 400s carry on slate in dark), so whatever the card is
+   * behind a chart is also what reads on top of a filled mark. `fg-muted` — the
+   * axis and legend colour — is the one thing a tile's label cannot be, since it
+   * sits on the fill rather than beside it.
+   */
+  fillInk: token("surface-raised"),
   border: token("border"),
   /** Tooltip body text. */
   fg: token("fg"),

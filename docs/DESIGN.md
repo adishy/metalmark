@@ -500,7 +500,7 @@ Seven further chart rules:
 
 §2.9 covers what a chart is painted with; this covers what it does when pointed at.
 Every option is assembled from `src/theme/chartInteraction.ts` — **no page writes a
-`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the seven charts cannot
+`tooltip`, an `axisPointer` or an `emphasis` of its own**, so the charts cannot
 drift apart. §8 rule 8 enforces that.
 
 **Hovering never removes ink.** The rule exists because it was broken: the net-worth
@@ -1536,7 +1536,7 @@ grep -rnE '<(p|span|h[1-6]|legend)[^>]*className="[^"]*\bbg-(surface|accent|posi
 # 8. Hand-written chart interaction. Every tooltip, axis pointer and emphasis
 #    comes from theme/chartInteraction.ts (§2.10), which is the only file
 #    allowed to name those keys — that is what makes hover behave identically
-#    on all seven charts instead of being remembered per chart.
+#    on every chart instead of being remembered per chart.
 #
 #    Not a bare grep, for the same reason rule 6 is not: `tooltip:` appears on
 #    correct code in the form `tooltip: chartTooltip(t)`. The script keys on the
