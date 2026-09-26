@@ -211,6 +211,70 @@ for (const vp of VIEWPORTS) {
       expect(detail.role).toBe("region");
       expect(detail.modal).toBeNull();
     });
+
+    // #29. The pane sits at the top of its column, so a row picked far down the
+    // ledger opened a form that had already scrolled off: measured at 1280x800
+    // with the page at the bottom, the pane's box sat at y = -1668 and the only
+    // way to reach it was to scroll back up. Nothing in this file held that —
+    // the geometry test above clicks the *first* row, the one case that always
+    // worked.
+    test("a row deep in the ledger opens its editor in view (#29)", async ({ page }) => {
+      await login(page);
+      await settle(page, "/transactions");
+
+      // The claim needs a ledger taller than the viewport; on a short one the
+      // broken layout and the fixed one look the same.
+      const viewport = await page.evaluate(() => window.innerHeight);
+      const docHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      expect(docHeight, "the seeded ledger must be taller than the viewport").toBeGreaterThan(
+        viewport + 200,
+      );
+
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const scrolled = await page.evaluate(() => window.scrollY);
+      expect(scrolled, "the scroll to the bottom must have moved the page").toBeGreaterThan(0);
+
+      const last = page.locator('[data-testid^="txn-row-"]').last();
+      await last.click();
+      await expect(page.getByTestId("txn-detail")).toBeVisible();
+
+      const pane = await page.evaluate(() => {
+        const header = document.querySelector("header")!.getBoundingClientRect();
+        const column = document.querySelector("[data-testid=txn-detail-column]") as HTMLElement;
+        const box = column.getBoundingClientRect();
+        const cs = getComputedStyle(column);
+        return {
+          headerBottom: header.bottom,
+          top: box.top,
+          bottom: box.bottom,
+          viewport: window.innerHeight,
+          scrollY: window.scrollY,
+          position: cs.position,
+          stickyTop: parseFloat(cs.top),
+          overflowY: cs.overflowY,
+        };
+      });
+
+      // Sticky, and pinned clear of the bar rather than under it. The offset is
+      // read from the computed style rather than assumed: a pane that sticks to
+      // `top-0` measures a top of 0 and hides its first 61 px — the header's
+      // height — behind the header.
+      expect(pane.position).toBe("sticky");
+      expect(pane.stickyTop).toBeGreaterThanOrEqual(pane.headerBottom - 1);
+
+      // On screen, and wholly so. `overflow-y-auto` is what makes a form taller
+      // than the viewport reachable: its bottom (Save, Delete) sits inside a box
+      // that fits, instead of staying pinned below the fold.
+      expect(pane.top, "the pane opens above the fold").toBeGreaterThanOrEqual(0);
+      expect(pane.top, "the pane opens below the header").toBeLessThan(pane.viewport - 44);
+      expect(pane.overflowY).toBe("auto");
+      expect(pane.bottom).toBeLessThanOrEqual(pane.viewport + 1);
+
+      // And it got there without moving the page: no forced scroll to the top.
+      // (Playwright scrolls an element into view before clicking it, so a pixel
+      // either way is not the point; 900 rows of travel is.)
+      expect(Math.abs(pane.scrollY - scrolled), "the click must not move the page").toBeLessThan(2);
+    });
   });
 }
 

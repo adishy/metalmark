@@ -519,11 +519,51 @@ export default function Transactions() {
           to be, and is `hidden` below `lg:` because at 360 px there is no second
           column to fill and a stray line under the list would be noise.
 
+          **Sticky, and bounded by the viewport.** The list is the longest thing
+          in the app and the pane is one form card, so without this the two are
+          a tall column beside a short one: pick row 900 and the editor you just
+          opened is painted a few thousand pixels above where you are looking,
+          and the only way to reach it is to scroll back to the top. Measured —
+          the seeded ledger at 1280×800 runs to 2553 px, and the pane's box after
+          clicking the last row sat at y = −1668, entirely off screen. Sticking
+          it is what makes "click a row, edit it" true deep in the list as well
+          as at the top of it, which is §9.3's whole claim for this shape.
+
+          `top-16` (4rem, 64 px) is the same clearance `index.css` gives
+          `scroll-padding-top` for the sticky header, and it is measured rather
+          than guessed: the header is **61 px** at every width — `py-2` (8 + 8)
+          around a `min-h-11` (44) control, plus its 1 px `border-b`. The 3 px
+          the pane keeps beyond that is deliberate: flush against the bar it
+          reads as part of the chrome, and a focused control inside the pane
+          then scrolls to the same line as every other focused control on the
+          page instead of 3 px off it.
+
+          The `max-h` is the other half, and it is why this is not just
+          `sticky`. A sticky box taller than the viewport cannot be scrolled to
+          its own end: the bottom of the form — Save, Delete, the split editor —
+          stays below the fold no matter how far you scroll, because a sticky
+          element's bottom is pinned off-screen once its top is pinned to
+          `top-16`. It is `100dvh` (not `vh`, §4.8) minus the 4rem the pane is
+          pushed down by and minus §2.5's `lg:p-6` (1.5rem) page gutter at the
+          bottom, so the pane ends inside the viewport with the same breathing
+          room the shell gives it. `overflow-y-auto` then scrolls the form
+          *within* the pane rather than the page — which is also what the
+          `Combobox` inside the pane measures when it decides whether to open its
+          list up or down (see its `measure()`).
+
+          Nothing here is `lg:`-only in spirit but it is `lg:`-only in effect:
+          below `lg:` this element is the phone's dialogs' container — the
+          detail is a sheet over the page (§9.6), not a pane — and the empty
+          state stays `hidden lg:block`.
+
           The empty state is not an error and not a spinner: nothing is wrong
           and nothing is loading, the user simply has not picked a row. It says
           what the column is for, which is the one thing a blank two-thirds-of-
           a-page gap does not. */}
-      <div>
+      <div
+        className="lg:sticky lg:top-16 lg:max-h-[calc(100dvh_-_4rem_-_1.5rem)] lg:overflow-y-auto"
+        data-testid="txn-detail-column"
+      >
         {!selected && (
           <p
             className="hidden rounded-card bg-surface-raised px-4 py-6 text-center text-sm text-fg-muted lg:block"
