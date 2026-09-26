@@ -285,6 +285,26 @@ class PortfolioOut(BaseModel):
     accounts: list[AccountValuationOut]
 
 
+class AllocationSourceOut(BaseModel):
+    """One account's contribution to an allocation row (ADR-0054) — what lets the
+    UI answer "which accounts is this made of" for a row that can be one holding,
+    several accounts' cash, or both."""
+
+    account_id: uuid.UUID
+    account_name: str
+    institution: str | None = None
+    value_base: Decimal
+    share_of_group: Decimal
+    #: Set only on a ``group_by=security`` row, where a source is exactly one
+    #: account's position in that one security — under any other grouping an
+    #: account can contribute through several holdings at different prices, and
+    #: "the" quantity or price of the row would be a made-up number.
+    quantity: Decimal | None = None
+    price: Decimal | None = None
+    price_currency: str | None = None
+    price_date: date | None = None
+
+
 class AllocationRowOut(BaseModel):
     key: str
     label: str
@@ -293,12 +313,16 @@ class AllocationRowOut(BaseModel):
     #: How many positions make up this row. A 3% line that is one holding and a 3%
     #: line that is thirty read very differently.
     holdings: int
+    sources: list[AllocationSourceOut] = []
 
 
 class AllocationOut(BaseModel):
     as_of: date
     base_currency: str
     group_by: str
+    #: Echoes the request (ADR-0054): a stored link or a screenshot has to say
+    #: whether bank cash is in the total it shows, not just the total itself.
+    include_cash_accounts: bool
     total_base: Decimal
     rows: list[AllocationRowOut]
 

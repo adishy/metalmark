@@ -1,5 +1,5 @@
-// The investments view of the Accounts page: the consolidated allocation and the
-// valued holdings list, one under the other. docs/ARCHITECTURE.md §4 asks for the
+// The investments view of the Accounts page: the valued holdings list, plus a
+// link to where the allocation moved. docs/ARCHITECTURE.md §4 asks for the
 // consolidated view — "a single page that aggregates every holding across all
 // accounts" — and it is a *view of* an existing destination rather than a
 // destination of its own.
@@ -10,6 +10,13 @@
 // destination already owns the household's balances, and a portfolio is the same
 // subject seen at a different depth. `AppShell.tsx`'s `NAV` is deliberately
 // unchanged.
+//
+// The allocation card itself moved to Insights → Allocations (session 09, task
+// B4): it grew a "include bank cash" toggle and a tap-through detail sheet, both
+// of which are about the *household's money*, not about this one page's holdings
+// list — Insights is where the household reads and compares things, and this
+// page's job is a specific account's own numbers. What is left here is one link
+// row, so the trail from "the portfolio" to "the whole picture" is not lost.
 //
 // **Two of the spec's four row fields are not here, and that is a known gap, not
 // an oversight.** §4 names the summed row as "(quantity, total market value, cost
@@ -37,15 +44,17 @@
 // nothing is worse than its absence, and the empty states say where one would
 // go.
 
-import AllocationBreakdown from "@/components/AllocationBreakdown";
+import { Link } from "react-router-dom";
+import { ChevronRightIcon } from "@/components/icons";
 import PortfolioHoldings from "@/components/PortfolioHoldings";
 
 export default function InvestmentsView({ ownerName }: { ownerName?: string | null }) {
   return (
-    // §9.3's card grid, and these two are the cards: the allocation a reader
-    // asks about first, and the holdings that explain it. Side by side at `lg:`
-    // the breakdown sits next to the thing it is a breakdown *of*, which is the
-    // one arrangement where a donut and a table argue with each other usefully.
+    // §9.3's card grid, kept for the two things this view still holds: the
+    // pointer to where the allocation went (Insights → Allocations) and the
+    // holdings list beside it. The grid itself is unchanged from when the
+    // allocation lived here — the holdings table is the wide thing the view
+    // is for, and the link card sits opposite it rather than as a strip above.
     // The owner note spans both because it is about the view, not about either
     // card.
     <div
@@ -66,7 +75,14 @@ export default function InvestmentsView({ ownerName }: { ownerName?: string | nu
           Every owner — the portfolio is household-wide, so {ownerName}’s filter does not apply here.
         </p>
       )}
-      <AllocationBreakdown />
+      <Link
+        to="/insights/allocations"
+        className="flex min-h-11 items-center justify-between gap-3 rounded-card bg-surface-raised p-4 text-sm hover:bg-surface-inset"
+        data-testid="allocation-moved-link"
+      >
+        See allocation in Insights
+        <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 text-fg-muted" />
+      </Link>
       <PortfolioHoldings />
     </div>
   );
