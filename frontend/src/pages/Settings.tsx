@@ -1621,6 +1621,7 @@ const ENTITY_LABELS: Record<string, string> = {
   holdings: "holdings",
   investment_transactions: "investment transactions",
   owners: "owners",
+  recurring_series: "recurring series",
   rules: "rules",
   securities: "securities",
   security_prices: "security prices",

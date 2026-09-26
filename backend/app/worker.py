@@ -40,6 +40,7 @@ import time
 import traceback
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import text
@@ -334,10 +335,54 @@ def failure(exc: BaseException) -> dict[str, str]:
     # The deepest frame in *this* package: a database error is raised deep inside
     # SQLAlchemy or asyncpg, and a line there says nothing about which query of
     # ours failed.
-    ours = [f for f in frames if "/app/" in f.filename]
+    ours = [f for f in frames if _is_ours(f.filename)]
     frame = (ours or frames)[-1] if frames else None
-    where = f"{frame.filename.rsplit('/app/', 1)[-1]}:{frame.lineno}" if frame else ""
-    return {"error_type": type(exc).__name__, "at": where}
+    return {"error_type": type(exc).__name__, "at": _where(frame) if frame else ""}
+
+
+#: This package's own directory: ``.../backend/app`` from a checkout, ``/app/app``
+#: in the container. "Ours" is decided against this and never against the path the
+#: code is mounted under. The container mounts the backend *at* ``/app``, which
+#: makes ``/app/tests/...`` match any test for ``/app/`` in a filename — and a test's
+#: own frame then gets reported as the place an app error was raised, which is
+#: exactly what made ``test_checks``'s crashing-check assertion fail there and pass
+#: in CI.
+_APP_ROOT = Path(__file__).resolve().parent
+
+
+def _is_ours(filename: str) -> bool:
+    """Whether a frame's file is inside this package.
+
+    A path compared by *directory*, not by substring: a sibling of the package is
+    not the package, however much of its path is shared.
+
+    Synthetic names — ``<string>``, ``<stdin>``, ``<frozen importlib...>`` — are not
+    paths at all, so they are refused before ``resolve()`` sees them: resolving one
+    would turn it into a path under the working directory that could then be
+    "ours" by accident.
+    """
+    if not filename or filename.startswith("<"):
+        return False
+    try:
+        return Path(filename).resolve().is_relative_to(_APP_ROOT)
+    # A path the OS will not resolve: a symlink loop raises RuntimeError, and a
+    # filesystem that refuses raises OSError. Neither is ours.
+    except (OSError, RuntimeError):
+        return False
+
+
+def _where(frame: traceback.FrameSummary) -> str:
+    """The frame's place, relative to this package when it is inside it.
+
+    Relative to the *package* rather than to the mount: the same failure reported
+    from a checkout and from the container then reads the same — ``services/sync.py``
+    either way — where the two mount paths do not agree. A frame outside the package
+    (the fallback, when nothing in the traceback is ours) keeps the path it has.
+    """
+    name = frame.filename
+    if _is_ours(name):
+        name = str(Path(name).resolve().relative_to(_APP_ROOT))
+    return f"{name}:{frame.lineno}"
 
 
 async def heartbeat() -> None:

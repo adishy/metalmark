@@ -21,7 +21,7 @@ import type {
 import Dialog from "@/components/Dialog";
 import { Day } from "@/components/datetime";
 import { Button, Field, Input, Select, Spinner, useFieldId, validAmount } from "@/components/form";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, fromMinorUnits, sumMinorUnits, toMinorUnits } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
 
 const FREQUENCIES: { value: PayFrequency; label: string }[] = [
@@ -329,10 +329,15 @@ function draftFrom(paystub: Paystub | null): DraftLine[] {
   }));
 }
 
-function sumKind(lines: DraftLine[], kind: PaystubLineKind): number {
-  return lines
-    .filter((l) => l.kind === kind)
-    .reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
+/** Lines of one kind, totalled in the currency's **integer minor units** — the
+ *  same integer arithmetic the server does, so the worksheet below the editor
+ *  agrees with the paystub the server stores instead of drifting from it by a
+ *  float's last bit (ADR-0005). */
+function sumKind(lines: DraftLine[], kind: PaystubLineKind, currency: string): number {
+  return sumMinorUnits(
+    lines.filter((l) => l.kind === kind).map((l) => l.amount),
+    currency,
+  ).minor;
 }
 
 function PaystubEditor({
@@ -353,16 +358,18 @@ function PaystubEditor({
   const netId = useFieldId("paystub-net");
 
   // The worksheet: what the lines add up to, live, so a mismatch shows before
-  // submitting rather than as a 422 after.
-  const computedGross = sumKind(lines, "earning");
+  // submitting rather than as a 422 after. Every figure here is in minor units.
+  const computedGross = sumKind(lines, "earning", currency);
   const computedNet =
     computedGross
-    - sumKind(lines, "pre_tax_deduction")
-    - sumKind(lines, "tax")
-    - sumKind(lines, "post_tax_deduction");
+    - sumKind(lines, "pre_tax_deduction", currency)
+    - sumKind(lines, "tax", currency)
+    - sumKind(lines, "post_tax_deduction", currency);
   const hasLines = lines.length > 0;
-  const grossMismatch = hasLines && Math.abs(computedGross - (Number(gross) || 0)) > 0.01;
-  const netMismatch = hasLines && Math.abs(computedNet - (Number(net) || 0)) > 0.01;
+  // The server's `_TOTALS_TOLERANCE` is a cent — one minor unit of a 2-decimal
+  // currency — and this mirrors it, in the units the figures are already in.
+  const grossMismatch = hasLines && Math.abs(computedGross - toMinorUnits(gross, currency)) > 1;
+  const netMismatch = hasLines && Math.abs(computedNet - toMinorUnits(net, currency)) > 1;
 
   function addLine(kind: PaystubLineKind) {
     setLines((prev) => [
@@ -495,7 +502,10 @@ function PaystubEditor({
           }`}
           data-testid="paystub-footer"
         >
-          <p>Lines total: gross {computedGross.toFixed(2)}, net {computedNet.toFixed(2)}</p>
+          <p>
+            Lines total: gross {fromMinorUnits(computedGross, currency)}, net{" "}
+            {fromMinorUnits(computedNet, currency)}
+          </p>
           {(grossMismatch || netMismatch) && (
             <p className="font-medium" data-testid="paystub-mismatch">
               Doesn’t match the header above yet — the lines must sum to gross and net.

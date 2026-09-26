@@ -459,9 +459,19 @@ async def world(app):
         },
     )
 
+    # A series, picked from one of the ledger's own rows (the "track this"
+    # path), so the catalog's ``{series_id}`` template has something to resolve
+    # to and the name it inherits from the merchant is a name, not an id.
+    series = await s.ok(
+        "POST",
+        "/recurring",
+        json={"transaction_id": bakery2["id"], "cadence": "monthly"},
+    )
+
     ids.update(
         child=child["id"],
         paystub=paystub["id"],
+        series=series["id"],
         allowance=allowance["id"],
         groceries=groceries["id"],
         tag=tag["id"],
@@ -867,6 +877,7 @@ def _fill(path: str, ids: dict) -> str:
         .replace("{owner_id}", ids["child"])
         .replace("{paystub_id}", ids["paystub"])
         .replace("{category_id}", ids["allowance"])
+        .replace("{series_id}", ids["series"])
     )
 
 

@@ -10,9 +10,25 @@ from app.schemas.patch import is_set
 
 
 class SplitIn(BaseModel):
-    # Exactly one of amount / pct across siblings; validated in the service.
+    """One leg of a split (ADR-0056).
+
+    A leg carries **exactly one** of ``amount`` or ``pct``, and every leg of a set
+    carries the same one — the set is all-amount or all-pct, never a mix and never
+    a leg with both. ``amount`` legs must sum exactly to the parent's amount;
+    ``pct`` legs must sum to 100 (within ``PCT_SUM_TOLERANCE``, see
+    ``services.transactions``). Those three rules are cross-*sibling* rules, so
+    they are enforced in the service, which is the only place that sees the whole
+    set — the bounds here are the per-leg half of the same invariant, and they
+    exist so an obviously bad leg never reaches it.
+
+    ``pct`` is bounded ``0 < pct <= 100``: a non-positive share names no leg at
+    all, and a share above 100 cannot be part of a set summing to 100. ``amount``
+    is deliberately unbounded — a zero or negative leg is meaningful (a split of a
+    negative transaction, ADR-0043).
+    """
+
     amount: Decimal | None = None
-    pct: Decimal | None = None
+    pct: Decimal | None = Field(default=None, gt=0, le=100)
     category_id: uuid.UUID | None = None
     # Null = inherit the parent transaction's owner (ADR-0026).
     owner_id: uuid.UUID | None = None

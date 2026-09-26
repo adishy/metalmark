@@ -30,6 +30,7 @@ from app.models.ledger import (  # noqa: F401
     TransactionTag,
     TransferGroup,
 )
+from app.models.recurring import RecurringSeries  # noqa: F401
 from app.models.sync import SyncJob, SyncRun, SyncRunEvent  # noqa: F401
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "OwnerIncomeProfile",
     "Paystub",
     "PaystubLine",
+    "RecurringSeries",
     "Rule",
     "Tag",
     "SyncJob",

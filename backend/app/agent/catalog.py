@@ -10,13 +10,13 @@ every link it offers and expects each to answer.
 from __future__ import annotations
 
 import typing
-from datetime import date
 from typing import Any
 
 from fastapi.routing import APIRoute
 
 from app.agent import dispatch
 from app.schemas.agent import CatalogOut, ParamOut, RouteOut
+from app.services.ledger import today as ledger_today
 
 AGENT_VERSION = "v1"
 AGENT_BASE = f"{dispatch.PUBLIC_PREFIX}/agent/{AGENT_VERSION}"
@@ -118,7 +118,7 @@ def _returns(route: APIRoute) -> str | None:
 def app_routes(base: str) -> list[RouteOut]:
     """Every exposed app route, as reachable under ``base``."""
     out = []
-    today = date.today().isoformat()
+    today = ledger_today().isoformat()
     for e in dispatch.exposed():
         params = _params(e.route)
         required = [p for p in params if p.location == "path" or p.required]

@@ -616,3 +616,76 @@ def test_0013_adds_the_income_tables_with_rls_and_touches_nothing_else(scratch_d
     _alembic(scratch_db, "upgrade", "0013")
     with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
         assert _has_table(conn, "paystub_lines")
+
+
+# ---- 0014: recurring_series -------------------------------------------------
+
+
+def test_0014_adds_recurring_series_with_rls_and_touches_nothing_else(scratch_db):
+    """Additive, and the only interesting thing is what it points at.
+
+    A populated install already has the accounts, the categories and the
+    transactions a series is written against, so the case here (a) proves the
+    table arrives RLS-protected without touching a row of the household's data,
+    and (b) proves the two ``SET NULL`` foreign keys behave on live rows:
+    deleting the account or the transaction a series came from must not delete
+    the series — the person's list is theirs, and a closed account or a ducked
+    charge is not a reason to lose it (ADR-0053).
+    """
+    _alembic(scratch_db, "upgrade", "0013")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from today's metadata, so undo the table to be the shape
+        # an install on 0013 actually has.
+        conn.execute("DROP TABLE IF EXISTS recurring_series")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        txn = conn.execute(
+            "INSERT INTO transactions (household_id, account_id, amount, currency, "
+            "transacted_at, description, review_status, is_pending, is_hidden, "
+            "is_split_parent, source, field_sources) VALUES (%s, %s, -12.99, 'USD', "
+            "'2026-09-05', 'Streaming', 'needs_review', false, false, false, 'manual', "
+            "'{}') RETURNING id",
+            (hid, acct),
+        ).fetchone()[0]
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0014")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "recurring_series")
+        assert conn.execute(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = 'recurring_series'"
+        ).fetchone()[0]
+        assert conn.execute(
+            "SELECT count(*) FROM pg_policies WHERE tablename = 'recurring_series'"
+        ).fetchone()[0] == 1
+        assert _fingerprint(conn) == before
+
+        # What the API would now write: a series picked from that transaction.
+        series = conn.execute(
+            "INSERT INTO recurring_series (household_id, name, merchant, account_id, "
+            "amount, currency, cadence, next_due_date, is_active, transaction_id) "
+            "VALUES (%s, 'Streaming', 'Streaming', %s, -12.99, 'USD', 'monthly', "
+            "'2026-10-05', true, %s) RETURNING id",
+            (hid, acct, txn),
+        ).fetchone()[0]
+
+        # The two SET NULLs, on live rows: neither deletion may take the series.
+        conn.execute("DELETE FROM transactions WHERE id = %s", (txn,))
+        conn.execute("DELETE FROM accounts WHERE id = %s", (acct,))
+        row = conn.execute(
+            "SELECT account_id, transaction_id, amount::text, cadence, is_active "
+            "FROM recurring_series WHERE id = %s",
+            (series,),
+        ).fetchone()
+        assert row == (None, None, "-12.9900", "monthly", True)
+
+    _alembic(scratch_db, "downgrade", "0013")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "recurring_series")
+
+    # And back up again: the shape-detecting create is safe to re-run.
+    _alembic(scratch_db, "upgrade", "0014")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "recurring_series")

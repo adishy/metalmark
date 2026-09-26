@@ -20,12 +20,14 @@
 import type { Account, Category, Transaction } from "@/api/types";
 import { UNCATEGORIZED_ICON } from "@/components/CategoryPicker";
 import { calendarDay, formatDay } from "@/lib/dates";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 
 interface Day {
   day: string;
   rows: Transaction[];
-  /** The day's net in the rows' currency, or null when the day mixes currencies. */
+  /** The day's net in the rows' currency, counted in that currency's **integer
+   *  minor units** (ADR-0005 — a day's rows are money, and money is not summed
+   *  as a float), or null when the day mixes currencies. */
   net: number | null;
   currency: string;
 }
@@ -41,7 +43,10 @@ function byDay(items: Transaction[]): Day[] {
     }
     last.rows.push(t);
     if (last.net !== null) {
-      last.net = t.currency === last.currency ? last.net + Number(t.amount) : null;
+      last.net =
+        t.currency === last.currency
+          ? last.net + sumMinorUnits([t.amount], t.currency).minor
+          : null;
     }
   }
   return days;
@@ -78,7 +83,7 @@ export default function TxnPhoneList({
             <h2 className="text-sm font-semibold text-fg">{dayLabel(day)}</h2>
             {net !== null && (
               <span className={`text-sm tabular-nums ${net > 0 ? "text-positive" : "text-fg-muted"}`}>
-                {signed(String(net), currency)}
+                {signed(fromMinorUnits(net, currency), currency)}
               </span>
             )}
           </div>
