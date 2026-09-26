@@ -147,3 +147,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0048](0048-agents-read-an-anonymized-mirror.md) | Agents read an anonymized, read-only mirror of the app's API, by token | Accepted |
 | [0049](0049-transfers-pair-by-date-and-categories-start-typed.md) | Identical transfers pair by date; households start with typed categories and a local categorizer | Accepted |
 | [0050](0050-a-stalled-bank-is-shown-not-silent.md) | A stalled bank is shown, not silent | Accepted |
+| [0055](0055-amazon-orders-annotate-charges.md) | Amazon orders annotate the charges they explain | Proposed |

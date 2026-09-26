@@ -1,0 +1,9 @@
+Website,Order ID,Order Date,Currency,Unit Price,Total Owed,Ship Date,Product Name,ASIN,Quantity,Payment Instrument Type,Order Status
+Amazon.com,111-1,2026-03-01T10:00:00Z,USD,10.00,10.83,2026-03-02T01:00:00Z,USB cable,B01,1,Visa - 1234,Closed
+Amazon.com,111-1,2026-03-01T10:00:00Z,USD,20.00,"21,65",2026-03-02T01:00:00Z,Bad money cell,B09,1,Visa - 1234,Closed
+Amazon.com,111-1,2026-03-01T10:00:00Z,USD,5.00,5.41,2026-03-02T01:00:00Z,Batteries,B02,1,Visa - 1234,Closed
+Amazon.com,111-1,2026-03-01T10:00:00Z,USD,30.00,32.48,2026-03-05T01:00:00Z,Desk lamp,B03,1,Visa - 1234,Closed
+Amazon.com,222-2,2026-03-10T10:00:00Z,USD,4.99,4.99,Not Available,Ebook,B04,1,Visa - 1234,Closed
+Amazon.com,222-2,2026-03-10T10:00:00Z,USD,12.00,12.99,2026-03-12T01:00:00Z,Notebook,B05,2,Visa - 1234,Closed
+Amazon.com,333-3,2026-03-11T10:00:00Z,USD,99.00,107.17,Not Available,Cancelled thing,B06,1,Visa - 1234,Cancelled
+Amazon.com,444-4,2026-03-20T10:00:00Z,USD,8.00,8.66,2026-03-20T12:00:00Z,Soap,B07,1,Visa - 1234,Closed
