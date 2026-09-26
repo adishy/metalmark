@@ -17,6 +17,7 @@ import {
 } from "@/api/hooks";
 import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
+import { donutOption as donutOptionFor } from "@/lib/donutChart";
 import { formatMoney, formatMoneyTick } from "@/lib/format";
 import { coverageNotes, netWorthOption } from "@/lib/netWorthChart";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
@@ -35,7 +36,6 @@ import {
   chartTooltip,
   emphasisBar,
   emphasisLine,
-  emphasisPie,
   zeroRule,
   type ChartBox,
   type TooltipPoint,
@@ -180,46 +180,14 @@ export default function Overview() {
     [cashFlow.data, t, ccy],
   );
 
-  const donutOption: EChartsOption = useMemo(() => {
-    const rows = spending.data?.rows ?? [];
-    const total = rows.reduce((sum, r) => sum + Number(r.total), 0);
-    // Slices are named by the row's **key**, not by the words a reader sees, for
-    // the reason the graph gives: ECharts merges data items that share a name, so
-    // two rows with the same label would become one slice with their totals added
-    // — a chart that balances against a legend that is wrong. Two categories may
-    // share a name, and a household may name a category "Investment fees" while
-    // also paying real ones. The names live in this map instead, and both the
-    // legend and the tooltip read them back out.
-    const nameOf = (key: unknown) =>
-      rows.find((r) => r.key === key)?.category_name ?? String(key);
-    return {
-      tooltip: chartTooltip(t, {
-        trigger: "item",
-        formatter: (p: TooltipPoint) => {
-          const value = Number(p.value);
-          const share = total === 0 ? 0 : (value / total) * 100;
-          // `share` replaces ECharts' `{d}`, which is only available to the
-          // template-string form — and the template cannot map a key to a name.
-          return `${nameOf(p.name)}: ${formatMoney(value, ccy)} (${share.toFixed(0)}%)`;
-        },
-      }),
-      legend: chartLegend(t, { bottom: 0, type: "scroll", formatter: nameOf }),
-      color: t.series,
-      series: [
-        {
-          type: "pie",
-          radius: ["45%", "70%"],
-          center: ["50%", "45%"],
-          // The gap between slices is the card behind them, not a fixed navy.
-          itemStyle: { borderColor: t.surface, borderWidth: 2 },
-          // Named everywhere the reader looks, keyed everywhere ECharts looks.
-          label: { color: t.label, formatter: (p: TooltipPoint) => nameOf(p.name) },
-          emphasis: emphasisPie(t),
-          data: rows.map((r) => ({ name: r.key, value: Number(r.total) })),
-        },
-      ],
-    };
-  }, [spending.data, t, ccy]);
+  // Built in `lib/donutChart`, like the graph: the ring, its labels and what the
+  // phone card is allowed to say about them are one decision, and it is a decision
+  // about the canvas it is drawn on — so the option takes the measured box.
+  const donutOption = useCallback(
+    (box: ChartBox): EChartsOption =>
+      donutOptionFor(spending.data?.rows ?? [], t, ccy, box),
+    [spending.data, t, ccy],
+  );
 
   // The graph, built here and nowhere else: the payload carries rows and this is
   // the one place the picture's shape is decided, so a layout bug and a data bug

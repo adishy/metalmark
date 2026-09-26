@@ -243,6 +243,20 @@ export interface ChartBox {
 /** Below this a canvas is a phone card; at or above it, a column of a wide page. */
 const PHONE_MAX = 480;
 
+/**
+ * Is this canvas a phone card?
+ *
+ * The threshold above, asked by charts that are not laid out in columns: a phone
+ * card is not a small version of a wide page, it is a different chart. What a
+ * donut can afford to *say* differs between the two — a slice label has room at
+ * 1104 px and is clipped to `Ut…` at 310 px — and a chart that answered that
+ * question from `window.innerWidth` would be answering about the viewport while
+ * being drawn into a card.
+ */
+export function phoneCanvas(box: ChartBox): boolean {
+  return box.width < PHONE_MAX;
+}
+
 /** The gap ECharts leaves between a label and the node it belongs to. */
 const LABEL_GAP = 5;
 

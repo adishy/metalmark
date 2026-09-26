@@ -450,6 +450,21 @@ Seven further chart rules:
   the rest, which is what they are for; a wide canvas keeps the roomy margins it has
   always been drawn with.
 
+- **No chart text is drawn as a fragment.** A label a reader cannot read is not a
+  label: `Clo…`, `Ut…` and a bare `…` are marks saying a chart *had* something to say
+  and spent its room saying nothing. ECharts clips a pie's outside labels to the room
+  left inside the canvas, which on a 310 px phone card truncated three of the demo
+  household's six — so **a phone card draws no slice labels at all** (`phoneCanvas`):
+  the ring keeps its slices and their colours, and the names are read from the legend
+  beneath it, from the tap tooltip, and from the `<ul>` of categories and totals the
+  next rule requires. Hiding the label does not hide its leader line — ECharts keeps
+  the guide line on the strength of the label's *position* — so both go together. A
+  wide canvas draws all six labels whole and is unchanged. The question is asked of the
+  **box, never the viewport**: the same chart is 310 px in a phone card and 1104 px in
+  a page's. The one place a fixed column can still clip is the sankey's 84 px label
+  column, which holds every one of the household's names and would clip a longer one —
+  a gap this rule names rather than covers, and the reason the audit reads the drawn
+  text back out of zrender at 390 and 360 px rather than trusting the option.
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
   category + amount under the spending donut (already correct in `insights/Overview.tsx` —
