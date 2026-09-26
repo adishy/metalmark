@@ -43,12 +43,13 @@ const active = () => input().getAttribute("aria-activedescendant");
 describe("<CommandPalette />", () => {
   it("filters as you type, and says how many are left", async () => {
     renderPalette();
-    // The whole list, before a query: five nav destinations, Insights' two
-    // tabs, and Settings' eleven sections less the admin-only one this member
-    // cannot reach — 5 + 2 + 10. The count is the palette's own arithmetic, so
-    // it is asserted rather than assumed: a destination that goes missing
-    // silently is the failure mode this number exists to catch.
-    expect(screen.getByTestId("palette-status")).toHaveTextContent("17 destinations");
+    // The whole list, before a query: five nav destinations, Insights' three
+    // tabs (Overview, Allocations, Recurring), and Settings' eleven sections
+    // less the admin-only one this member cannot reach — 5 + 3 + 10. The count
+    // is the palette's own arithmetic, so it is asserted rather than assumed: a
+    // destination that goes missing silently is the failure mode this number
+    // exists to catch.
+    expect(screen.getByTestId("palette-status")).toHaveTextContent("18 destinations");
 
     await userEvent.type(input(), "trans");
 
