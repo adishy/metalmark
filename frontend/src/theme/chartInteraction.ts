@@ -82,6 +82,14 @@ export function chartMotion(reduced: boolean | null): EChartsOption {
 }
 
 /**
+ * The class every tooltip element carries, for the tests that read one.
+ *
+ * Set through ECharts' own `tooltip.className`, so it is the library that puts it
+ * on the element and nothing here reaches into its DOM.
+ */
+export const TOOLTIP_CLASS = "mm-chart-tooltip";
+
+/**
  * The tooltip, and the pointer that anchors it.
  *
  * `confine` keeps it inside the canvas: without it a tooltip on a phone-width
@@ -100,6 +108,12 @@ export function chartMotion(reduced: boolean | null): EChartsOption {
 export interface TooltipPoint {
   name?: string;
   value?: unknown;
+  /** The series a point belongs to. An axis tooltip hands over one point per
+   *  series, and the only way to tell them apart is by name. */
+  seriesName?: string;
+  /** Where the point sits in its series: how a chart whose axis carries bucket
+   *  labels finds the date behind the one under the pointer. */
+  dataIndex?: number;
   /** The data item under the pointer: an edge in a graph series, or nothing at
    *  all. Loosely typed for the same reason as `value`. */
   data?: unknown;
@@ -151,6 +165,11 @@ export function chartTooltip(
     // A tap shows the tooltip where a hover would: on a phone there is no
     // hover, and a chart that answered only to a mouse was a picture.
     triggerOn: "mousemove|click",
+    // A name for the tooltip element, which ECharts otherwise leaves anonymous.
+    // The tooltip is the one part of a chart that is DOM rather than canvas, and
+    // what it *says* — money, formatted in the report's own currency — is
+    // otherwise only checkable by looking at a screenshot.
+    className: TOOLTIP_CLASS,
     // Big enough to read at arm's length, and kept clear of the thumb.
     extraCssText: "border-radius: 12px; padding: 8px 12px; font-size: 14px;",
     backgroundColor: t.surface,
@@ -195,13 +214,128 @@ export function chartTooltip(
   };
 }
 
-/** Axis styling. `grid` adds the horizontal rules, so it is for the value axis. */
-export function chartAxis(t: ChartTokens, { grid = false } = {}) {
+/**
+ * Axis styling. `grid` adds the horizontal rules, so it is for the value axis.
+ *
+ * `tick` is how a **money** value axis says so: pass `formatMoneyTick` and a
+ * currency. It lives here rather than in each option for the same reason the
+ * tooltip does — one implementation across the charts, so the net-worth, cash-flow
+ * and design-system axes cannot end up three different shapes.
+ *
+ * `splitNumber` is how many intervals the axis divides its range into, and it is
+ * worth passing `valueTicks(box)`: ECharts' own choice is not a count but a
+ * consequence of hunting for round numbers, and on an 8,000-wide range it lands on
+ * nine rules where five read better (`−$2k … $6k` in 2k steps at 220 px).
+ *
+ * Axis ticks are off, always. A tick marks a position the label already names, and
+ * on a phone-width axis that is a row of stubs under five labels saying nothing the
+ * labels do not.
+ */
+export function chartAxis(
+  t: ChartTokens,
+  {
+    grid = false,
+    tick,
+    splitNumber,
+  }: { grid?: boolean; tick?: (value: number) => string; splitNumber?: number } = {},
+) {
   return {
     axisLine: { lineStyle: { color: t.axis } },
-    axisLabel: { color: t.label },
+    axisTick: { show: false },
+    axisLabel: { color: t.label, ...(tick ? { formatter: tick } : {}) },
+    ...(splitNumber === undefined ? {} : { splitNumber }),
     ...(grid ? { splitLine: { lineStyle: { color: t.split } } } : {}),
   };
+}
+
+/**
+ * How many intervals to ask a value axis for, on a canvas of this height: roughly
+ * one rule per 70 px, floored at three and capped at four.
+ *
+ * Grid lines are furniture — what a reader measures a bar against — and past a
+ * handful they stop being that and become a hatch. The count that matters is
+ * vertical, so this asks the box's height and never the viewport's width: the
+ * cash-flow chart is 280 px tall in a phone card and 280 px on a wide page, and it
+ * had the same nine rules in both. Nine was never chosen — it is what ECharts'
+ * nice-number search returns for the default `splitNumber` on a range from −$990 to
+ * $5,235 — which is why the fix is to say how many and let the library keep
+ * choosing the round values.
+ *
+ * **The ask is a request, not a promise.** ECharts may return a tick or two more
+ * than asked, by a margin that depends on the data's own range rather than on the
+ * canvas, so these numbers were tuned against the *drawn* result (counted through
+ * the SVG renderer, §2.9) and not derived from a formula: four intervals draws five
+ * rules for the two extents this app actually has (8 and 9 before), and never more
+ * than six of them for any range tested. Asking for more is what produces the
+ * hatch: five intervals returns eight rules on the same data.
+ */
+export function valueTicks(box: ChartBox): number {
+  return Math.max(3, Math.min(4, Math.round(box.height / 70)));
+}
+
+/** A chart's own box, in CSS pixels: what `Chart.tsx` measures and hands to an
+ *  option that has to be laid out for the canvas it is drawn on. */
+export interface ChartBox {
+  width: number;
+  height: number;
+}
+
+/** Below this a canvas is a phone card; at or above it, a column of a wide page. */
+const PHONE_MAX = 480;
+
+/**
+ * Is this canvas a phone card?
+ *
+ * The threshold above, asked by charts that are not laid out in columns: a phone
+ * card is not a small version of a wide page, it is a different chart. What a
+ * donut can afford to *say* differs between the two — a slice label has room at
+ * 1104 px and is clipped to `Ut…` at 310 px — and a chart that answered that
+ * question from `window.innerWidth` would be answering about the viewport while
+ * being drawn into a card.
+ */
+export function phoneCanvas(box: ChartBox): boolean {
+  return box.width < PHONE_MAX;
+}
+
+/** The gap ECharts leaves between a label and the node it belongs to. */
+const LABEL_GAP = 5;
+
+/** The widest a chart label may be before it truncates (§2.9). */
+const LABEL_WIDTH = 84;
+
+/** What a canvas this size affords a chart that is laid out in columns. */
+export interface ChartLayout {
+  /** Room for the column of labels on each side of the picture. */
+  left: number;
+  right: number;
+  /** How wide a label may be before it truncates. */
+  labelWidth: number;
+  nodeWidth: number;
+  nodeGap: number;
+}
+
+/**
+ * The layout a canvas can afford, from its own measured width.
+ *
+ * A chart has no viewport, only the box it was given, and the two are not the same
+ * fact: the sankey is 310 px wide on a phone and 1104 px on a wide page *inside the
+ * same card*. Its margins are where the node labels live, so on a phone they are
+ * sized to the labels and not a pixel more — a label column takes `LABEL_WIDTH` plus
+ * ECharts' own gap, and every remaining pixel goes to the ribbons, which are the
+ * thing the chart is *for*. On a wide canvas the roomy margins are kept: they were
+ * chosen when the chart was drawn there, and nothing about a 1104 px card argues for
+ * changing them.
+ *
+ * A canvas measured as zero — a chart whose box has not been laid out yet — takes the
+ * phone layout rather than a sliver, because the numbers here are floors and ribs
+ * cannot be drawn in a negative space.
+ */
+export function chartLayout(box: ChartBox): ChartLayout {
+  if (box.width >= PHONE_MAX) {
+    return { left: 88, right: 104, labelWidth: LABEL_WIDTH, nodeWidth: 14, nodeGap: 10 };
+  }
+  const column = LABEL_WIDTH + LABEL_GAP;
+  return { left: column, right: column, labelWidth: LABEL_WIDTH, nodeWidth: 10, nodeGap: 8 };
 }
 
 /**
@@ -219,6 +353,66 @@ export function chartLegend(t: ChartTokens, extra: Record<string, unknown> = {})
     textStyle: { color: t.label },
     inactiveColor: t.label,
     ...extra,
+  };
+}
+
+/**
+ * How round a bar's outer end is, on the chart's own canvas.
+ *
+ * Measured rather than picked: a bar on the cash-flow chart is 36 px wide on a
+ * 310 px phone canvas and 79 px on a 620 px card, so 4 px is about a tenth of
+ * the width — a corner that reads as a corner, not a capsule. It is deliberately
+ * *not* one of §2.6's radii: those size a surface (a card, a control, a sheet),
+ * and a bar is a mark with its own geometry, which is why the value is written
+ * down in §2.9 instead.
+ */
+export const BAR_RADIUS = 4;
+
+/**
+ * The radius for the end of a bar stack that faces away from the baseline —
+ * `"top"` for a stack growing up, `"bottom"` for one growing down. ECharts takes
+ * the four corners in CSS order (top-left, top-right, bottom-right, bottom-left).
+ *
+ * Only the outer end is rounded. Rounding every segment would turn a stack into a
+ * row of pills and imply a gap the data does not have; the inner ends are joins,
+ * and a join has no corner to make. The outer end is where the value *is*, so it
+ * gets the round.
+ *
+ * A bar thinner or shorter than the radius does not overflow it: zrender scales
+ * the radii down to fit the rect (`zrender/lib/graphic/helper/roundRect.js`, the
+ * four `> width` / `> height` branches), so a one-pixel sliver comes out square
+ * rather than spilling over the axis.
+ */
+export function barEndRadius(end: "top" | "bottom"): [number, number, number, number] {
+  return end === "top" ? [BAR_RADIUS, BAR_RADIUS, 0, 0] : [0, 0, BAR_RADIUS, BAR_RADIUS];
+}
+
+/**
+ * The rule at zero, for a chart whose bars grow both ways.
+ *
+ * An income-vs-expense chart is read from its baseline outwards: the bar above the
+ * line is what came in, the bar below it is what went out, and the net line is
+ * what is left. Without a rule, that baseline is one gridline among five of the
+ * same weight, at whatever value the axis happened to choose — the reader is left
+ * to infer which one it is. This states it.
+ *
+ * `silent` and `symbol: none`: it is a fact about the chart, not a series to be
+ * pointed at, so it takes no tooltip and draws no arrowheads. It is dashed in the
+ * axis colour — furniture, at the weight of an axis, never of a data mark.
+ *
+ * ECharts paints a mark line *above* the series it belongs to (verified against
+ * the SVG renderer: the dashed path comes after the bar paths), which is what this
+ * wants — the rule divides the two halves of each bar instead of hiding behind
+ * them.
+ */
+export function zeroRule(t: ChartTokens) {
+  return {
+    silent: true,
+    symbol: "none" as const,
+    animation: false,
+    label: { show: false },
+    lineStyle: { color: t.axis, width: 1, type: "dashed" as const },
+    data: [{ yAxis: 0 }],
   };
 }
 

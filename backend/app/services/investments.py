@@ -411,28 +411,119 @@ async def value_portfolio(
 
 
 async def allocation(
-    session: AsyncSession, *, on: date, base_ccy: str, group_by: str = "security"
+    session: AsyncSession,
+    *,
+    on: date,
+    base_ccy: str,
+    group_by: str = "security",
+    include_cash_accounts: bool = False,
 ) -> dict:
-    """The consolidated cross-account allocation view (ADR-0011).
+    """The consolidated cross-account allocation view (ADR-0011, ADR-0054).
 
     One row per group with its share of the portfolio. ``unaccounted cash`` from
     ADR-0021 is folded into the ``cash`` group rather than listed as an unnamed
     line, so the percentages still sum to 100 and the thing the user sees is
     something they can reason about. A ``derived`` account's own cash holding is a
     real security and lands in the same group.
+
+    ``include_cash_accounts`` (ADR-0054) folds every asset-side depository
+    account's current balance in, at the same key the plug above uses — so a
+    household's real bank cash and an investment account's uninvested cash read
+    as one "Cash" line instead of two things a reader has to add themselves.
+    Liabilities (credit, loan) and investment accounts (already counted, as
+    holdings or the plug) never reach this path, so nothing here can double-count
+    or misclassify a balance net worth would show on the other side of the ledger.
+
+    Every row also carries ``sources``: which accounts it is made of, each with
+    its share of the row. For a ``security`` row that is one account's position —
+    quantity and the price it was valued at come along too, since a security-
+    grouped row is the one case where "one account, one price" is a fact rather
+    than a mix of several.
     """
     if group_by not in ("security", "type", "account", "currency"):
         raise ValueError(f"unsupported group_by: {group_by!r}")
 
     valuations, _total = await value_portfolio(session, on=on, base_ccy=base_ccy)
-    groups: dict[tuple, dict] = {}
 
-    def _add(key, label, value: Decimal) -> None:
+    # Asset-side depository accounts only: checking, savings, cash-like. Credit
+    # cards and loans are liabilities (LIABILITY_TYPES) and investment accounts
+    # are counted above, as holdings or the stated-balance plug — this query
+    # structurally cannot see either, so there is no case to double-count.
+    depository_accounts: list[Account] = []
+    if include_cash_accounts:
+        depository_accounts = list(
+            (
+                await session.execute(
+                    select(Account).where(
+                        Account.type == "depository", Account.is_hidden.is_(False)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    # account_id -> institution, for `sources`. One extra query rather than
+    # threading institution through `AccountValuation`, which nothing else reads
+    # it for.
+    institutions: dict[uuid.UUID, str | None] = {a.id: a.institution for a in depository_accounts}
+    if valuations:
+        rows_inst = (
+            await session.execute(
+                select(Account.id, Account.institution).where(
+                    Account.id.in_([v.account_id for v in valuations])
+                )
+            )
+        ).all()
+        institutions.update(dict(rows_inst))
+
+    groups: dict = {}
+
+    def _add(
+        key,
+        label,
+        value: Decimal,
+        *,
+        account_id: uuid.UUID,
+        account_name: str,
+        quantity: Decimal | None = None,
+        price: Decimal | None = None,
+        price_currency: str | None = None,
+        price_date: date | None = None,
+    ) -> None:
         row = groups.setdefault(
-            key, {"key": key, "label": label, "value_base": ZERO, "holdings": 0}
+            key, {"key": key, "label": label, "value_base": ZERO, "holdings": 0, "sources": {}}
         )
         row["value_base"] += value
         row["holdings"] += 1
+        src = row["sources"].setdefault(
+            account_id,
+            {
+                "account_id": account_id,
+                "account_name": account_name,
+                "institution": institutions.get(account_id),
+                "value_base": ZERO,
+                "quantity": None,
+                "price": None,
+                "price_currency": None,
+                "price_date": None,
+            },
+        )
+        src["value_base"] += value
+        # Quantity/price only mean one thing when the row is one security: under
+        # every other group_by an account can contribute through several
+        # holdings, each at its own price, and "the" price of the row would be a
+        # made-up number.
+        if group_by == "security" and quantity is not None:
+            src["quantity"] = (src["quantity"] or ZERO) + quantity
+            src["price"] = price
+            src["price_currency"] = price_currency
+            src["price_date"] = price_date
+
+    # "Cash" once a bank balance can legitimately land in this group too;
+    # "Unaccounted cash" (ADR-0021's narrower plug) when it can't — the label
+    # never claims to cover more than the row actually can hold.
+    cash_label = "Cash" if include_cash_accounts else "Unaccounted cash"
 
     for v in valuations:
         for h in v.holdings:
@@ -447,15 +538,42 @@ async def allocation(
             # vocabulary, and a UUID-or-string union would put the JSON type of
             # `key` at the mercy of which group_by the caller chose.
             if group_by == "security":
-                _add(str(h.security_id), h.ticker or h.name, h.value_base)
+                _add(
+                    str(h.security_id), h.ticker or h.name, h.value_base,
+                    account_id=v.account_id, account_name=v.name,
+                    quantity=h.quantity, price=h.price,
+                    price_currency=h.price_currency, price_date=h.price_date,
+                )
             elif group_by == "type":
-                _add(h.security_type, h.security_type, h.value_base)
+                _add(h.security_type, h.security_type, h.value_base,
+                     account_id=v.account_id, account_name=v.name)
             elif group_by == "currency":
-                _add(h.price_currency or v.currency, h.price_currency or v.currency, h.value_base)
+                ccy_key = h.price_currency or v.currency
+                _add(ccy_key, ccy_key, h.value_base, account_id=v.account_id, account_name=v.name)
             else:
-                _add(str(v.account_id), v.name, h.value_base)
+                _add(str(v.account_id), v.name, h.value_base,
+                     account_id=v.account_id, account_name=v.name)
         if v.unaccounted_cash_base:
-            _add(CASH_SECURITY_TYPE, "Unaccounted cash", v.unaccounted_cash_base)
+            _add(CASH_SECURITY_TYPE, cash_label, v.unaccounted_cash_base,
+                 account_id=v.account_id, account_name=v.name)
+
+    if include_cash_accounts and depository_accounts:
+        # Lazy import: `reports.py` imports this module, so a top-level import
+        # here would be circular. By call time both modules are fully loaded.
+        from app.services.reports import net_worth_points_by_account
+
+        ids = {a.id for a in depository_accounts}
+        balances = await net_worth_points_by_account(session, [on], base_ccy, account_ids=ids)
+        for a in depository_accounts:
+            value = (balances.get(a.id) or [ZERO])[0]
+            if value == 0:
+                continue
+            if group_by in ("security", "type"):
+                _add(CASH_SECURITY_TYPE, cash_label, value, account_id=a.id, account_name=a.name)
+            elif group_by == "currency":
+                _add(a.currency, a.currency, value, account_id=a.id, account_name=a.name)
+            else:  # account
+                _add(str(a.id), a.name, value, account_id=a.id, account_name=a.name)
 
     # `ZERO`, not a bare `sum`: an empty portfolio has no groups, and `sum` over
     # nothing returns the *int* 0, whose `.quantize` is an AttributeError. Which
@@ -470,7 +588,16 @@ async def allocation(
         pct = (
             Decimal("0") if total == 0 else (value / total * Decimal("100"))
         )
-        rows.append({**row, "value_base": value, "percent": quantize_storage(pct)})
+        sources = []
+        for src in row["sources"].values():
+            src_value = quantize_storage(src["value_base"])
+            share = Decimal("0") if value == 0 else (src_value / value * Decimal("100"))
+            sources.append(
+                {**src, "value_base": src_value, "share_of_group": quantize_storage(share)}
+            )
+        sources.sort(key=lambda s: s["value_base"], reverse=True)
+        row_out = {**row, "value_base": value, "percent": quantize_storage(pct), "sources": sources}
+        rows.append(row_out)
     rows.sort(key=lambda r: r["value_base"], reverse=True)
 
     unpriced = [h for v in valuations for h in v.unpriced]
@@ -479,6 +606,7 @@ async def allocation(
         "base_currency": base_ccy,
         "on": on,
         "group_by": group_by,
+        "include_cash_accounts": include_cash_accounts,
         "total_base": total,
         "rows": rows,
         "unpriced_positions": len(unpriced),

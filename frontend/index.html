@@ -9,6 +9,18 @@
          unreachable before: the class outranked every `:root` value, so the
          light palette was defined and never once painted. -->
     <meta name="theme-color" content="#f8fafc" />
+    <!-- iOS reads these two for "Add to Home Screen" independently of the
+         manifest's `display: "standalone"`. `default` keeps the status bar
+         opaque and reserving its own space — the header does not need to
+         paint under it. We deliberately do not set `black-translucent`: that
+         mode extends content under the status bar and would require the
+         header to carry `padding-top: env(safe-area-inset-top)` in both
+         themes to avoid the clock/battery glyphs sitting on top of it. Not
+         worth the risk for a change this task didn't ask for; if the app ever
+         wants the immersive look, that inset goes on the header at the same
+         time as this value flips. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- The metalmark (Riodinidae). Order matters: Safari picks the first icon
          it understands, Chrome prefers the SVG when one is offered, and an
          `.ico` remains the one thing every browser will ask for by name at

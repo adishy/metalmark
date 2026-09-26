@@ -598,6 +598,24 @@ export type UnpricedReason = "no_price" | "no_rate";
  */
 export type QuantitySource = "history" | "provider" | "manual";
 
+/** One account's contribution to an `AllocationRow` (ADR-0054) — what the
+ *  tap-through detail sheet lists under a group. `quantity`/`price`/`price_date`
+ *  are set only on a `group_by=security` row, the one grouping where "one
+ *  account, one price" is a fact about the row rather than a mix of several
+ *  holdings. */
+export interface AllocationSource {
+  account_id: UUID;
+  account_name: string;
+  institution: string | null;
+  value_base: Money;
+  /** Share of the *row's* `value_base`, at 4 dp — not of the grand total. */
+  share_of_group: Money;
+  quantity: Money | null;
+  price: Money | null;
+  price_currency: string | null;
+  price_date: string | null;
+}
+
 export interface AllocationRow {
   /** A UUID or a vocabulary token, always a string — the grouping is a wire
    *  vocabulary and `key`'s JSON type must not depend on `group_by`. */
@@ -609,12 +627,17 @@ export interface AllocationRow {
   /** How many positions make up this row. A 3% line that is one holding and a
    *  3% line that is thirty read very differently. */
   holdings: number;
+  /** Which accounts this row is made of (ADR-0054). */
+  sources: AllocationSource[];
 }
 
 export interface Allocation {
   as_of: string;
   base_currency: string;
   group_by: AllocationGroup;
+  /** Echoes the request (ADR-0054): a screenshot or a stored link has to say
+   *  whether bank cash is folded into the total it shows. */
+  include_cash_accounts: boolean;
   /** Excludes every position that could not be valued — which is what
    *  `unpriced_positions` and `no_rate_positions` are there to say. */
   total_base: Money;

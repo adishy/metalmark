@@ -175,6 +175,25 @@ test.describe("target size (SC 2.5.8)", () => {
     await expect(page.getByTestId("range-start")).toBeVisible();
     await measure("/insights/overview#custom-window");
 
+    // Allocations' tap-through sheet (ADR-0054) is the same gap a third time:
+    // the route sweep measures the group-by switch and the cash toggle, but a
+    // row's source links exist only once a row is tapped. The seeded household
+    // has bank accounts and the cash toggle defaults on, so there is a Cash row
+    // to tap; the guard below is a failure if the seed ever stops providing one,
+    // not a skip — an allocation page with nothing to tap would be its own bug.
+    await page.goto("/insights/allocations");
+    await expect(page.getByTestId("allocation")).toBeVisible();
+    await page.waitForTimeout(SETTLE_MS);
+    const allocationRow = page.locator('[data-testid^="allocation-row-"]').first();
+    // Not a skip if this is empty, for the same reason as the txn sheet above.
+    await expect(
+      allocationRow,
+      "seeded household must have an allocation row to open",
+    ).toHaveCount(1);
+    await allocationRow.click();
+    await expect(page.getByTestId("allocation-detail")).toBeVisible();
+    await measure("/insights/allocations (detail sheet)");
+
     expect(failures, `undersized targets:\n${failures.join("\n")}`).toEqual([]);
   });
 });

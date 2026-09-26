@@ -40,6 +40,81 @@ export function formatMoney(amount: string | number, currency = "USD"): string {
 }
 
 /**
+ * The units a tick may be shortened to, largest first.
+ *
+ * `k` is there for the phone: an axis tick of `20 000` is six characters of
+ * gutter on a 310 px chart, and the gutter is where a phone's plot area goes to
+ * die. Everything below a thousand stays as it is — `$850` needs no help.
+ */
+const TICK_UNITS: ReadonlyArray<readonly [number, string]> = [
+  [1e9, "B"],
+  [1e6, "M"],
+  [1e3, "k"],
+];
+
+/** True when `scaled` is a number two decimal places can state *exactly*, so
+ *  the shortened form is the same figure rather than a rounded one. */
+function isExactTo2dp(scaled: number): boolean {
+  const hundredths = scaled * 100;
+  return Math.abs(hundredths - Math.round(hundredths)) < 1e-6;
+}
+
+/**
+ * A money figure for an **axis tick** — a scale mark, not a number a reader acts
+ * on. Use `formatMoney` for every figure that is the point of the screen.
+ *
+ * Ticks are "nice" numbers (0, 2 000, 40 000), so the full form spends five
+ * characters saying "000". The shortened form is offered **only where it is
+ * exact**: `2,000` is `$2k`, `2,500` is `$2.5k`, `1,250,000` is `$1.25M` — and
+ * `1,234` is emphatically *not* `$1.2k`. It falls back to `formatMoney`, because
+ * §6.5's rule ("never truncate a number into a different number") is a rule
+ * about what the digits *mean*, and an axis is not exempt from it: the only
+ * licence taken here is that `k`/`M`/`B` state the same value in fewer glyphs.
+ * The exact figure is one tap away in the tooltip and stated in full by the
+ * chart's `aria-label`, so nothing is lost by shortening the scale.
+ *
+ * The formatter it builds is deliberately not `formatMoney`'s: a tick shows no
+ * minor units (`$2k`, never `$2.00k`) and no grouping, because the grouping
+ * separator has nothing left to separate. Zero keeps its own case — `$0`, not
+ * `$0.00`, for the same reason it is not `$0k`.
+ */
+export function formatMoneyTick(amount: string | number, currency = "USD"): string {
+  const n = typeof amount === "string" ? Number(amount) : amount;
+  // Not a number: `formatMoney` is where that is dealt with, and it is not a
+  // case a tick reaches — an axis is built from numbers.
+  if (!Number.isFinite(n)) return formatMoney(amount, currency);
+
+  /** The digits a tick carries: symbol, no grouping, no minor units. */
+  const compact = (value: number) =>
+    new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+      useGrouping: false,
+    }).format(value);
+
+  try {
+    // Zero is the one tick with no unit to shorten: it is `$0`, not `$0.00`,
+    // because a tick carries no minor units at all.
+    if (n === 0) return compact(0);
+    const abs = Math.abs(n);
+    for (const [unit, suffix] of TICK_UNITS) {
+      if (abs < unit) continue;
+      const scaled = abs / unit;
+      if (!isExactTo2dp(scaled)) continue;
+      return `${n < 0 ? "−" : ""}${compact(scaled)}${suffix}`;
+    }
+  } catch {
+    // An ISO code `Intl` refuses: there is no symbol to shorten around, so the
+    // full form — which has its own fallback — is the honest answer.
+    return formatMoney(n, currency);
+  }
+  return formatMoney(n, currency);
+}
+
+/**
  * A decimal string with its sign flipped — still a string, never via a float
  * (ADR-0005). Zero keeps no sign, so "0.00" never becomes "-0.00".
  *

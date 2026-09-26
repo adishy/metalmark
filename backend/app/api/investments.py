@@ -340,16 +340,21 @@ async def portfolio(
 async def allocation(
     on: date | None = Query(default=None),
     group_by: str = Query(default="security", pattern=_GROUP_PATTERN),
+    include_cash_accounts: bool = Query(default=False),
     ctx: RequestContext = Depends(get_context),
 ):
-    """The consolidated cross-account allocation (ADR-0011).
+    """The consolidated cross-account allocation (ADR-0011, ADR-0054).
 
     Unpriced positions are counted separately and never folded into a row as zero.
+    ``include_cash_accounts`` folds the household's bank balances in beside the
+    portfolio, so a reader can see where all their money sits, not just the
+    invested part of it.
     """
     as_of = on or _today()
     base = await ledger_svc.base_currency(ctx.session, ctx.household_id)
     result = await svc.allocation(
-        ctx.session, on=as_of, base_ccy=base, group_by=group_by
+        ctx.session, on=as_of, base_ccy=base, group_by=group_by,
+        include_cash_accounts=include_cash_accounts,
     )
     # The service names the date `on` because it is a parameter there; the wire
     # calls it `as_of`, matching the portfolio endpoint.

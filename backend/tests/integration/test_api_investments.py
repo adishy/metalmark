@@ -255,6 +255,46 @@ async def test_allocation_groups_one_instrument_across_accounts(client):
         Decimal("100.0000"),
         Decimal("300.0000"),
     }
+    # Each row now also names which accounts it's made of.
+    assert {s["account_id"] for r in body["rows"] for s in r["sources"]} == {
+        first["id"], second["id"],
+    }
+
+
+async def test_allocation_include_cash_accounts_is_off_by_default(client):
+    """ADR-0054: the query param has to be asked for, not assumed — a stored link
+    without it must keep showing the household the same total it always did."""
+    await _signup(client)
+    account = await _brokerage(client)
+    security = await _security(client)
+    await client.put(
+        f"/investments/securities/{security['id']}/prices",
+        json={"price_date": "2026-09-20", "price": "10"},
+    )
+    await client.post(
+        "/investments/holdings",
+        json={"account_id": account["id"], "security_id": security["id"], "quantity": "10"},
+    )
+    await client.post(
+        "/accounts",
+        json={"name": "Checking", "type": "depository", "currency": "USD",
+              "current_balance": "500", "balance_date": "2026-09-20"},
+    )
+
+    default = (await client.get("/investments/allocation", params={"on": "2026-09-20"})).json()
+    assert default["include_cash_accounts"] is False
+    assert Decimal(default["total_base"]) == Decimal("100.0000")
+
+    included = (
+        await client.get(
+            "/investments/allocation",
+            params={"on": "2026-09-20", "include_cash_accounts": "true"},
+        )
+    ).json()
+    assert included["include_cash_accounts"] is True
+    assert Decimal(included["total_base"]) == Decimal("600.0000")
+    cash_row = next(r for r in included["rows"] if r["key"] == "cash")
+    assert cash_row["sources"][0]["account_name"] == "Checking"
 
 
 # ---- the refusals ----------------------------------------------------------

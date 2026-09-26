@@ -20,3 +20,5 @@ capturing the *process*: what was asked, what was researched, what the reviews f
 | 2026-09-23 | 05 | Balance-model fixes (0043/0044), balance history + coverage (0045), chart, stale/alike accounts, daily FX fetch (0046) |
 | 2026-09-24 | 06 | Cash flow debugged via the agent API; typed starter categories, local categorizer, Accounts redesign, balance history, institution logos (0049) |
 | 2026-09-24 | 07 | Design review (-ink tokens), phone UI overhaul, stalled-bank diagnosis (0050), repo AGENTS.md files |
+| 2026-09-24 | 08 | The bank's holdings landed as positions (ADR-0051, migration 0011); worktree + CI notes |
+| 2026-09-25 | 09 | Eight improvements: connection names, Insights + allocations with bank cash, owner income and paystubs, recurring, fixed PWA chrome, a chart pass, an Amazon spike; seven topics landed in one merge |

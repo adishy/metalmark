@@ -44,6 +44,16 @@ test("reports render their charts and re-scope to one owner", async ({ page }) =
   await expect(page.getByTestId("sankey-attribution")).toBeHidden();
   await expect(page.getByTestId("spending-attribution")).toBeHidden();
 
+  // The donut's centre figure (§2.9) is DOM text, not canvas pixels — which is
+  // exactly what makes it checkable here, and why it is an element over the chart
+  // rather than a canvas `graphic`. It has to be the sum of the rows printed
+  // beside it, or the ring's hole says something the list does not.
+  const centre = page.getByTestId("spending-total");
+  await expect(centre).toBeVisible();
+  const spendRows = page.getByTestId("report-spending").locator("ul").first().locator("li");
+  const rowSum = (await spendRows.allTextContents()).reduce((a, row) => a + parseMoney(row), 0);
+  expect(parseMoney((await centre.textContent()) ?? "")).toBeCloseTo(rowSum, 2);
+
   // The graph's text equivalent, which is the part a canvas cannot carry (§2.9):
   // both sides listed with a total each, and both totals the same figure — the
   // property the picture is drawn on, asserted where a reader can see it.
@@ -145,4 +155,95 @@ test("/reports redirects to Insights' Overview tab, carrying its query string", 
   // The redirect landed on a real, working tab — not just the right URL.
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
   await expect(page.getByTestId("insights-tab-overview")).toHaveAttribute("aria-selected", "true");
+});
+
+// The Allocations tab (ADR-0054) is the only surface whose whole point is the
+// round trip the component tests cannot make: `useAllocation(groupBy,
+// includeCashAccounts)` against a real server, the toggle changing what that
+// server counts, and `sources` coming back named. The component test stubs the
+// hook entirely — rightly, it owns the call — so this is the only place that
+// proves the request the UI sends and the rows the API answers with line up.
+//
+// The seeded household has bank accounts and no investment accounts, which is
+// exactly the case ADR-0054 was written for: with the toggle on there is a
+// "Cash" row to read and to tap, and with it off the portfolio is empty.
+test("allocations counts bank cash when asked and names its sources on tap", async ({ page }) => {
+  await login(page);
+  await page.goto("/insights/allocations");
+
+  await expect(page.getByTestId("insights-tab-allocations")).toHaveAttribute("aria-selected", "true");
+  // The toggle defaults on (ADR-0054: the household's own choice, remembered),
+  // so the seeded bank balances are the allocation from the first paint.
+  await expect(page.getByTestId("allocation-include-cash")).toBeChecked();
+  const cashRow = page.getByTestId("allocation-row-cash");
+  await expect(cashRow).toHaveText(/Cash/);
+
+  // Off: the same household has no positions to allocate, and the page says so
+  // rather than showing an empty total. This is the flag reaching the server and
+  // back — a UI that ignored it would leave the Cash row standing.
+  await page.getByTestId("allocation-include-cash").click();
+  await expect(page.getByTestId("allocation-empty")).toHaveText(/No holdings yet/);
+
+  // On again, and tap through: the sheet names which accounts the row is made
+  // of — the seeded household's bank accounts, not a holdings list it has none of.
+  await page.getByTestId("allocation-include-cash").click();
+  await cashRow.click();
+  const sources = page.getByTestId("allocation-detail-sources");
+  await expect(sources).toContainText("Everyday Checking");
+  await expect(sources).toContainText("High-Yield Savings");
+  await expect(sources).toContainText("Euro Savings");
+
+  // Each source is a way back to Accounts, so the trail from "where is our
+  // money" to the accounts themselves is one tap, not a navigation hunt.
+  await expect(page.getByTestId("allocation-detail-close")).toBeVisible();
+});
+
+// A chart's tooltip is the one part of it that is DOM rather than canvas, which makes
+// it the only part of a chart's *content* this suite can read — and it is where a
+// reader gets the exact figures an axis can only abbreviate (§6.5). It used to hand
+// ECharts no formatter at all, so a tap printed `Income 5235`: no currency anywhere on
+// a money chart, and a title of `Sep`, which names a month but not a year.
+test("the cash-flow tooltip reads as money, and names the bucket in full", async ({ page }) => {
+  await login(page);
+  await page.getByTestId("nav-insights").click();
+
+  const chart = page.getByTestId("cash-flow-chart");
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("cash-flow-chart has no bounding box");
+  await expect(chart.locator("canvas").first()).toBeVisible();
+
+  // The class `chartTooltip` sets on ECharts' own tooltip element. Every chart on
+  // the page mounts one of these, empty ones included, so it is scoped to the chart
+  // under test rather than to the page.
+  const tooltip = chart.locator(".mm-chart-tooltip");
+  // Point at the plot until it answers. The chart is drawn from a fetch, and the
+  // pointer arriving before the bars do lands on an empty canvas — a tooltip that
+  // never opened would otherwise read as a tooltip that says nothing, and the two
+  // are not the same failure. `mousemove` is the trigger a desktop reader has;
+  // `click` beside it is what makes the same tooltip reachable on a phone, and the
+  // before/after shots exercise that path.
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+        return (await tooltip.innerText().catch(() => "")).trim();
+      },
+      { timeout: 15_000, message: "the cash-flow tooltip never opened" },
+    )
+    .not.toBe("");
+  await expect(tooltip).toBeVisible();
+  // `innerText`, not `textContent`: the tooltip's lines are separated by `<br/>`,
+  // which carries no text of its own, so textContent would run them together.
+  const lines = (await tooltip.innerText()).split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // The bucket, in full — the axis's `Sep` names a month but not a year, so the
+  // heading carries the year the axis's short form leaves out.
+  expect(lines[0]).toMatch(/\d{4}/);
+  // Then every series at that bucket, each as money in the report's own currency.
+  // The expense is negative because its bars grow downwards.
+  expect(lines.slice(1)).toHaveLength(3);
+  for (const line of lines.slice(1)) {
+    expect(line).toMatch(/^(Income|Expense|Net): [-−]?\$\d[\d,]*\.\d{2}$/);
+  }
 });
