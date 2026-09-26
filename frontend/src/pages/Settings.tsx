@@ -13,6 +13,7 @@ import {
   useAccounts,
   useCategories,
   useCategoryGroups,
+  useCategoryUsage,
   useCreateCategory,
   useCreateCategoryGroup,
   useCreateOwner,
@@ -51,12 +52,23 @@ import {
 } from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import Dialog from "@/components/Dialog";
 import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
+import ColorPicker from "@/components/ColorPicker";
 import { CloseIcon } from "@/components/icons";
+import { tokenHex } from "@/theme/chartTokens";
 import { Day, Instant } from "@/components/datetime";
 import ScrollTabs from "@/components/ScrollTabs";
-import type { Owner, OwnerReassignment } from "@/api/types";
+import type {
+  Category,
+  CategoryDeleteResult,
+  CategoryGroup,
+  CategoryUsage,
+  Owner,
+  OwnerReassignment,
+} from "@/api/types";
+import { categoryLabel } from "@/components/CategoryPicker";
 import { todayIso } from "@/lib/dates";
 import {
   Button,
@@ -556,24 +568,33 @@ function CategoriesSection() {
   const createGroup = useCreateCategoryGroup();
   const delGroup = useDeleteCategoryGroup();
   const createCat = useCreateCategory();
-  const delCat = useDeleteCategory();
-  const updateCat = useUpdateCategory();
 
   const [gName, setGName] = useState("");
   const [gType, setGType] = useState("expense");
   const [cName, setCName] = useState("");
   const [cGroup, setCGroup] = useState("");
-  const [cColor, setCColor] = useState("#14b8a6");
+  // The picker's default is the first entry in its own palette, read from the
+  // tokens rather than written out: a literal teal would open the picker on
+  // "Custom" in one of the two themes, and a new category opening on a colour
+  // that is not one of the ten reads as a bug. The fallback is the colour this
+  // form used before there was a palette, for a document that cannot resolve
+  // the custom properties at all.
+  const [cColor, setCColor] = useState(() => tokenHex("chart-1") ?? "#14b8a6");
   const [cIcon, setCIcon] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [cErr, setCErr] = useState<string | null>(null);
+  // What the last delete moved, shown as a `role="status"` line under the list:
+  // the row is gone by then, so this sentence is the only thing left saying where
+  // its entries went.
+  const [deleted, setDeleted] = useState<
+    { name: string; counts: CategoryDeleteResult; target: string } | null
+  >(null);
 
   const ids = {
     gName: useFieldId("group-name"),
     gType: useFieldId("group-type"),
     cName: useFieldId("cat-name"),
     cGroup: useFieldId("cat-group"),
-    cColor: useFieldId("cat-color"),
     cIcon: useFieldId("cat-icon"),
   };
 
@@ -586,6 +607,14 @@ function CategoriesSection() {
     });
     return m;
   }, [categories.data]);
+
+  // Type by group id, so a row can offer the categories of its own type without
+  // walking the groups again for each one.
+  const typeOf = useMemo(() => {
+    const m = new Map<string, string>();
+    groups.data?.forEach((g) => m.set(g.id, g.type));
+    return m;
+  }, [groups.data]);
 
   const defaultGroup = groups.data?.[0]?.id ?? "";
 
@@ -623,8 +652,15 @@ function CategoriesSection() {
       </Card>
 
       <Card title="Add category">
+        {/* Three fields, then the colour strip across the full width, then the
+            button on its own row. The order is the reading order *and* the tab
+            order, which a one-row grid cannot give: the picker is a fieldset of
+            eleven targets and does not fit in a fifth of a 616 px form.
+            The button's row follows the picker rather than sitting in the first
+            row as a fifth cell, which is also what fixed it — see the note on
+            the Emoji field. */}
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-5"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-3"
           data-testid="add-category-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -660,12 +696,23 @@ function CategoriesSection() {
               data-testid="category-group"
             />
           </Field>
-          <Field label="Emoji" htmlFor={ids.cIcon} hint="Optional, e.g. 🛒">
-            <Input id={ids.cIcon} value={cIcon} maxLength={16} onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
+          {/* The example moved from `hint` into the placeholder. A hint is a
+              second line under the control, so this one column was 20 px taller
+              than the rest of the row — and the button, bottom-aligned in its
+              own cell, was pushed to the bottom of the tallest cell. That is
+              the misalignment: the button sat 20 px below the inputs it was
+              supposed to line up with. An example is not a hint (§4.14) and
+              does not need a line of its own. */}
+          <Field label="Emoji" htmlFor={ids.cIcon}>
+            <Input id={ids.cIcon} value={cIcon} maxLength={16} placeholder="🛒" onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
           </Field>
-          <Field label="Color" htmlFor={ids.cColor}>
-            <Input id={ids.cColor} type="color" value={cColor} onChange={(e) => setCColor(e.target.value)} data-testid="category-color" className="h-10 p-1" />
-          </Field>
+          <ColorPicker
+            className="sm:col-span-3"
+            label="Color"
+            value={cColor}
+            onChange={setCColor}
+            testid="category-color"
+          />
           <div className="flex items-end">
             <Button type="submit" disabled={createCat.isPending || !groups.data?.length} data-testid="category-save">Add category</Button>
           </div>
@@ -673,6 +720,15 @@ function CategoriesSection() {
       </Card>
 
       <Card title="Categories">
+        {deleted && (
+          <p
+            className="mb-3 text-xs text-fg-muted"
+            role="status"
+            data-testid="category-delete-result"
+          >
+            Deleted “{deleted.name}” and moved {movedCounts(deleted.counts)} to {deleted.target}.
+          </p>
+        )}
         <ul className="space-y-4" data-testid="category-list">
           {groups.data?.map((g) => (
             <li key={g.id}>
@@ -694,41 +750,20 @@ function CategoriesSection() {
               </div>
               <ul className="mt-1 divide-y divide-border rounded-control bg-surface-inset/40">
                 {(byGroup.get(g.id) ?? []).map((c) => (
-                  <li key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="flex min-w-0 flex-1 items-center gap-3">
-                      {/* The emoji is edited in place: it is the one field
-                          people change for fun, and a dialog for one
-                          character is a long way round. Saved on blur. The
-                          wrapper sets the width — the control is w-full. */}
-                      <span className="w-14 shrink-0">
-                      <Input
-                        aria-label={`Emoji for ${c.name}`}
-                        defaultValue={c.icon ?? ""}
-                        maxLength={16}
-                        className="px-1 text-center"
-                        onBlur={(e) => {
-                          const next = e.target.value.trim() || null;
-                          if (next !== (c.icon ?? null)) {
-                            updateCat.mutate({ id: c.id, body: { icon: next } });
-                          }
-                        }}
-                        data-testid={`category-icon-${c.id}`}
-                      />
-                      </span>
-                      {!c.icon && (
-                        <span className="inline-block h-3 w-3 rounded-full" style={{ background: c.color ?? "#64748b" }} />
-                      )}
-                      <span className="truncate">{c.name}</span>
-                    </span>
-                    <Button
-                      variant="ghost"
-                      className="px-2 py-1 text-xs"
-                      onClick={() => delCat.mutate(c.id)}
-                      data-testid={`category-delete-${c.id}`}
-                    >
-                      Delete
-                    </Button>
-                  </li>
+                  <CategoryRow
+                    key={c.id}
+                    category={c}
+                    groups={(groups.data ?? []).filter((other) => other.type === g.type)}
+                    // Same type, itself excluded: a category's type is its
+                    // group's, so entries must land on the same side of cash
+                    // flow or the reports count them as something they are not.
+                    // The service refuses the same move, so the picker cannot
+                    // offer one that would come back 422.
+                    siblings={(categories.data ?? []).filter(
+                      (other) => other.id !== c.id && typeOf.get(other.group_id) === g.type,
+                    )}
+                    onDeleted={(result) => setDeleted({ name: c.name, ...result })}
+                  />
                 ))}
                 {(byGroup.get(g.id) ?? []).length === 0 && (
                   <li className="px-3 py-2 text-xs text-fg-muted">No categories.</li>
@@ -742,6 +777,339 @@ function CategoriesSection() {
   );
 }
 
+/**
+ * One category in the list: the emoji is edited *in* the row, everything else
+ * lives one tap away in `EditCategoryDialog`.
+ *
+ * **The emoji is in the row on purpose.** It is the one field people change for
+ * fun, and a dialog for one character is a long way round; saved on blur, like
+ * every other in-place edit here. Its wrapper sets the width — the control is
+ * `w-full`.
+ *
+ * **Everything else moved into the panel** (§4.6: a row has one primary action,
+ * and a second one either sits beside it at 44 px or moves into the detail). The
+ * arithmetic decided it rather than taste: at 360 px this row is 296 px wide, and
+ * an inline Rename button beside Delete left the *name* — the one thing the list
+ * is for — 51 px, which truncates "Paychecks". One Edit button costs less width
+ * than the Delete button it replaces and the name reads whole again.
+ */
+function CategoryRow({
+  category,
+  groups,
+  siblings,
+  onDeleted,
+}: {
+  category: Category;
+  /** Groups this category may move to: its own type only, never across. */
+  groups: CategoryGroup[];
+  /** Categories a delete could file its entries under, same type, minus itself. */
+  siblings: Category[];
+  onDeleted: (result: { counts: CategoryDeleteResult; target: string }) => void;
+}) {
+  const updateCat = useUpdateCategory();
+  const [editing, setEditing] = useState(false);
+
+  return (
+    <li className="px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-14 shrink-0">
+          <Input
+            aria-label={`Emoji for ${category.name}`}
+            defaultValue={category.icon ?? ""}
+            maxLength={16}
+            className="px-1 text-center"
+            onBlur={(e) => {
+              const next = e.target.value.trim() || null;
+              if (next !== (category.icon ?? null)) {
+                updateCat.mutate({ id: category.id, body: { icon: next } });
+              }
+            }}
+            data-testid={`category-icon-${category.id}`}
+          />
+        </span>
+        {!category.icon && (
+          <span
+            className="inline-block h-3 w-3 shrink-0 rounded-full"
+            style={{ background: category.color ?? "#64748b" }}
+            // Decorative: the name beside it is the label (§4.5). Only the
+            // colour picker's e2e has anything to say about it, which is that
+            // the swatch that was clicked is the colour that came back.
+            aria-hidden="true"
+            data-testid={`category-dot-${category.id}`}
+          />
+        )}
+        <span className="min-w-0 flex-1 truncate text-fg">{category.name}</span>
+        <Button
+          variant="ghost"
+          className="px-2 py-1 text-xs"
+          onClick={() => setEditing(true)}
+          data-testid={`category-edit-${category.id}`}
+        >
+          Edit
+        </Button>
+      </div>
+      {updateCat.isError && (
+        <p
+          className="mt-1 text-xs text-negative"
+          role="alert"
+          data-testid={`category-error-${category.id}`}
+        >
+          {(updateCat.error as Error).message}
+        </p>
+      )}
+
+      {editing && (
+        <EditCategoryDialog
+          category={category}
+          groups={groups}
+          siblings={siblings}
+          onDeleted={onDeleted}
+          onClose={() => setEditing(false)}
+        />
+      )}
+    </li>
+  );
+}
+
+/** "3 transactions", "1 split line" — never "1 transaction(s)". */
+function rows(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** What a delete actually moved: "3 transactions and 1 split line". */
+function movedCounts(counts: CategoryDeleteResult): string {
+  const parts: string[] = [];
+  if (counts.reassigned_transactions) {
+    parts.push(rows(counts.reassigned_transactions, "transaction", "transactions"));
+  }
+  if (counts.reassigned_splits) {
+    parts.push(rows(counts.reassigned_splits, "split line", "split lines"));
+  }
+  return parts.join(" and ") || "nothing";
+}
+
+/** What is filed under a category, as a sentence for the confirmation. */
+function filedUnder(usage: CategoryUsage): string {
+  const parts: string[] = [];
+  if (usage.transactions) parts.push(rows(usage.transactions, "transaction", "transactions"));
+  if (usage.splits) parts.push(rows(usage.splits, "split line", "split lines"));
+  if (!parts.length) return "Nothing is filed under it.";
+  const total = usage.transactions + usage.splits;
+  return `${parts.join(" and ")} ${total === 1 ? "is" : "are"} filed under it.`;
+}
+
+/**
+ * Rename a category, move it to another group of the same type, or delete it and
+ * say where its entries go.
+ *
+ * **Rename is a plain PATCH of one field** and the row behind the dialog is the
+ * same row it started from — no page, no context switch, and the list keeps
+ * showing every other category while this one is edited.
+ *
+ * **The group list is filtered to the category's own type, and that filter is a
+ * correctness rule rather than a tidy-up.** A category's type *is* its group's
+ * and every report reads it, so offering an income group here would let a rename
+ * silently move an expense category to the other side of cash flow with nothing
+ * in the ledger having changed. `update_category` refuses the same move
+ * server-side, so the two agree rather than one relying on the other.
+ *
+ * **Delete is a second step inside this dialog, not a second dialog** (§4.12's
+ * irreversible-but-small tier: an inline two-step confirm, the same shape the
+ * Accounts and Owners rows use). It states the count *before* anything is
+ * destroyed — the number comes from `GET /categories/{id}/usage`, which is a
+ * count the browser cannot compute without pulling the transactions — and it
+ * asks where the entries should go rather than silently orphaning them. "Keep"
+ * is the safe option and it takes the focus.
+ */
+function EditCategoryDialog({
+  category,
+  groups,
+  siblings,
+  onDeleted,
+  onClose,
+}: {
+  category: Category;
+  groups: CategoryGroup[];
+  siblings: Category[];
+  onDeleted: (result: { counts: CategoryDeleteResult; target: string }) => void;
+  onClose: () => void;
+}) {
+  const updateCat = useUpdateCategory();
+  const del = useDeleteCategory();
+  const [name, setName] = useState(category.name);
+  const [group, setGroup] = useState(category.group_id);
+  const [err, setErr] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  // "" is the sentinel: no category at all. A category that happens to be named
+  // "Uncategorized" is a *row*, with an id, and picking it is a different option.
+  const [target, setTarget] = useState("");
+  const nameId = useFieldId(`edit-category-name-${category.id}`);
+  const groupId = useFieldId(`edit-category-group-${category.id}`);
+  const targetId = useFieldId(`edit-category-target-${category.id}`);
+
+  // Only while the confirmation is on screen, and only then: the count is
+  // promised at the moment of the decision, not collected for every row drawn.
+  const usage = useCategoryUsage(confirming ? category.id : null);
+
+  const targets = [
+    {
+      value: "",
+      // Named differently from any category on purpose. A household can have a
+      // real category called "Uncategorized" — a row, with an id, that can be
+      // renamed and deleted — and this option is the opposite of that: no
+      // category at all. Two options reading "Uncategorized" would be a coin
+      // flip, and one of the two outcomes would be wrong.
+      label: "No category (Uncategorized)",
+    },
+    ...siblings.map((c) => ({ value: c.id, label: categoryLabel(c) })),
+  ];
+
+  const save = () => {
+    const e = requiredText(name);
+    setErr(e);
+    if (e) return;
+    updateCat.mutate(
+      {
+        id: category.id,
+        body: {
+          name: name.trim(),
+          // Only when the reader moved it: a rename is not a re-file.
+          ...(group !== category.group_id ? { group_id: group } : {}),
+        },
+      },
+      { onSuccess: onClose },
+    );
+  };
+
+  const confirmDelete = () => {
+    del.mutate(
+      { id: category.id, reassignTo: target || null },
+      {
+        onSuccess: (counts) => {
+          onDeleted({
+            counts,
+            target: targets.find((o) => o.value === target)?.label ?? "No category (Uncategorized)",
+          });
+          onClose();
+        },
+      },
+    );
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Edit “${category.name}”`}
+      testid={`edit-category-dialog-${category.id}`}
+      footer={
+        <>
+          {!confirming && (
+            <Button
+              variant="danger"
+              onClick={() => setConfirming(true)}
+              data-testid={`category-delete-${category.id}`}
+            >
+              Delete
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={save}
+            disabled={updateCat.isPending}
+            data-testid={`category-save-${category.id}`}
+          >
+            Save
+          </Button>
+        </>
+      }
+    >
+      {confirming ? (
+        <div
+          className="rounded-control border border-negative/40 bg-negative/10 p-3 text-sm"
+          data-testid={`category-delete-confirm-${category.id}`}
+        >
+          <p className="text-negative">Delete “{category.name}”? This cannot be undone.</p>
+          <p className="mt-1 text-fg" role="status" data-testid={`category-usage-${category.id}`}>
+            {usage.isPending
+              ? "Counting what is filed under it…"
+              : usage.isError
+                ? "Could not count what is filed under it. Nothing has been deleted."
+                : filedUnder(usage.data)}
+          </p>
+          <Field label="Move its entries to" htmlFor={targetId} className="mt-3">
+            <Combobox
+              id={targetId}
+              listLabel="Move its entries to"
+              value={target}
+              onChange={setTarget}
+              options={targets}
+              data-testid={`category-target-${category.id}`}
+            />
+          </Field>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            {/* The safe option, focused when the step opens (§4.12). */}
+            <Button
+              variant="secondary"
+              autoFocus
+              onClick={() => setConfirming(false)}
+              data-testid={`category-keep-${category.id}`}
+            >
+              Keep
+            </Button>
+            <Button
+              variant="danger"
+              disabled={del.isPending || usage.isPending || usage.isError}
+              onClick={confirmDelete}
+              data-testid={`category-delete-confirm-btn-${category.id}`}
+            >
+              Yes, delete
+            </Button>
+          </div>
+          {del.isError && (
+            <p className="mt-2 text-negative" role="alert">
+              {(del.error as Error).message}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field label="Name" htmlFor={nameId} required error={err}>
+            <Input
+              id={nameId}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid={`category-edit-name-${category.id}`}
+            />
+          </Field>
+          <Field
+            label="Group"
+            htmlFor={groupId}
+            hint={`Only ${groups[0]?.type ?? "matching"} groups: a category's type is its group's, and the reports read it.`}
+          >
+            <Combobox
+              id={groupId}
+              listLabel="Category group"
+              value={group}
+              onChange={setGroup}
+              options={groups.map((g) => ({ value: g.id, label: g.name }))}
+              data-testid={`category-edit-group-${category.id}`}
+            />
+          </Field>
+          {updateCat.isError && (
+            <p className="text-sm text-negative" role="alert">
+              {(updateCat.error as Error).message}
+            </p>
+          )}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 // -------------------------------------------------------------------- tags
 
 function TagsSection() {
@@ -749,16 +1117,19 @@ function TagsSection() {
   const createTag = useCreateTag();
   const delTag = useDeleteTag();
   const [name, setName] = useState("");
-  const [color, setColor] = useState("#38bdf8");
+  // The same rule as the category form's default, one palette slot along: a tag
+  // has no emoji to carry it, so its colour is the whole of its identity.
+  const [color, setColor] = useState(() => tokenHex("chart-2") ?? "#38bdf8");
   const [err, setErr] = useState<string | null>(null);
   const nameId = useFieldId("tag-name");
-  const colorId = useFieldId("tag-color");
 
   return (
     <div className="space-y-4">
       <Card title="Add tag">
+        {/* One column at every width: a tag is a name and a colour, and the
+            picker's strip needs the full width to stay on one line. */}
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+          className="grid grid-cols-1 gap-3"
           data-testid="add-tag-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -771,9 +1142,12 @@ function TagsSection() {
           <Field label="Tag name" htmlFor={nameId} required error={err}>
             <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} data-testid="tag-name" />
           </Field>
-          <Field label="Color" htmlFor={colorId}>
-            <Input id={colorId} type="color" value={color} onChange={(e) => setColor(e.target.value)} data-testid="tag-color" className="h-10 p-1" />
-          </Field>
+          <ColorPicker
+            label="Color"
+            value={color}
+            onChange={setColor}
+            testid="tag-color"
+          />
           <div className="flex items-end">
             <Button type="submit" disabled={createTag.isPending} data-testid="tag-save">Add tag</Button>
           </div>

@@ -94,21 +94,115 @@ test("split a transaction by amount", async ({ page }) => {
   await expect(page.getByTestId("txn-list")).toContainText("split");
 });
 
-test("add and delete a category in settings", async ({ page }) => {
+test("add, rename and delete a category in settings", async ({ page }) => {
   const run = Date.now();
   await login(page);
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("settings-panel-categories")).toBeVisible();
 
   const name = `Bikes ${run}`;
+  // A second category to move things *to*. Both are created through the same
+  // form, so both land in the same group — and a replacement has to share the
+  // group's type, because a category's type is its group's and the reports read
+  // it. Anything else would be a list of one.
+  const spare = `Pumps ${run}`;
+  // The colour is picked from the palette rather than typed into a raw colour
+  // input: ten named swatches, each one a token read at runtime. Pink, so the
+  // assertion below is about a colour that *was* picked — the default is the
+  // first swatch, and a test that never moved it would pass on a picker that
+  // ignored the click.
   await page.getByTestId("category-name").fill(name);
+  await page.getByRole("radio", { name: "Pink" }).check();
+  await expect(page.getByTestId("category-color-current")).toHaveText(/^Selected: Pink · /);
+  const picked = await page
+    .getByRole("radio", { name: "Pink" })
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
   await page.getByTestId("category-save").click();
   await expect(page.getByTestId("category-list")).toContainText(name);
+  // What was picked is what was stored: the dot beside the new category's name
+  // is the colour of the swatch that was clicked, read back from the server
+  // rather than from the form's own state. Compared against the swatch's own
+  // computed style, so a palette change moves both and only a broken round trip
+  // fails.
+  // `.last()` because the rows are nested inside the group's own <li>, so the
+  // group matches `hasText` too — the same scoping the rename below uses.
+  await expect(
+    page
+      .locator('[data-testid="category-list"] li', { hasText: name })
+      .last()
+      .locator('[data-testid^="category-dot-"]'),
+  ).toHaveCSS("background-color", picked);
+  await page.getByTestId("category-name").fill(spare);
+  await page.getByTestId("category-save").click();
+  await expect(page.getByTestId("category-list")).toContainText(spare);
 
-  // Delete the freshly-added category via its row's Delete button.
+  // Rename it from its own row: Edit opens a dialog over the list, so the tab
+  // you were on is still the tab you are on — no full-page context switch.
   const row = page.locator('[data-testid="category-list"] li', { hasText: name }).last();
-  await row.getByRole("button", { name: "Delete", exact: true }).click();
+  await row.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("dialog").getByTestId(/^category-edit-name-/).fill(`${name} renamed`);
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("category-list")).toContainText(`${name} renamed`);
+
+  // File something under it, so the delete has a count to state and something
+  // to move. Reassigned to another category rather than left uncategorized:
+  // an uncategorized transaction lands in the needs_review queue, and this spec
+  // must not leave a backlog behind for review.spec.ts.
+  const accountName = `Bikes Acct ${run}`;
+  const merchant = `Bike pump ${run}`;
+  await page.getByTestId("nav-accounts").click();
+  await addAccount(page, { name: accountName, balance: "300", currency: "USD" });
+  await page.getByTestId("nav-transactions").click();
+  await addTransaction(page, {
+    accountName,
+    amount: "-24.00",
+    merchant,
+    category: `${name} renamed`,
+  });
+
+  // Delete it from the same dialog the rename happened in: the row carries one
+  // action (§4.6), and the destructive one lives behind its own step (§4.12).
+  await page.getByTestId("nav-settings").click();
+  const renamed = page
+    .locator('[data-testid="category-list"] li', { hasText: `${name} renamed` })
+    .last();
+  await renamed.getByRole("button", { name: "Edit" }).click();
+  const dialog = page.getByRole("dialog");
+  const dialogTestId = (await dialog.getAttribute("data-testid")) ?? "";
+  const catId = dialogTestId.replace("edit-category-dialog-", "");
+  await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+
+  // How much is at stake, said before anything is destroyed — and the focus is
+  // on the safe option, never on the red one.
+  await expect(dialog.getByTestId(`category-usage-${catId}`)).toHaveText(
+    "1 transaction is filed under it.",
+  );
+  await expect(dialog.getByTestId(`category-keep-${catId}`)).toBeFocused();
+
+  // Default target: the sentinel. "Uncategorized" is the absence of a category
+  // rather than a row, so the option is the empty value and reads as its own
+  // thing — a household category really called "Uncategorized" is a different
+  // option with a different value.
+  await expect(dialog.getByTestId(`category-target-${catId}`)).toHaveValue(
+    "No category (Uncategorized)",
+  );
+
+  // Move it to a real category instead, and the confirmation says which.
+  await pickOption(dialog, `category-target-${catId}`, new RegExp(`${spare}$`));
+  await dialog.getByTestId(`category-delete-confirm-btn-${catId}`).click();
+
   await expect(page.getByTestId("category-list")).not.toContainText(name);
+  // The row is gone, so this line is what says where its entries went.
+  const result = page.getByTestId("category-delete-result");
+  await expect(result).toContainText(`Deleted “${name} renamed”`);
+  await expect(result).toContainText("moved 1 transaction to");
+  await expect(result).toContainText(spare);
+
+  // No orphan: the transaction is still there and now reads the new category.
+  await page.getByTestId("nav-transactions").click();
+  await expect(page.getByTestId("txn-list").locator("li", { hasText: merchant })).toContainText(
+    spare,
+  );
 });
 
 test("add an FX rate in settings", async ({ page }) => {

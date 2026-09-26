@@ -866,6 +866,7 @@ def _fill(path: str, ids: dict) -> str:
         .replace("{run_id}", ids["run"])
         .replace("{owner_id}", ids["child"])
         .replace("{paystub_id}", ids["paystub"])
+        .replace("{category_id}", ids["allowance"])
     )
 
 
