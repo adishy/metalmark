@@ -47,6 +47,7 @@ from app.schemas import auth as au
 from app.schemas import checks as ch
 from app.schemas import connections as co
 from app.schemas import household as hh
+from app.schemas import income as pay
 from app.schemas import institutions as ins
 from app.schemas import investments as inv
 from app.schemas import ledger as le
@@ -110,6 +111,17 @@ EVENT_DETAIL = JsonTree(
 CURSOR = Pattern(re.compile(r"[A-Za-z0-9_\-=]{1,512}"), "Cursor")
 #: An alembic revision (``0008``) or a version string (``0.1.0``).
 VERSION = Pattern(re.compile(r"[0-9A-Za-z][0-9A-Za-z_.+\-]{0,31}"), "Version")
+#: A jurisdiction code the household typed ("US-CA"), not a fixed vocabulary —
+#: shaped like a country or country-subdivision code, so it clears without
+#: being an enumerable ``Code``.
+TAX_REGION = Pattern(re.compile(r"[A-Z]{2}(-[A-Z0-9]{1,3})?"), "TaxRegion")
+PAY_FREQUENCIES = Code("weekly", "biweekly", "semimonthly", "monthly", "annual")
+FILING_STATUSES = Code(
+    "single", "married_joint", "married_separate", "head_of_household"
+)
+PAYSTUB_LINE_KINDS = Code(
+    "earning", "pre_tax_deduction", "tax", "post_tax_deduction", "employer_contribution"
+)
 
 REGISTRY: dict[tuple[type, str], Policy] = {}
 
@@ -188,6 +200,47 @@ register(
 # ---- owners, household, identity ------------------------------------------------
 
 register(ow.OwnerOut, id=K, name=Label("Owner"), kind=Code("person", "shared"), sort=K)
+
+# ---- owner income and paystubs (ADR-0052) --------------------------------------
+
+register(
+    pay.OwnerIncomeProfileFields,
+    id=K,
+    currency=CUR,
+    annual_gross_income=K,
+    pay_frequency=PAY_FREQUENCIES,
+    filing_status=FILING_STATUSES,
+    tax_region=TAX_REGION,
+    created_at=K,
+    updated_at=K,
+)
+register(pay.YtdKindTotal, kind=PAYSTUB_LINE_KINDS, amount=K)
+register(pay.IncomeSummaryOut, annualized_gross=K, ytd=N, effective_tax_rate=K)
+register(pay.OwnerIncomeProfileOut, owner_id=K, profile=N, summary=N)
+register(
+    pay.PaystubLineOut,
+    id=K,
+    kind=PAYSTUB_LINE_KINDS,
+    label=Label("PaystubLine"),
+    amount=K,
+    ytd_amount=K,
+    position=K,
+)
+register(
+    pay.PaystubOut,
+    id=K,
+    owner_id=K,
+    pay_date=K,
+    period_start=K,
+    period_end=K,
+    employer=Pseudonym("Employer"),
+    currency=CUR,
+    gross=K,
+    net=K,
+    lines=N,
+    created_at=K,
+    updated_at=K,
+)
 register(
     hh.HouseholdOut,
     id=K,
@@ -480,6 +533,7 @@ register(
     as_of=K,
     base_currency=CUR,
     group_by=Code("security", "type", "account", "currency"),
+    include_cash_accounts=K,
     total_base=K,
     rows=N,
     unpriced_positions=K,
@@ -493,6 +547,19 @@ register(
     value_base=K,
     percent=K,
     holdings=K,
+    sources=N,
+)
+register(
+    inv.AllocationSourceOut,
+    account_id=K,
+    account_name=Pseudonym("Account"),
+    institution=Pseudonym("Institution"),
+    value_base=K,
+    share_of_group=K,
+    quantity=K,
+    price=K,
+    price_currency=CUR,
+    price_date=K,
 )
 
 # ---- checks, connections, sync --------------------------------------------------
@@ -512,6 +579,7 @@ register(
     id=K,
     provider=Code(),
     org_name=Pseudonym("Institution"),
+    display_name=Pseudonym("Institution"),
     status=Code(),
     last_synced_at=K,
     last_error=EXT,

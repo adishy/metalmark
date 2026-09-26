@@ -353,7 +353,7 @@ style={{ x, rotate: reduce ? 0 : rotate }}
 ### 2.9 Charts (ECharts)
 
 Charts must **read the tokens at runtime**. Hardcoded greys in an option object — the
-current pattern in `Reports.tsx` (`#475569`, `#1e293b`, `#94a3b8`, `#0f172a`) — are
+current pattern in `insights/Overview.tsx` (`#475569`, `#1e293b`, `#94a3b8`, `#0f172a`) — are
 why a chart cannot follow a theme change.
 
 **The module already exists** as `src/theme/chartTokens.ts`. Its architecture is right
@@ -415,13 +415,82 @@ The mapping, per chart:
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
-Three further chart rules:
+Seven further chart rules:
 
+- **A money value axis says it is money, and stays short.** `chartAxis(t, { tick })`
+  takes a currency formatter; every money axis passes `formatMoneyTick` (§6.5), so
+  the ticks read `$5k`/`$40k` rather than a bare `5000`/`40000` whose currency the
+  reader has to infer. The gutter is then **measured, not reserved**: those options
+  set `grid: { containLabel: true, left: 8 }`, because a constant `left: 60` spends
+  a fifth of a 310 px phone canvas on gutter when the ticks are short and clips them
+  when they are long.
+
+- **Grid furniture is sized to the canvas, and never repeats the data.** A value axis
+  divides its range into `valueTicks(box)` intervals — three or four on the heights
+  this app draws (220 px in the accounts card, 280 px in Insights) — and every axis
+  turns its **ticks off**: a tick marks a position the label beside it already names.
+  ECharts' `splitNumber` default is not a count but the by-product of a hunt for round
+  numbers, and on the demo household's own ranges it answers with eight or nine rules
+  where five read just as well. The count asked for is a *request* — the library may
+  return a tick or two more — so it is tuned against rules counted on the **drawn**
+  chart (§8's audit through the SVG renderer) rather than derived from a formula. The
+  rules stay solid, in `split`, which is a lighter value than the axis: it is their
+  number and not their weight that makes a hatch. `zeroRule` is the one dashed line,
+  in the axis colour, so the baseline is never mistaken for one of the grid.
+
+- **A bar stack is rounded at the end the value is at, and a chart that grows both
+  ways rules its baseline.** `barEndRadius("top" | "bottom")` rounds the *outer* end
+  of each stack and only that end: the inner ends are joins, and a pill on every
+  segment would imply a gap the data does not have. The radius is 4 px and is
+  deliberately not one of §2.6's — those size a surface, and a bar is a mark whose
+  corner is a chart decision. It is measured rather than tasteful: a bar is 36 px
+  wide on a 310 px phone canvas and 79 px at 620 px, so 4 px is a corner rather than
+  a capsule, and zrender scales a radius down to fit a thinner or shorter bar instead
+  of letting it spill past the axis. An income-vs-expense chart then draws
+  `zeroRule(t)` — silent, dashed, 1 px, in the axis colour — because the line the
+  bars are measured *from* is otherwise one gridline among five of the same weight,
+  and which one it is becomes a guess. ECharts paints a mark line above its series,
+  so the rule divides the two halves of each bar rather than hiding behind them.
+
+- **A chart is laid out for its own box, not for the window.** `Chart.tsx` measures the
+  box it was given — in a layout effect before the first paint, and through a
+  `ResizeObserver` after that — and hands it to any option passed as a function of it.
+  `chartLayout(box)` is the one place that says what a canvas of a given size affords.
+  The same sankey is 310 px wide on a phone and 1104 px on a wide page **inside the same
+  card**, so an option that places anything in px — a column of labels, a node width —
+  cannot be a constant without being wrong on one of them. On a phone the sankey's label
+  columns take what a label needs (84 px plus ECharts' own 5 px gap) and the ribbons take
+  the rest, which is what they are for; a wide canvas keeps the roomy margins it has
+  always been drawn with.
+
+- **No chart text is drawn as a fragment.** A label a reader cannot read is not a
+  label: `Clo…`, `Ut…` and a bare `…` are marks saying a chart *had* something to say
+  and spent its room saying nothing. ECharts clips a pie's outside labels to the room
+  left inside the canvas, which on a 310 px phone card truncated three of the demo
+  household's six — so **a phone card draws no slice labels at all** (`phoneCanvas`):
+  the ring keeps its slices and their colours, and the names are read from the legend
+  beneath it, from the tap tooltip, and from the `<ul>` of categories and totals the
+  next rule requires. Hiding the label does not hide its leader line — ECharts keeps
+  the guide line on the strength of the label's *position* — so both go together. A
+  wide canvas draws all six labels whole and is unchanged. The question is asked of the
+  **box, never the viewport**: the same chart is 310 px in a phone card and 1104 px in
+  a page's. The one place a fixed column can still clip is the sankey's 84 px label
+  column, which holds every one of the household's names and would clip a longer one —
+  a gap this rule names rather than covers, and the reason the audit reads the drawn
+  text back out of zrender at 390 and 360 px rather than trusting the option.
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
-  category + amount under the spending donut (already correct in `Reports.tsx` —
+  category + amount under the spending donut (already correct in `insights/Overview.tsx` —
   it is now required, not incidental), and give the `<Chart>` wrapper
   `role="img"` with an `aria-label` that states the finding.
+- **A ring states its total in its own centre.** A donut's hole is the one piece of
+  space on the chart that carries nothing, and the figure the ring is *about* — what
+  the slices add up to — is otherwise only in the `aria-label` and the `<ul>`. It is
+  **DOM text over the canvas**, not a canvas `graphic` and not a second pie series:
+  real text is selectable and readable to assistive technology, and it takes its
+  colour from the tokens, so a theme flip repaints it with nothing to keep in step.
+  A figure too long for the hole steps **down** the type scale (§6.5 — shrink the
+  type, never round it in the display), floored at `text-base font-semibold`.
 - **Re-render on theme change.** `ReactECharts` will not notice a CSS variable
   change. Key the chart on the resolved theme (`key={theme}`) so it re-mounts.
 - **Colour is a secondary channel in charts too** — the cash-flow chart's income and
@@ -463,6 +532,15 @@ pixels cannot see dimming and must measure intensity.
 
 **Tooltips are confined** (`confine: true`), or a phone-width chart's tooltip
 overhangs the card it belongs to.
+
+**A tooltip says what the chart could not.** It is the one place in a chart a reader
+gets an exact figure, so on a money chart it prints money at full precision through
+`formatMoney` — a tick's licence to compact (`formatMoneyTick`, §6.5) stops at the
+axis — and it names its bucket in the long form (`Sep 2026`), not the axis's short one
+(`Sep`): the axis abbreviates because it has to fit, and the tooltip has the room to be
+a date a reader can place in a year. A page's formatter goes through `chartTooltip`
+(§8 rule 8) and formats with `formatMoney` and `formatBucket`; it is where the exact
+figure behind every compacted tick lives.
 
 **Motion.** Charts animate in JavaScript onto a canvas, which no CSS rule can reach —
 so, like framer-motion (§2.8), ECharts has to be told about `prefers-reduced-motion`
@@ -1091,9 +1169,13 @@ default and the design target — build at 360 px first, then widen.
 A row of chips or tabs that does not fit is not made to scroll: below `sm:` a choice
 from a list is a **pill that opens a sheet** (`SheetSelect` — "Range · This year ⌄"),
 and chips that stay are allowed to wrap. Two exceptions, each marked `data-scroll-x-ok`
-or a labelled region: the **Settings section tabs** (eleven sections read better as
-tabs than from a picker — one swipeable row, edges faded, the chosen tab kept in
-view), and a data table whose columns are the point (the CSV import preview). `e2e/mobile.spec.ts` walks every route at 360 and 390 px and fails on any
+or a labelled region: a **`ScrollTabs`** strip (`components/ScrollTabs.tsx` — the
+**Settings section tabs**, eleven sections that read better as tabs than from a picker,
+and **Insights' tabs**; one swipeable row, edges faded, the chosen tab kept in view,
+roving tabindex and arrow keys per §7.4), and a data table whose columns are the point
+(the CSV import preview). `ScrollTabs` is the one sanctioned sideways strip — a new tab
+list goes through it rather than reimplementing the fade mask and the roving-tabindex
+model. `e2e/mobile.spec.ts` walks every route at 360 and 390 px and fails on any
 element past the edge or any container that scrolls sideways. Date inputs carry
 `min-width: 0` in `index.css`, because iOS gives them an intrinsic width wider than a
 phone column.
@@ -1274,6 +1356,17 @@ currencies.
 - **No abbreviations.** `$1.2K`, `$1.2M`, `1,2 mil` are all forbidden in this app. If
   a figure does not fit, shrink the type, wrap it, or give it its own row — never
   round it in the display.
+- **One exception, and it is not an abbreviation: a value axis's tick may be
+  shortened only where the short form is the same figure.** `formatMoneyTick()` in
+  `src/lib/format.ts` is the implementation and the whole of the licence —
+  `2,000` → `$2k` and `2,500` → `$2.5k` (both exact), `1,234` → `$1,234.00`
+  (nothing shorter states it). The rule it answers is the one above: a tick is a
+  *scale mark*, so it has no room for six characters of zeros on a
+  phone-width chart, and a shortened tick that rounded would be the display
+  inventing a number the ledger never held. It is never used for a figure a
+  reader acts on: amounts, totals and headline figures use `formatMoney`. The
+  exact value stays one tap away in the tooltip, and the chart's `aria-label`
+  states the finding in full.
 - **No CSS truncation on an amount.** `truncate`, `overflow-hidden`, and `text-ellipsis`
   must never be applied to an element rendering a number. Grep in §8.
 - A displayed amount equals the stored decimal rounded to the currency's minor unit
@@ -1424,7 +1517,7 @@ grep -rn 'outline-none' src/ | grep -v 'ring-'
 #    Scoped to the files that build chart options rather than all of src/pages/:
 #    Settings.tsx holds hex legitimately, as the *default colour of a new
 #    category* — user data, not a theme value.
-grep -rn '#[0-9a-fA-F]\{6\}' src/pages/Reports.tsx src/pages/DesignSystem.tsx src/components/Chart.tsx
+grep -rn '#[0-9a-fA-F]\{6\}' src/pages/insights/Overview.tsx src/pages/DesignSystem.tsx src/components/Chart.tsx
 
 # 6. A background token on an inline text element. A `bg-*` here is a text
 #    colour that got machine-substituted: it either paints a box where a colour
@@ -1483,7 +1576,7 @@ Settings card.
 - DevTools colour picker on any text: it prints the contrast ratio inline. Spot-check
   `text-fg-muted` on `surface-inset`, which is the tightest pair we allow.
 - Lighthouse → Accessibility ≥95 on `/login`, `/accounts`, `/transactions`,
-  `/reports`, `/settings`. Note the score is a floor, not the goal: it does not test
+  `/insights/overview`, `/settings`. Note the score is a floor, not the goal: it does not test
   target size or live regions.
 - axe DevTools for a structural pass.
 - DevTools → Accessibility pane → check the **computed accessible name** of every
@@ -1528,7 +1621,7 @@ One global width is the bug. Width follows what the content *is*:
 | Content | Max width | Why |
 |---|---|---|
 | Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
-| Reports, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
+| Insights, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
 | Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
 
 The shell sets the **widest** case and pages narrow themselves; a page that needs less
@@ -1560,9 +1653,10 @@ Five shapes, and they are the whole of it:
   with the detail panel in the second column, shown when a row is selected and a quiet
   empty state otherwise. This is the single biggest win: the phone's row → sheet → back
   loop becomes one click with no navigation.
-- **Reports — two-up.** KPI row spans both columns; the charts pair two per row above
-  `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their meaning when
-  squeezed.
+- **Insights (Overview) — two-up.** KPI row spans both columns; the charts pair two per
+  row above `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their
+  meaning when squeezed. The tab strip above it is `ScrollTabs` (§5), not part of this
+  shape.
 - **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
   their internal layout and simply stop being full-width.
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first

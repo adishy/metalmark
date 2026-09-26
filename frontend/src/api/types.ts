@@ -350,6 +350,9 @@ export interface Connection {
   /** The institution, from the first successful fetch. Null until then: the
    *  claim endpoint refuses to invent one. */
   org_name: string | null;
+  /** A local name the owner set ("Chase — joint"). Null means "use the bank's
+   *  name" — see `connectionName()` in `lib/bankFreshness`. */
+  display_name: string | null;
   status: ConnectionStatus;
   last_synced_at: string | null;
   last_error: string | null;
@@ -551,6 +554,9 @@ export interface ConnectionClaim {
 export interface ConnectionUpdate {
   is_enabled?: boolean;
   sync_interval_minutes?: number;
+  /** Present-and-blank clears back to the bank's name (server stores NULL);
+   *  omit the field entirely to leave it unchanged. */
+  display_name?: string | null;
 }
 
 export interface SplitIn {
@@ -592,6 +598,24 @@ export type UnpricedReason = "no_price" | "no_rate";
  */
 export type QuantitySource = "history" | "provider" | "manual";
 
+/** One account's contribution to an `AllocationRow` (ADR-0054) — what the
+ *  tap-through detail sheet lists under a group. `quantity`/`price`/`price_date`
+ *  are set only on a `group_by=security` row, the one grouping where "one
+ *  account, one price" is a fact about the row rather than a mix of several
+ *  holdings. */
+export interface AllocationSource {
+  account_id: UUID;
+  account_name: string;
+  institution: string | null;
+  value_base: Money;
+  /** Share of the *row's* `value_base`, at 4 dp — not of the grand total. */
+  share_of_group: Money;
+  quantity: Money | null;
+  price: Money | null;
+  price_currency: string | null;
+  price_date: string | null;
+}
+
 export interface AllocationRow {
   /** A UUID or a vocabulary token, always a string — the grouping is a wire
    *  vocabulary and `key`'s JSON type must not depend on `group_by`. */
@@ -603,12 +627,17 @@ export interface AllocationRow {
   /** How many positions make up this row. A 3% line that is one holding and a
    *  3% line that is thirty read very differently. */
   holdings: number;
+  /** Which accounts this row is made of (ADR-0054). */
+  sources: AllocationSource[];
 }
 
 export interface Allocation {
   as_of: string;
   base_currency: string;
   group_by: AllocationGroup;
+  /** Echoes the request (ADR-0054): a screenshot or a stored link has to say
+   *  whether bank cash is folded into the total it shows. */
+  include_cash_accounts: boolean;
   /** Excludes every position that could not be valued — which is what
    *  `unpriced_positions` and `no_rate_positions` are there to say. */
   total_base: Money;
@@ -798,4 +827,109 @@ export interface BalancePoint {
   balance_date: string;
   balance: string;
   currency: string;
+}
+
+// ---- owner income and paystubs (ADR-0052) ----------------------------------
+
+export type PayFrequency = "weekly" | "biweekly" | "semimonthly" | "monthly" | "annual";
+export type FilingStatus =
+  | "single"
+  | "married_joint"
+  | "married_separate"
+  | "head_of_household";
+export type PaystubLineKind =
+  | "earning"
+  | "pre_tax_deduction"
+  | "tax"
+  | "post_tax_deduction"
+  | "employer_contribution";
+
+export interface YtdKindTotal {
+  kind: PaystubLineKind;
+  amount: Money;
+}
+
+export interface IncomeSummary {
+  annualized_gross: Money | null;
+  ytd: YtdKindTotal[];
+  effective_tax_rate: Money | null;
+}
+
+export interface OwnerIncomeProfileFields {
+  id: UUID;
+  currency: string;
+  annual_gross_income: Money | null;
+  pay_frequency: PayFrequency | null;
+  filing_status: FilingStatus | null;
+  tax_region: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** ``profile`` is null until the household's first save — a real state, not a
+ *  loading placeholder (see the backend schema's own note). */
+export interface OwnerIncomeProfile {
+  owner_id: UUID;
+  profile: OwnerIncomeProfileFields | null;
+  summary: IncomeSummary;
+}
+
+export interface OwnerIncomeProfileUpdate {
+  currency?: string;
+  annual_gross_income?: Money | null;
+  pay_frequency?: PayFrequency | null;
+  filing_status?: FilingStatus | null;
+  tax_region?: string | null;
+}
+
+export interface PaystubLineIn {
+  kind: PaystubLineKind;
+  label: string;
+  amount: Money;
+  ytd_amount?: Money | null;
+  position?: number;
+}
+
+export interface PaystubLine extends PaystubLineIn {
+  id: UUID;
+  position: number;
+}
+
+export interface Paystub {
+  id: UUID;
+  owner_id: UUID;
+  pay_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  employer: string | null;
+  currency: string;
+  gross: Money;
+  net: Money;
+  lines: PaystubLine[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaystubCreate {
+  pay_date: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  employer?: string | null;
+  currency?: string | null;
+  gross: Money;
+  net: Money;
+  lines?: PaystubLineIn[];
+}
+
+/** Absent means unchanged, including for ``lines`` — omit the key entirely to
+ *  leave a paystub's lines as they are; send ``lines: []`` to clear them. */
+export interface PaystubPatch {
+  pay_date?: string;
+  period_start?: string | null;
+  period_end?: string | null;
+  employer?: string | null;
+  currency?: string | null;
+  gross?: Money;
+  net?: Money;
+  lines?: PaystubLineIn[];
 }

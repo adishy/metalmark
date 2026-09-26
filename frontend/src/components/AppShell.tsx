@@ -39,7 +39,7 @@ const NAV: NavItem[] = [
   { to: "/accounts", label: "Accounts", Icon: WalletIcon },
   { to: "/transactions", label: "Transactions", Icon: ListIcon },
   { to: "/review", label: "Review", Icon: ReviewIcon },
-  { to: "/reports", label: "Reports", Icon: ChartIcon },
+  { to: "/insights", label: "Insights", Icon: ChartIcon },
   { to: "/settings", label: "Settings", Icon: SettingsIcon },
   { to: "/admin", label: "Admin", Icon: AdminIcon, adminOnly: true },
 ];
@@ -100,8 +100,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   // The primary orientation cue for a screen reader and for a phone's tab
   // switcher, and it was the same string on every route (§7.11).
+  //
+  // Prefix match, not exact: Insights is the first destination with sub-routes
+  // (`/insights/overview`, `/insights/allocations`, …) and every one of them
+  // is still "Insights" — the tab within it isn't a separate document title,
+  // the same way Settings' eleven tabs (all under the one route `/settings`)
+  // never were.
   useEffect(() => {
-    const here = items.find((n) => n.to === pathname)?.label ?? EXTRA_TITLES[pathname];
+    const here =
+      items.find((n) => n.to === pathname || pathname.startsWith(`${n.to}/`))?.label ??
+      EXTRA_TITLES[pathname];
     document.title = here ? `${here} · MetalMark Money` : "MetalMark Money";
     // `items` is a new array each render; `isAdmin` is what actually varies.
   }, [pathname, isAdmin]);
@@ -112,7 +120,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
           scrolling a long list used to take navigation away entirely. `z-40`
           matches the phone tab bar; overlays are `z-50` and cover both. The
           `bg-surface` is load-bearing — without it, rows scroll through the
-          bar. Focus scroll-margin for this bar is set in index.css. */}
+          bar. Focus scroll-margin for this bar is set in index.css.
+
+          Stays `sticky` rather than `fixed` (unlike the tab bar below): it is
+          the first item in this flex column, so `sticky top-0` pins from the
+          very first frame with no catch-up and no flow it can fall out of.
+          `overscroll-behavior: none` (index.css) is what stops the home-screen
+          app's rubber-band from dragging it, and that applies to a sticky
+          header exactly as well as a fixed one — going `fixed` here would
+          only add the cost of reserving its height in `main` manually. */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2">
         <div className="flex min-w-0 items-center gap-6">
           {/* Mark and wordmark as one unit, so the `gap-6` above stays the space
@@ -173,7 +189,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
           promised `lg:p-6` since the token layer landed and the shell never took
           it; this is that gutter arriving, one breakpoint up where the extra
           8 px is not worth the content it costs at 360. */}
-      <main className="mx-auto w-full max-w-7xl flex-1 p-4 lg:p-6">
+      {/* `fixed` bars are out of flow, so `main` has to reserve their space
+          itself. The tab bar is phone-only (`sm:hidden` below) and `min-h-16`
+          (4rem) plus the home-indicator inset; `sm:pb-4`/`lg:p-6` restore the
+          plain padding once the bar is gone. See the tab bar's own comment
+          for why it is `fixed` rather than `sticky`. */}
+      <main className="mx-auto w-full max-w-7xl flex-1 p-4 pb-[calc(4rem+env(safe-area-inset-bottom)+1rem)] sm:pb-4 lg:p-6">
         <InstitutionLogosProvider>{children}</InstitutionLogosProvider>
       </main>
 
@@ -181,9 +202,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
           `font-semibold` gives the eye — the accent hue alone is a colour-only
           signal, which SC 1.4.1 forbids (§4.13). The first five only: this bar
           is where the cap lives, and an admin reaches the panel from
-          Settings → Admin on a phone. */}
+          Settings → Admin on a phone.
+
+          `fixed`, not `sticky`: this sits at the end of a flex column inside
+          `min-h-full`, and `position: sticky` on the last flex item is where
+          iOS Safari's sticky-bottom support is weakest — it can fail to pin
+          at all, and in the standalone home-screen app a rubber-band
+          overscroll can drag it off the bottom edge (`overscroll-behavior`
+          above is the primary fix for that; `fixed` means the bar does not
+          depend on it). `fixed` anchors it to the viewport unconditionally,
+          which is also what "only content scrolls" means literally. */}
       <nav
-        className="sticky bottom-0 z-40 flex border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface-raised pb-[env(safe-area-inset-bottom)] sm:hidden"
         aria-label="Main"
       >
         {items.slice(0, TAB_BAR_MAX).map((n) => (

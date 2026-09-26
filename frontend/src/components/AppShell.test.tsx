@@ -106,7 +106,7 @@ describe("<AppShell /> navigation", () => {
     for (const isAdmin of [true, false]) {
       me = who({ isAdmin });
       const { unmount } = renderShell();
-      for (const label of ["accounts", "transactions", "review", "reports", "settings"]) {
+      for (const label of ["accounts", "transactions", "review", "insights", "settings"]) {
         expect(screen.getByTestId(`nav-${label}`)).toBeInTheDocument();
       }
       unmount();
@@ -146,5 +146,14 @@ describe("<AppShell /> navigation", () => {
     me = who({ isAdmin: true });
     renderShell({ at: "/admin" });
     expect(document.title).toBe("Admin · MetalMark Money");
+  });
+
+  it("titles every Insights sub-route as Insights, not just the bare route", () => {
+    // Insights is the first destination with sub-routes (/insights/:tab); the
+    // title match has to be a prefix, or every tab but the first renders no
+    // title at all.
+    me = who({ isAdmin: false });
+    renderShell({ at: "/insights/allocations" });
+    expect(document.title).toBe("Insights · MetalMark Money");
   });
 });

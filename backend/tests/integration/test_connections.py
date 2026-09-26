@@ -321,6 +321,95 @@ async def test_the_cadence_bounds_come_from_the_columns(api):
     assert body["sync_interval_minutes"] == 360
 
 
+# ---- display_name -----------------------------------------------------------
+
+
+async def test_a_connection_can_be_renamed(api):
+    client, _, _, _ = api
+    connection = await _connect(client)
+    assert connection["display_name"] is None
+
+    renamed = await client.patch(
+        f"/connections/{connection['id']}", json={"display_name": "Chase — joint"}
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["display_name"] == "Chase — joint"
+    # The bank's own name is untouched — the local name augments it, never
+    # replaces the column that holds it.
+    assert renamed.json()["org_name"] == connection["org_name"]
+
+
+async def test_the_rename_is_trimmed(api):
+    client, _, _, _ = api
+    connection = await _connect(client)
+
+    renamed = await client.patch(
+        f"/connections/{connection['id']}", json={"display_name": "  Chase — joint  "}
+    )
+    assert renamed.json()["display_name"] == "Chase — joint"
+
+
+async def test_a_blank_rename_clears_back_to_the_banks_name(api):
+    """Whitespace-only, after trimming, is the "reset to bank name" request —
+    not a request to display an empty string, which would be an unreadable row."""
+    client, _, _, _ = api
+    connection = await _connect(client)
+    await client.patch(f"/connections/{connection['id']}", json={"display_name": "Mine"})
+
+    cleared = await client.patch(
+        f"/connections/{connection['id']}", json={"display_name": "   "}
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["display_name"] is None
+
+
+async def test_omitting_display_name_leaves_it_unchanged(api):
+    """Absent must not read as ``None`` — otherwise every PATCH that only flips
+    ``is_enabled`` would silently clear a name someone already set."""
+    client, _, _, _ = api
+    connection = await _connect(client)
+    await client.patch(f"/connections/{connection['id']}", json={"display_name": "Mine"})
+
+    resp = await client.patch(f"/connections/{connection['id']}", json={"is_enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["display_name"] == "Mine"
+
+
+async def test_a_rename_over_100_chars_is_a_422(api):
+    client, _, _, _ = api
+    connection = await _connect(client)
+
+    resp = await client.patch(
+        f"/connections/{connection['id']}", json={"display_name": "x" * 101}
+    )
+    assert resp.status_code == 422
+    assert (await client.get("/connections")).json()[0]["display_name"] is None
+
+
+async def test_a_member_of_another_household_cannot_rename_this_connection(api):
+    """RLS plus the row lookup: another household's owner PATCHing this id gets
+    the same 404 a nonexistent connection would — never a peek at its existence."""
+    from app.db import unscoped_session
+    from app.main import create_app
+    from app.services import auth as auth_svc
+
+    client, _, _, _ = api
+    connection = await _connect(client)
+
+    other_email = f"{uuid.uuid4().hex[:8]}@example.com"
+    async with unscoped_session() as s:
+        await auth_svc.bootstrap_household(
+            s, name="Other", base_currency="USD", owner_email=other_email,
+            owner_name="Bea", owner_password="password123",
+        )
+    async with _Api(create_app()) as other:
+        await other.login(other_email)
+        resp = await other.patch(
+            f"/connections/{connection['id']}", json={"display_name": "Not yours"}
+        )
+        assert resp.status_code == 404
+
+
 # ---- queue and cancel ------------------------------------------------------
 
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import {
@@ -15,12 +15,13 @@ import {
 } from "@/api/hooks";
 import { downloadAccountCsv } from "@/api/portability";
 import { useConnections } from "@/api/sync";
-import { isStalled } from "@/lib/bankFreshness";
+import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { isoDay, todayIso } from "@/lib/dates";
 import { netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
+import type { ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -193,7 +194,7 @@ export default function Accounts() {
           data-testid="bank-stalled"
         >
           {stalled.length === 1
-            ? `${stalled[0].org_name ?? "A bank"} hasn’t sent new transactions for a while, though its syncs succeed.`
+            ? `${connectionName(stalled[0], "A bank")} hasn’t sent new transactions for a while, though its syncs succeed.`
             : `${stalled.length} banks haven’t sent new transactions for a while, though their syncs succeed.`}{" "}
           Check the link at SimpleFIN Bridge; Admin has the details.
         </p>
@@ -261,7 +262,12 @@ function NetWorthHero({
   const start = useMemo(() => rangeStart(months), [months]);
   const series = useNetWorthSeries(start, today(), ownerFilter);
   const t = useChartTokens();
-  const option: EChartsOption = useMemo(() => netWorthOption(series.data, t), [series.data, t]);
+  // A function of the box: this card is 220 px tall, and how many values the
+  // reader is asked to count off its axis follows from that (`valueTicks`).
+  const option = useCallback(
+    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box),
+    [series.data, t],
+  );
 
   const points = series.data?.points ?? [];
   const first = points[0];

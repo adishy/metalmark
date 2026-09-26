@@ -4,7 +4,7 @@
 // that cannot use the Tailwind token utilities. Rather than restate the palette
 // here, this reads the same CSS custom properties those tokens are built from —
 // so index.css stays the single source of truth and a theme flip needs no second
-// list kept in step. (Reports.tsx previously hardcoded `#475569`, `#1e293b`,
+// list kept in step. (Overview.tsx (formerly Reports.tsx) previously hardcoded `#475569`, `#1e293b`,
 // `#94a3b8` and `#0f172a`, which is why its charts ignored the theme entirely.)
 import { useMemo } from "react";
 import { useTheme } from "@/theme/theme";

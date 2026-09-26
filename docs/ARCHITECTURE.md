@@ -99,7 +99,7 @@ not for investment accounts, whose balance also moves with the market). Each poi
 lists the accounts it cannot count and why (`not_started`, `no_balance`, `no_rate`, `no_price`). A manual investment account's balance is derived as
 Σ(`holdings.market_value`) once it has a position (until then it is read from its snapshots, ADR-0044) and snapshotted the same way (unless `balance_source='stated'` — see Investments).
 - **Reconciliation with FX:** over any period, Δnet-worth (base) = cash-flow (base) + **currency revaluation**
-  (the base-value change of foreign balances from rate moves). Reports show revaluation as its own line;
+  (the base-value change of foreign balances from rate moves). Insights shows revaluation as its own line;
   single-currency views reconcile exactly, multi-currency views reconcile *including* that line.
 
 ### Identity & sharing

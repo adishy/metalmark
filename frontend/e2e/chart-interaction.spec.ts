@@ -63,11 +63,45 @@ type Box = { x: number; y: number; width: number; height: number };
 
 type Metric = (page: import("@playwright/test").Page, testid: string) => Promise<number>;
 
+/**
+ * Read a metric once the canvas has stopped changing.
+ *
+ * A chart is drawn *twice* on mount, and not by anything this app does: `echarts-
+ * for-react` paints a temporary instance, and on its `finished` event — the end
+ * of the entrance animation, roughly a second in — disposes it and builds the
+ * real one, which animates in again from nothing. A fixed pause therefore
+ * measures whichever animation happens to be running. Reading the donut 500 ms
+ * after it scrolled into view reported 3,448 full-strength pixels, mid-animation,
+ * where the settled chart has 23,025 — and the same race would let a `dimmest`
+ * read from the legend sweep fall under its bound while proving nothing. Every
+ * assertion here is about a state, "at rest" or "spotlit", so a reading has to
+ * come from one: two consecutive equal counts 100 ms apart.
+ */
+async function settled(
+  page: import("@playwright/test").Page,
+  testid: string,
+  metric: Metric,
+  { tries = 30, gap = 100 } = {},
+): Promise<number> {
+  let last = await metric(page, testid);
+  let stable = 0;
+  for (let i = 0; i < tries; i++) {
+    await page.waitForTimeout(gap);
+    const value = await metric(page, testid);
+    if (value === last) {
+      if (++stable === 2) return value;
+    } else {
+      stable = 0;
+      last = value;
+    }
+  }
+  return last;
+}
+
 /** Move the pointer away and read the resting value. */
 async function restValue(page: import("@playwright/test").Page, testid: string, metric: Metric) {
   await page.mouse.move(4, 4);
-  await page.waitForTimeout(500); // let the entrance animation settle
-  return metric(page, testid);
+  return settled(page, testid, metric);
 }
 
 /**
@@ -93,8 +127,7 @@ async function hoverAt(
   const rest = await restValue(page, testid, metric);
   const [x, y] = aim(box);
   await page.mouse.move(x, y);
-  await page.waitForTimeout(500);
-  const hovered = await metric(page, testid);
+  const hovered = await settled(page, testid, metric);
 
   return { rest, hovered };
 }
@@ -115,7 +148,7 @@ const ring = (b: Box) => {
 
 test.beforeEach(async ({ page }) => {
   await login(page);
-  await page.goto("/reports");
+  await page.goto("/insights/overview");
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
   await page.waitForTimeout(800);
 });
@@ -156,14 +189,14 @@ test("cash flow: the legend spotlights a series without erasing the rest", async
 
   // The legend is drawn on the canvas, so its entries have no DOM to target and
   // their x positions depend on the label widths. Sweeping the band and taking
-  // the strongest response is what makes this robust to that: a fixed fraction
-  // was tried first and quietly pointed at empty space, which meant the test
-  // passed by hovering nothing.
+  // the strongest response is what makes that robust: a fixed fraction was tried
+  // first and quietly pointed at empty space, which meant the test passed by
+  // hovering nothing. Each step reads a *settled* count, so the sweep cannot
+  // pick up a mid-animation frame and report a dim that never happened.
   let dimmest = rest;
   for (let f = 0.3; f <= 0.8; f += 0.02) {
     await page.mouse.move(box.x + box.width * f, box.y + 10);
-    await page.waitForTimeout(300);
-    dimmest = Math.min(dimmest, await strong(page, "cash-flow-chart"));
+    dimmest = Math.min(dimmest, await settled(page, "cash-flow-chart", strong, { tries: 12 }));
   }
 
   // The legend must genuinely dim the other series. Measured at full strength,

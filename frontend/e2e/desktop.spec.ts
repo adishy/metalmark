@@ -51,9 +51,9 @@ const SHAPES: Shape[] = [
     ratio: 2,
   },
   {
-    name: "reports: net worth paired with income vs expense",
-    route: "/reports",
-    root: "[data-testid=reports-page]",
+    name: "insights overview: net worth paired with income vs expense",
+    route: "/insights/overview",
+    root: "[data-testid=insights-overview-page]",
     columns: 2,
   },
   {
@@ -63,7 +63,9 @@ const SHAPES: Shape[] = [
     columns: 3,
   },
   {
-    name: "investments: allocation beside holdings",
+    // The allocation moved to Insights → Allocations (ADR-0054); what shares
+    // this grid now is the pointer to it and the holdings list.
+    name: "investments: the Insights pointer beside holdings",
     route: "/accounts",
     root: "[data-testid=investments-view]",
     columns: 2,
@@ -109,7 +111,7 @@ async function settle(page: Page, route: string, prepare?: (page: Page) => Promi
   await page.waitForTimeout(300);
 }
 
-const ROUTES = ["/accounts", "/transactions", "/review", "/reports", "/settings", "/admin"];
+const ROUTES = ["/accounts", "/transactions", "/review", "/insights/overview", "/settings", "/admin"];
 
 for (const vp of VIEWPORTS) {
   test.describe(`desktop ${vp.width}x${vp.height} (§9.7)`, () => {

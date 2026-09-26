@@ -6,7 +6,7 @@
 // which is worse than having no gallery.
 //
 // Add a component to the app, add it here in the same commit.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import Chart from "@/components/Chart";
 import Dialog from "@/components/Dialog";
@@ -17,6 +17,7 @@ import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
 import { token, useChartTokens } from "@/theme/chartTokens";
 import {
+  barEndRadius,
   chartArea,
   chartAxis,
   chartLegend,
@@ -24,8 +25,12 @@ import {
   emphasisBar,
   emphasisLine,
   emphasisPie,
+  valueTicks,
+  zeroRule,
+  type ChartBox,
 } from "@/theme/chartInteraction";
-import { formatDuration, formatMoney } from "@/lib/format";
+import { sliceLabels } from "@/lib/donutChart";
+import { formatDuration, formatMoney, formatMoneyTick } from "@/lib/format";
 import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
 import AccountMark from "@/components/AccountMark";
 import { MetalMark } from "@/components/MetalMark";
@@ -180,6 +185,7 @@ function demoConnection(
     id,
     provider: "simplefin",
     org_name,
+    display_name: null,
     status,
     last_synced_at: null,
     last_error: null,
@@ -212,16 +218,23 @@ export default function DesignSystem() {
     area: useFieldId("ds-area"),
   };
 
-  const lineOption: EChartsOption = useMemo(
-    () => ({
-      grid: { top: 20, right: 16, bottom: 30, left: 60 },
+  const lineOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
+      grid: { top: 16, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
         data: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, "USD"),
+          splitNumber: valueTicks(box),
+        }),
+      },
       series: [
         {
           type: "line",
@@ -237,9 +250,9 @@ export default function DesignSystem() {
     [t],
   );
 
-  const barOption: EChartsOption = useMemo(
-    () => ({
-      grid: { top: 30, right: 16, bottom: 30, left: 60 },
+  const barOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
+      grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
@@ -247,21 +260,29 @@ export default function DesignSystem() {
         data: ["Jan", "Feb", "Mar", "Apr"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, "USD"),
+          splitNumber: valueTicks(box),
+        }),
+      },
       series: [
         {
           name: "Income",
           type: "bar",
           stack: "cf",
-          itemStyle: { color: t.positive },
+          itemStyle: { color: t.positive, borderRadius: barEndRadius("top") },
           emphasis: emphasisBar(t, t.positive),
+          markLine: zeroRule(t),
           data: [3200, 3400, 3100, 3600],
         },
         {
           name: "Expense",
           type: "bar",
           stack: "cf",
-          itemStyle: { color: t.negative },
+          itemStyle: { color: t.negative, borderRadius: barEndRadius("bottom") },
           emphasis: emphasisBar(t, t.negative),
           data: [-2100, -2450, -1980, -2300],
         },
@@ -270,8 +291,8 @@ export default function DesignSystem() {
     [t],
   );
 
-  const donutOption: EChartsOption = useMemo(
-    () => ({
+  const donutOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
       tooltip: chartTooltip(t, { trigger: "item" }),
       legend: chartLegend(t, { bottom: 0, type: "scroll" }),
       color: t.series,
@@ -281,7 +302,9 @@ export default function DesignSystem() {
           radius: ["45%", "70%"],
           center: ["50%", "45%"],
           itemStyle: { borderColor: t.surface, borderWidth: 2 },
-          label: { color: t.label },
+          // The same rule the real donut follows, from the same module: the
+          // design system shows the app's charts, not a second set of them.
+          ...sliceLabels(t, box),
           emphasis: emphasisPie(t),
           data: [
             { name: "Groceries", value: 820 },

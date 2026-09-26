@@ -63,7 +63,7 @@ const RULES = [
     // Settings.tsx holds hex legitimately, as the *default colour of a new
     // category*, which is user data rather than a theme value.
     files: (f) =>
-      f.endsWith("src/pages/Reports.tsx") ||
+      f.endsWith("src/pages/insights/Overview.tsx") ||
       f.endsWith("src/pages/DesignSystem.tsx") ||
       f.endsWith("src/components/Chart.tsx"),
     test: (line) => /#[0-9a-fA-F]{6}\b/.test(line),

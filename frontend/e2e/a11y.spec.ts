@@ -35,7 +35,14 @@ const MIN = 44;
 /** Routes that render their whole content on load. `/admin` is in here rather
  *  than reached through the settings walk because it is a route of its own —
  *  and a route nobody measures is a route nobody has measured. */
-const ROUTES = ["/accounts", "/transactions", "/review", "/reports", "/admin"] as const;
+const ROUTES = [
+  "/accounts",
+  "/transactions",
+  "/review",
+  "/insights/overview",
+  "/insights/allocations",
+  "/admin",
+] as const;
 
 /** Only one Settings tab is mounted at a time; the default is "categories". */
 const SETTINGS_TABS = [
@@ -158,15 +165,34 @@ test.describe("target size (SC 2.5.8)", () => {
     await expect(page.getByTestId("import-cancel")).toBeVisible();
     await measure("/transactions (import dialog)");
 
-    // The reports window is the same gap one level down. The route sweep above
+    // The Insights window is the same gap one level down. The route sweep above
     // measures the range and granularity chips, but the custom range's two date
     // inputs are in the DOM only once Custom is picked — and date inputs are
     // exactly where a native control's own height can win over the padding that
     // was supposed to set it.
-    await page.goto("/reports");
+    await page.goto("/insights/overview");
     await page.getByTestId("range-custom").click();
     await expect(page.getByTestId("range-start")).toBeVisible();
-    await measure("/reports#custom-window");
+    await measure("/insights/overview#custom-window");
+
+    // Allocations' tap-through sheet (ADR-0054) is the same gap a third time:
+    // the route sweep measures the group-by switch and the cash toggle, but a
+    // row's source links exist only once a row is tapped. The seeded household
+    // has bank accounts and the cash toggle defaults on, so there is a Cash row
+    // to tap; the guard below is a failure if the seed ever stops providing one,
+    // not a skip — an allocation page with nothing to tap would be its own bug.
+    await page.goto("/insights/allocations");
+    await expect(page.getByTestId("allocation")).toBeVisible();
+    await page.waitForTimeout(SETTLE_MS);
+    const allocationRow = page.locator('[data-testid^="allocation-row-"]').first();
+    // Not a skip if this is empty, for the same reason as the txn sheet above.
+    await expect(
+      allocationRow,
+      "seeded household must have an allocation row to open",
+    ).toHaveCount(1);
+    await allocationRow.click();
+    await expect(page.getByTestId("allocation-detail")).toBeVisible();
+    await measure("/insights/allocations (detail sheet)");
 
     expect(failures, `undersized targets:\n${failures.join("\n")}`).toEqual([]);
   });

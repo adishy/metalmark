@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.ledger import (
     SYNC_INTERVAL_DEFAULT_MINUTES,
@@ -47,13 +47,29 @@ class ConnectionClaim(BaseModel):
     setup_token: str = Field(min_length=1, max_length=SETUP_TOKEN_MAX_CHARS)
 
 
+#: The bank's own name is the longest observed ``org_name`` plus headroom, and a
+#: local name is meant to be a short label ("Chase — joint"), not a paragraph.
+DISPLAY_NAME_MAX_CHARS = 100
+
+
 class ConnectionUpdate(BaseModel):
-    """The two knobs the control panel turns.
+    """The knobs the control panel turns.
 
     ``is_enabled`` is pause/resume and ``sync_interval_minutes`` is the cadence.
-    Absent means no change; neither has a "clear" semantics, because a nullable
-    pause flag or a nullable interval would both need a third state to mean
-    "inherit", and the columns give each exactly one meaning.
+    Absent means no change for both; neither has a "clear" semantics, because a
+    nullable pause flag or a nullable interval would both need a third state to
+    mean "inherit", and the columns give each exactly one meaning.
+
+    ``display_name`` is different: it *does* have a clear semantics, because
+    "use the bank's name" is a real, first-class state (NULL) rather than an
+    absence of a decision. So the three states are distinguished at the
+    ``model_fields_set`` level, not by value:
+
+    * absent from the request body → no change (checked via ``model_fields_set``,
+      never ``is None`` — a client that omits the field must not clear it).
+    * present and blank/whitespace-only after trimming → clear back to the bank's
+      name (stored as NULL).
+    * present and non-blank → the trimmed value.
     """
 
     is_enabled: bool | None = None
@@ -62,6 +78,17 @@ class ConnectionUpdate(BaseModel):
         ge=SYNC_INTERVAL_MIN_MINUTES,
         le=SYNC_INTERVAL_MAX_MINUTES,
     )
+    display_name: str | None = Field(default=None, max_length=DISPLAY_NAME_MAX_CHARS)
+
+    @field_validator("display_name")
+    @classmethod
+    def _trim_display_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        # Blank after trimming is the "clear" request, not "set it to blank" —
+        # a connection's name is never an empty string, only unset.
+        return trimmed or None
 
 
 class ConnectionOut(BaseModel):
@@ -79,6 +106,7 @@ class ConnectionOut(BaseModel):
     id: uuid.UUID
     provider: str
     org_name: str | None
+    display_name: str | None
     status: str
     last_synced_at: datetime | None
     last_error: str | None

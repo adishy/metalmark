@@ -68,6 +68,11 @@ class AccountConnection(UUIDPkMixin, TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="simplefin")
     access_url_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     org_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # A local name the owner gives the connection ("Chase — joint"), shown instead
+    # of ``org_name`` everywhere a connection is named. NULL means "use the bank's
+    # name" — that is also the state of every row before this column existed, so
+    # NULL is not a missing value here, it is the connection's normal state.
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Health, not scheduling: ok|auth_error|error. Deliberately *not* extended with
     # a paused value — pausing is a scheduling gate (`is_enabled`) and conflating the
     # two would make "paused" indistinguishable from "broken" in the status column.

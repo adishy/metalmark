@@ -28,7 +28,7 @@ from app.models import (
     SecurityPrice,
 )
 from app.services import investments as inv
-from app.services import reports
+from app.services import ledger, reports
 
 pytestmark = pytest.mark.integration
 
@@ -79,6 +79,28 @@ async def _price(session, household_id, security, on, value, ccy=None):
         )
     )
     await session.flush()
+
+
+async def _bank_account(session, household_id, *, name="Checking", currency="USD",
+                         balance=Decimal("0"), type="depository", institution=None):
+    """A non-investment account (depository, credit, or loan), with a snapshot
+    dated `ON` so `net_worth_points_by_account` (what `allocation`'s
+    `include_cash_accounts` reads) has something to read."""
+    acc = Account(
+        household_id=household_id,
+        name=name,
+        type=type,
+        currency=currency,
+        current_balance=Decimal("0"),
+        is_asset=type not in ("credit", "loan"),
+        is_manual=True,
+        institution=institution,
+        owner_id=await _owner(session),
+    )
+    session.add(acc)
+    await session.flush()
+    await ledger.record_balance(session, acc, balance=balance, on=ON)
+    return acc
 
 
 async def _holding(session, household_id, account, security, qty, basis=None):
@@ -484,6 +506,126 @@ async def test_allocation_by_type_puts_cash_in_its_own_group(household_factory):
         by_label = {r["label"]: r for r in result["rows"]}
         assert by_label["etf"]["value_base"] == Decimal("1000.0000")
         assert by_label["cash"]["value_base"] == Decimal("500.0000")
+
+
+# ---- allocation: bank cash (ADR-0054) --------------------------------------
+
+
+async def test_allocation_includes_bank_cash_only_when_asked(household_factory):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc = await _account(s, hh, name="Brokerage")
+        sec = await _security(s, hh, name="VTI", ticker="VTI")
+        await _price(s, hh, sec, ON, "100")
+        await _holding(s, hh, acc, sec, "10")
+        await _bank_account(s, hh, name="Everyday Checking", balance=Decimal("500"))
+
+        off = await inv.allocation(s, on=ON, base_ccy=BASE, group_by="type")
+        assert off["total_base"] == Decimal("1000.0000")
+        assert off["include_cash_accounts"] is False
+        assert "cash" not in {r["key"] for r in off["rows"]}
+
+        on = await inv.allocation(
+            s, on=ON, base_ccy=BASE, group_by="type", include_cash_accounts=True
+        )
+        assert on["total_base"] == Decimal("1500.0000")
+        assert on["include_cash_accounts"] is True
+        cash_row = next(r for r in on["rows"] if r["key"] == "cash")
+        assert cash_row["value_base"] == Decimal("500.0000")
+        assert cash_row["label"] == "Cash"
+
+
+async def test_allocation_excludes_liabilities_and_investment_accounts_from_cash(
+    household_factory,
+):
+    """A card's debt is not "bank cash", and an investment account's own cash is
+    already counted (as a holding or the ADR-0021 plug) — including it again here
+    would double it."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        inv_acc = await _account(s, hh, name="Brokerage", source="stated", balance=Decimal("900"))
+        cash_sec = await _security(s, hh, name="USD cash", ticker=None, stype="cash")
+        await _price(s, hh, cash_sec, ON, "1")
+        await _holding(s, hh, inv_acc, cash_sec, "900")  # accounts for the whole stated balance
+        await _bank_account(s, hh, name="Credit Card", balance=Decimal("-200"), type="credit")
+        await _bank_account(s, hh, name="Checking", balance=Decimal("300"))
+
+        result = await inv.allocation(
+            s, on=ON, base_ccy=BASE, group_by="account", include_cash_accounts=True
+        )
+        by_label = {r["label"]: r for r in result["rows"]}
+        assert "Credit Card" not in by_label
+        assert by_label["Checking"]["value_base"] == Decimal("300.0000")
+        # The investment account is counted once, via its cash holding — not
+        # again via the bank-cash path, which only ever looks at `depository`
+        # accounts and structurally cannot see this one.
+        assert by_label["Brokerage"]["value_base"] == Decimal("900.0000")
+        assert result["total_base"] == Decimal("1200.0000")
+
+
+async def test_allocation_percents_and_sources_sum_correctly_with_cash(household_factory):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc = await _account(s, hh, name="Brokerage")
+        sec = await _security(s, hh, name="VTI", ticker="VTI")
+        await _price(s, hh, sec, ON, "100")
+        await _holding(s, hh, acc, sec, "10")  # $1000
+        await _bank_account(s, hh, name="Checking", balance=Decimal("500"))
+        await _bank_account(s, hh, name="Savings", balance=Decimal("500"))
+
+        for group_by in ("security", "type", "account", "currency"):
+            result = await inv.allocation(
+                s, on=ON, base_ccy=BASE, group_by=group_by, include_cash_accounts=True
+            )
+            assert sum(r["percent"] for r in result["rows"]) == Decimal("100.0000"), group_by
+            for row in result["rows"]:
+                assert sum(src["value_base"] for src in row["sources"]) == row["value_base"], (
+                    group_by, row["label"],
+                )
+                assert sum(src["share_of_group"] for src in row["sources"]) == Decimal(
+                    "100.0000"
+                ), (group_by, row["label"])
+
+
+async def test_allocation_security_grouping_carries_quantity_and_price_only_for_securities(
+    household_factory,
+):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc = await _account(s, hh, name="Brokerage")
+        sec = await _security(s, hh, name="VTI", ticker="VTI")
+        await _price(s, hh, sec, ON, "100")
+        await _holding(s, hh, acc, sec, "10")
+        await _bank_account(s, hh, name="Checking", balance=Decimal("500"))
+
+        result = await inv.allocation(
+            s, on=ON, base_ccy=BASE, group_by="security", include_cash_accounts=True
+        )
+        by_key = {r["key"]: r for r in result["rows"]}
+        vti_source = by_key[str(sec.id)]["sources"][0]
+        assert vti_source["quantity"] == Decimal("10.00000000")
+        assert vti_source["price"] == Decimal("100.00000000")
+        cash_source = by_key["cash"]["sources"][0]
+        assert cash_source["quantity"] is None
+        assert cash_source["price"] is None
+
+
+async def test_allocation_is_cash_only_for_a_household_with_no_investments(household_factory):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        await _bank_account(s, hh, name="Checking", balance=Decimal("500"))
+        await _bank_account(s, hh, name="Savings", balance=Decimal("1500"))
+
+        off = await inv.allocation(s, on=ON, base_ccy=BASE, group_by="account")
+        assert off["rows"] == []
+        assert off["total_base"] == Decimal("0.0000")
+
+        result = await inv.allocation(
+            s, on=ON, base_ccy=BASE, group_by="account", include_cash_accounts=True
+        )
+        assert result["total_base"] == Decimal("2000.0000")
+        assert {r["label"] for r in result["rows"]} == {"Checking", "Savings"}
+        assert sum(r["percent"] for r in result["rows"]) == Decimal("100.0000")
 
 
 # ---- what a buy does to the balance (ADR-0033) -----------------------------

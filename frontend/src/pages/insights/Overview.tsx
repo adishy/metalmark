@@ -6,7 +6,7 @@
 // (`RangeControl`); the owner filter is a lens for right now and lives in
 // `useState`. Both are read by all three reports, so neither can be true of one
 // chart and false of the next.
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import {
   useCashFlow,
@@ -17,17 +17,12 @@ import {
 } from "@/api/hooks";
 import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
-import { formatMoney } from "@/lib/format";
+import { donutOption as donutOptionFor } from "@/lib/donutChart";
+import { formatMoney, formatMoneyTick } from "@/lib/format";
 import { coverageNotes, netWorthOption } from "@/lib/netWorthChart";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
-import {
-  LEFTOVER_NODE,
-  SAVINGS_NODE,
-  WINDOW_NODE,
-  buildSankey,
-  sideRows,
-  type SankeyNode,
-} from "@/lib/sankey";
+import { buildSankey, sideRows } from "@/lib/sankey";
+import { sankeyOption as sankeyOptionFor } from "@/lib/sankeyChart";
 import Chart from "@/components/Chart";
 import { Day } from "@/components/datetime";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
@@ -35,14 +30,15 @@ import RangeControl, { useReportRange } from "@/components/RangeControl";
 import Reconciliation from "@/components/Reconciliation";
 import { useChartTokens } from "@/theme/chartTokens";
 import {
+  barEndRadius,
   chartAxis,
   chartLegend,
   chartTooltip,
   emphasisBar,
   emphasisLine,
-  emphasisPie,
-  emphasisSankey,
-  type TooltipEdge,
+  valueTicks,
+  zeroRule,
+  type ChartBox,
   type TooltipPoint,
 } from "@/theme/chartInteraction";
 
@@ -63,7 +59,24 @@ function bucketLabels(
   return data?.points.map((p) => formatBucket(p.date, data.granularity)) ?? [];
 }
 
-export default function Reports() {
+/**
+ * How big the donut's centre figure is set.
+ *
+ * The hole's width is a fact of the canvas — `radius: 45%` of a 310 × 280 phone
+ * chart leaves about 126 px across — and an amount's width is a fact of the
+ * figure: "$5,063.70" is nine characters, "$1,234,567.89" is thirteen and would
+ * run over the ring. §6.5 says never round a figure to make it fit, and the
+ * alternative it names is to shrink the type, so the *size* is chosen from the
+ * string rather than the string being cut short. `text-base` is the floor for an
+ * amount (§2.4), and the returned names are literals so Tailwind keeps them.
+ */
+function centreSize(amount: string): string {
+  if (amount.length <= 9) return "text-xl";
+  if (amount.length <= 13) return "text-lg";
+  return "text-base";
+}
+
+export default function Overview() {
   const range = useReportRange();
   const owners = useOwners();
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
@@ -88,35 +101,76 @@ export default function Reports() {
   const t = useChartTokens();
 
   // Built in `lib/netWorthChart`: a time axis, straight segments, and partial
-  // points drawn and named as partial (ADR-0045).
-  const nwOption: EChartsOption = useMemo(() => netWorthOption(nw.data, t), [nw.data, t]);
+  // points drawn and named as partial (ADR-0045). A function of the box because
+  // how many values a reader is asked to count off the axis is a question about
+  // the canvas's height (`valueTicks`).
+  const nwOption = useCallback(
+    (box: ChartBox): EChartsOption => netWorthOption(nw.data, t, box),
+    [nw.data, t],
+  );
   const nwNotes = useMemo(() => coverageNotes(nw.data?.points ?? []), [nw.data]);
 
-  const cashFlowOption: EChartsOption = useMemo(
-    () => ({
-      grid: { top: 30, right: 16, bottom: 30, left: 60 },
-      tooltip: chartTooltip(t),
+  const cashFlowOption = useCallback(
+    (box: ChartBox): EChartsOption => ({
+      // `top` clears the legend row. `containLabel` is the phone's share: the
+      // tick gutter is measured from the labels rather than reserved as 60 px of
+      // a 310 px-wide canvas.
+      grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
+      // ECharts' default tooltip template prints the raw numbers — `Income 5235`,
+      // no currency and no thousands separator — on a chart whose whole subject is
+      // money, and it titles itself with the axis label, which names a month but
+      // not a year. Both are the same finding: what a reader taps for is the figure
+      // and the bucket it belongs to.
+      tooltip: chartTooltip(t, {
+        formatter: (param: TooltipPoint) => {
+          // An axis tooltip hands over every series at the pointer, in series order.
+          const points = (Array.isArray(param) ? param : [param]) as TooltipPoint[];
+          const bucket = cashFlow.data?.points[points[0]?.dataIndex ?? 0];
+          const heading = bucket
+            ? formatBucket(bucket.date, cashFlow.data?.granularity ?? "month", "long")
+            : (points[0]?.name ?? "");
+          return [
+            `<strong>${heading}</strong>`,
+            ...points.map((p) => `${p.seriesName}: ${formatMoney(Number(p.value), ccy)}`),
+          ].join("<br/>");
+        },
+      }),
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
         type: "category",
         data: bucketLabels(cashFlow.data),
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      // Money ticks: `$5k` in a gutter that used to read `5,000` with no
+      // currency anywhere on the axis. How many of them comes from the canvas:
+      // the range here (−$2k … $6k) drew nine rules at ECharts' default, four of
+      // them within a thumb's width of another on a phone.
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, {
+          grid: true,
+          tick: (v) => formatMoneyTick(v, ccy),
+          splitNumber: valueTicks(box),
+        }),
+      },
       series: [
         {
           name: "Income",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: t.positive },
+          // Round the end the value is at, and state the baseline the two halves
+          // are measured from — a chart that grows both ways has to say where
+          // zero is rather than leaving it to whichever gridline the axis chose.
+          itemStyle: { color: t.positive, borderRadius: barEndRadius("top") },
           emphasis: emphasisBar(t, t.positive),
+          markLine: zeroRule(t),
           data: cashFlow.data?.points.map((p) => Number(p.income)) ?? [],
         },
         {
           name: "Expense",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: t.negative },
+          itemStyle: { color: t.negative, borderRadius: barEndRadius("bottom") },
           emphasis: emphasisBar(t, t.negative),
           // Expenses are summed as positive magnitudes by some backends and as
           // negatives by others; plot them downward either way.
@@ -135,49 +189,17 @@ export default function Reports() {
         },
       ],
     }),
-    [cashFlow.data, t],
+    [cashFlow.data, t, ccy],
   );
 
-  const donutOption: EChartsOption = useMemo(() => {
-    const rows = spending.data?.rows ?? [];
-    const total = rows.reduce((sum, r) => sum + Number(r.total), 0);
-    // Slices are named by the row's **key**, not by the words a reader sees, for
-    // the reason the graph gives: ECharts merges data items that share a name, so
-    // two rows with the same label would become one slice with their totals added
-    // — a chart that balances against a legend that is wrong. Two categories may
-    // share a name, and a household may name a category "Investment fees" while
-    // also paying real ones. The names live in this map instead, and both the
-    // legend and the tooltip read them back out.
-    const nameOf = (key: unknown) =>
-      rows.find((r) => r.key === key)?.category_name ?? String(key);
-    return {
-      tooltip: chartTooltip(t, {
-        trigger: "item",
-        formatter: (p: TooltipPoint) => {
-          const value = Number(p.value);
-          const share = total === 0 ? 0 : (value / total) * 100;
-          // `share` replaces ECharts' `{d}`, which is only available to the
-          // template-string form — and the template cannot map a key to a name.
-          return `${nameOf(p.name)}: ${formatMoney(value, ccy)} (${share.toFixed(0)}%)`;
-        },
-      }),
-      legend: chartLegend(t, { bottom: 0, type: "scroll", formatter: nameOf }),
-      color: t.series,
-      series: [
-        {
-          type: "pie",
-          radius: ["45%", "70%"],
-          center: ["50%", "45%"],
-          // The gap between slices is the card behind them, not a fixed navy.
-          itemStyle: { borderColor: t.surface, borderWidth: 2 },
-          // Named everywhere the reader looks, keyed everywhere ECharts looks.
-          label: { color: t.label, formatter: (p: TooltipPoint) => nameOf(p.name) },
-          emphasis: emphasisPie(t),
-          data: rows.map((r) => ({ name: r.key, value: Number(r.total) })),
-        },
-      ],
-    };
-  }, [spending.data, t, ccy]);
+  // Built in `lib/donutChart`, like the graph: the ring, its labels and what the
+  // phone card is allowed to say about them are one decision, and it is a decision
+  // about the canvas it is drawn on — so the option takes the measured box.
+  const donutOption = useCallback(
+    (box: ChartBox): EChartsOption =>
+      donutOptionFor(spending.data?.rows ?? [], t, ccy, box),
+    [spending.data, t, ccy],
+  );
 
   // The graph, built here and nowhere else: the payload carries rows and this is
   // the one place the picture's shape is decided, so a layout bug and a data bug
@@ -187,91 +209,13 @@ export default function Reports() {
     [sankey.data],
   );
 
-  const sankeyOption: EChartsOption = useMemo(() => {
-    if (graph === null) return {};
-
-    // Colour by *side*, not by position in the palette. A Sankey is read as a
-    // direction of travel, so the two sides have to be told apart at a glance and
-    // must not change colour when the window changes — which a cycling palette
-    // would do, since a node's index moves as rows are added and removed. The
-    // three nodes that are not a category at all (the window itself and the two
-    // residual nodes) take the accent, which reads as "the household's own money"
-    // rather than as one more source or destination.
-    const color = (node: SankeyNode) =>
-      node.name === WINDOW_NODE || node.name === SAVINGS_NODE || node.name === LEFTOVER_NODE
-        ? t.accent
-        : node.depth === 0
-          ? t.positive
-          : t.negative;
-
-    return {
-      tooltip: chartTooltip(t, {
-        trigger: "item",
-        // Node captions and the tooltip both need *words* where the graph stores
-        // an id: an id has to be unique across the picture and a label does not,
-        // so they are different strings and only one of them is readable.
-        formatter: (p: TooltipPoint) => {
-          const label = (id: unknown) => graph.labels.get(String(id)) ?? String(id);
-          // The pointer can be on a node or on a ribbon, and ECharts types the
-          // item as either. A link is the case with endpoints — its own `name` is
-          // empty, and what it means is the two nodes it joins.
-          const edge = p.data as TooltipEdge | null | undefined;
-          if (edge?.source !== undefined && edge.target !== undefined) {
-            return `${label(edge.source)} → ${label(edge.target)}: ${formatMoney(
-              Number(edge.value),
-              ccy,
-            )}`;
-          }
-          return `${label(p.name)}: ${formatMoney(Number(p.value), ccy)}`;
-        },
-      }),
-      series: [
-        {
-          type: "sankey",
-          // Not the usual hairline inset: these margins are where the node labels
-          // live. Each column's words are placed *outward* from its node — sources
-          // to the left, destinations to the right — so a label sits beside the
-          // graph instead of on top of a ribbon, which is where ECharts puts it by
-          // default. The middle node's goes above it, having no margin of its own.
-          left: 88,
-          right: 104,
-          // Deep enough for the middle column's label, which ECharts draws *above*
-          // its node: at a hairline inset the word is cut in half by the canvas
-          // edge, which reads as a rendering fault rather than as a crop.
-          top: 26,
-          bottom: 8,
-          // Wide enough that a ribbon reads as a flow rather than as a hairline.
-          nodeWidth: 14,
-          nodeGap: 10,
-          data: graph.nodes.map((n) => ({
-            name: n.name,
-            depth: n.depth,
-            itemStyle: { color: color(n) },
-            label: { position: n.depth === 0 ? "left" : n.depth === 2 ? "right" : "top" },
-          })),
-          links: graph.links,
-          label: {
-            color: t.label,
-            // Bounded so a long name cannot run back over the graph or off the
-            // canvas — a household names its own categories, and one can be longer
-            // than any margin. Truncation is the honest failure: the alternative is
-            // a clipped word or a label over the ribbons, and the list under the
-            // chart carries every name in full either way.
-            width: 84,
-            overflow: "truncate",
-            formatter: (p: TooltipPoint) => graph.labels.get(String(p.name)) ?? "",
-          },
-          // `source` is not decoration: a ribbon is tinted by where it came from,
-          // which is what makes "this came out of Salary" readable without a
-          // legend. `curveness` keeps two flows from a shared origin apart.
-          lineStyle: { color: "source", opacity: 0.4, curveness: 0.5 },
-          emphasis: emphasisSankey(t),
-        },
-      ],
-    };
-    // `graph.labels` is rebuilt with `graph`, so the two are one dependency, and
-    // `color` closes over `t` rather than being a dependency of its own.
-  }, [graph, t, ccy]);
+  // Built in `lib/sankeyChart`: the columns, their labels and the ribbon margins,
+  // laid out for the canvas the wrapper measured. `graph.labels` is rebuilt with
+  // `graph`, so the two are one dependency.
+  const sankeyOption = useCallback(
+    (box: ChartBox): EChartsOption => (graph === null ? {} : sankeyOptionFor(graph, t, ccy, box)),
+    [graph, t, ccy],
+  );
 
   const hasSpending = (spending.data?.rows.length ?? 0) > 0;
   const hasSeries = (nw.data?.points.length ?? 0) > 0;
@@ -347,10 +291,11 @@ export default function Reports() {
   );
 
   return (
-    // `max-w-6xl` rather than the shell's `max-w-7xl`: §9.1 gives Reports the
-    // middle width because its content at `lg:` is a two-up grid, and a 1280 px
-    // pair of charts is two 620 px charts — the second column is not worth the
-    // stretch. `mx-auto` keeps the page centred inside the wider shell.
+    // No `mx-auto max-w-6xl` of its own any more — that's `Insights.tsx` now
+    // (§9.1 gives this content the middle width because it's a two-up grid at
+    // `lg:`, and a 1280 px pair of charts is two 620 px charts; the second
+    // column isn't worth the stretch), and the heading above the tabs is the
+    // page's one `<h1>`, so this tab doesn't carry its own.
     //
     // §9.3's two-up, and the grid is the page rather than a wrapper around two
     // of its children, so a section's place is decided by one class on it and
@@ -358,11 +303,9 @@ export default function Reports() {
     // stack; at `lg:` the gap does the same job on both axes, which is why the
     // vertical step is turned off rather than left to double up with it.
     <div
-      className="mx-auto max-w-6xl space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
-      data-testid="reports-page"
+      className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
+      data-testid="insights-overview-page"
     >
-      <h1 className="text-xl font-semibold lg:col-span-2">Reports</h1>
-
       <div className="space-y-4 rounded-card bg-surface-raised p-4 lg:col-span-2">
         <RangeControl state={range} />
         <OwnerFilterChips
@@ -549,7 +492,27 @@ export default function Reports() {
         ) : (
           <>
             {hasSpending ? (
-              <Chart option={donutOption} label={donutLabel} testid="spending-donut" />
+              <div className="relative">
+                <Chart option={donutOption} label={donutLabel} testid="spending-donut" />
+                {/* The hole in the ring is the one part of the chart carrying
+                    nothing, and the total is the figure the picture is about.
+                    DOM text over the canvas rather than a canvas `graphic`
+                    (§2.9): it is real text for a screen reader, it is selectable,
+                    and it takes its colour from the tokens — so a theme flip
+                    repaints it with no second palette to keep in step.
+                    `top-[45%]` is the pie's own `center` y, so the two cannot
+                    drift apart; `pointer-events-none` keeps it out of the
+                    chart's own tap handling. */}
+                <div
+                  className="pointer-events-none absolute left-1/2 top-[45%] -translate-x-1/2 -translate-y-1/2 text-center"
+                  data-testid="spending-total"
+                >
+                  <p className="text-sm text-fg-muted">Total</p>
+                  <p className={`font-semibold tabular-nums ${centreSize(formatMoney(spendTotal, ccy))}`}>
+                    {formatMoney(spendTotal, ccy)}
+                  </p>
+                </div>
+              </div>
             ) : (
               <p className="text-sm text-fg-muted">No spending in range.</p>
             )}

@@ -25,16 +25,20 @@ import { api } from "@/api/client";
 import type { Allocation, AllocationGroup, Holding, Portfolio, UUID } from "@/api/types";
 
 /**
- * The cross-account allocation, grouped by `groupBy`.
+ * The cross-account allocation, grouped by `groupBy` (ADR-0011), optionally
+ * folding in bank cash (`includeCashAccounts`, ADR-0054).
  *
- * `group_by` is part of the key: each grouping is its own response, and switching
- * back to one already fetched must not refetch it.
+ * Both are part of the key: each grouping — and each cash setting — is its own
+ * response, and switching back to one already fetched must not refetch it.
  */
-export function useAllocation(groupBy: AllocationGroup) {
+export function useAllocation(groupBy: AllocationGroup, includeCashAccounts: boolean) {
   return useQuery({
-    queryKey: ["allocation", groupBy],
+    queryKey: ["allocation", groupBy, includeCashAccounts],
     queryFn: () =>
-      api.get<Allocation>(`/investments/allocation?group_by=${encodeURIComponent(groupBy)}`),
+      api.get<Allocation>(
+        `/investments/allocation?group_by=${encodeURIComponent(groupBy)}` +
+          `&include_cash_accounts=${includeCashAccounts}`,
+      ),
   });
 }
 

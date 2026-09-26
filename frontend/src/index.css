@@ -94,12 +94,21 @@
 
 html {
   color-scheme: light;
-  /* The shell has sticky chrome at both ends (header, and the phone tab bar).
+  /* The shell has chrome pinned at both ends (header, and the phone tab bar).
      Without this, the browser scrolls a focused element flush to the viewport
      edge and the bar covers it — §7 item 3: "nothing focused is entirely
-     hidden behind a sticky bar". 4rem clears either bar. */
+     hidden behind a sticky bar". 4rem clears the header; the tab bar is the
+     same 4rem plus whatever the home indicator adds on that device. */
   scroll-padding-top: 4rem;
-  scroll-padding-bottom: 4rem;
+  scroll-padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  /* iOS's "Add to Home Screen" app has no browser chrome left to absorb an
+     overscroll, so pulling past either end of the document rubber-bands the
+     whole page — dragging the fixed tab bar and header away from the screen
+     edge with it. iOS Safari 16+ honours `overscroll-behavior` on the root
+     scroller, which stops the bounce at the source rather than papering over
+     it with more positioning. Chromium can't reproduce the rubber-band to
+     verify this locally; it is exercised on-device only. */
+  overscroll-behavior: none;
 }
 html.dark {
   color-scheme: dark;
@@ -120,6 +129,10 @@ body {
   font-variant-numeric: tabular-nums;
   /* Removes the ~300ms double-tap-zoom delay on every interactive element. */
   touch-action: manipulation;
+  /* Belt-and-suspenders with the `html` rule above: some engines apply
+     overscroll containment at the body level rather than the document's root
+     scroller. Harmless to set on both. */
+  overscroll-behavior: none;
 }
 
 /* One focus treatment for the whole app, so it cannot be forgotten per

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import InstitutionsSection from "@/pages/InstitutionsSection";
@@ -47,14 +47,17 @@ import {
   useConnections,
   useDeleteConnection,
   useTriggerSync,
+  useUpdateConnection,
 } from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import IncomeDialog from "@/components/IncomeDialog";
+import { connectionName } from "@/lib/bankFreshness";
 import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
+import ScrollTabs from "@/components/ScrollTabs";
 import type { Owner, OwnerReassignment } from "@/api/types";
 import { todayIso } from "@/lib/dates";
-import { useIsDesktop } from "@/lib/media";
 import {
   Button,
   Checkbox,
@@ -95,45 +98,6 @@ export default function Settings() {
   // property read would not typecheck — the `in` check narrows to it, and its
   // only value there is `true`. A member's list is the eight that follow.
   const tabs = TABS.filter((t) => !("adminOnly" in t) || isAdmin);
-  // §9.3's rail. This is the one thing on the page a media query cannot decide:
-  // the strip below `lg:` is horizontal and the rail above it is vertical, and
-  // `aria-orientation` has to say which one is on screen. An ARIA attribute is
-  // not a style, so there is no class that can carry it — hence the hook.
-  const rail = useIsDesktop();
-  // Keep the chosen tab in view in the phone's swiping strip.
-  useEffect(() => {
-    const i = tabs.findIndex((t) => t.id === tab);
-    tabRefs.current[i]?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps -- `tabs` is rebuilt each render
-  // Roving tabindex: the tablist is one tab stop and the arrow keys move inside
-  // it. Declaring role="tablist" without that model announces a tab widget that
-  // ignores the keys a screen reader user will reach for (docs/DESIGN.md §7.4).
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
-
-  function onTabKey(e: React.KeyboardEvent<HTMLButtonElement>) {
-    // `tabs`, not `TABS`: the roving index has to walk the list that is actually
-    // rendered, or an administrator's arrow keys land one short of the end and a
-    // member's skip the tab their index no longer matches.
-    const i = tabs.findIndex((t) => t.id === tab);
-    const last = tabs.length - 1;
-    let next: number;
-    // Both pairs move the same way — Right/Down forward, Left/Up back — in both
-    // presentations. ARIA's own guidance names the pair that matches the axis and
-    // is silent on the other; accepting it costs one `||` and saves a reader who
-    // guessed wrong from concluding the tablist is broken. `aria-orientation`
-    // below is what tells assistive tech which pair is the canonical one, and that
-    // is the only part of this that has to know the axis.
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = i === last ? 0 : i + 1;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = i === 0 ? last : i - 1;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = last;
-    else return;
-    e.preventDefault();
-    // Automatic activation: the panel is a local swap, so selecting on focus
-    // saves the Enter that manual activation would cost.
-    setTab(tabs[next].id);
-    tabRefs.current[next]?.focus();
-  }
 
   return (
     // §9.1 files Settings under form width — `max-w-2xl` (672 px), because a
@@ -150,51 +114,19 @@ export default function Settings() {
     // not the panel.
     <div className="mx-auto max-w-4xl space-y-4 lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
       <h1 className="text-xl font-semibold lg:col-span-2">Settings</h1>
-      <div
-        // Below `lg:` this is the underline strip it has always been. At `lg:` it
-        // is a vertical rail, and a rail is not the strip rotated: the underline
-        // becomes the AppShell nav's inset fill and the radius goes back to
-        // `rounded-control`, because a tab that sits *beside* its panel has no
-        // edge to underline. `lg:flex-nowrap` matters — a `flex-col` container
-        // that may still wrap turns its overflow into extra columns.
-        // Phone: one row of tabs that swipes sideways — the one strip in the
-        // app allowed to (DESIGN §5), because eleven sections are a lot to read
-        // from a picker and tabs show where you are among them. The edges fade
-        // to say there is more; the selected tab is scrolled into view.
-        data-scroll-x-ok
-        className="-mx-4 flex snap-x gap-1 overflow-x-auto border-b border-border px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-16px),transparent)] [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:[mask-image:none] lg:w-56 lg:flex-col lg:flex-nowrap lg:border-b-0"
-        role="tablist"
-        aria-label="Settings sections"
-        aria-orientation={rail ? "vertical" : "horizontal"}
-      >
-        {tabs.map((t, i) => (
-          <button
-            key={t.id}
-            ref={(el) => {
-              tabRefs.current[i] = el;
-            }}
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
-            onClick={() => setTab(t.id)}
-            onKeyDown={onTabKey}
-            // The `lg:` overrides ride on Tailwind's own order — every variant
-            // block is emitted after the unvariant utilities — so `lg:border-b-0`
-            // and `lg:rounded-control` beat `border-b-2` and `rounded-t-lg`
-            // without a `!` or a duplicated branch.
-            className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-t-lg px-3 text-sm whitespace-nowrap lg:justify-start lg:rounded-control lg:border-b-0 ${
-              tab === t.id
-                ? "border-b-2 border-accent text-fg lg:bg-surface-inset lg:font-semibold lg:text-fg"
-                : "text-fg-muted hover:text-fg lg:hover:bg-surface-inset lg:hover:text-fg"
-            }`}
-            data-testid={`settings-tab-${t.id}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Below `lg:` this is the underline strip it has always been. At `lg:`
+          it is a vertical rail (`rail`, §9.3) — the tab list is *navigation*
+          beside its panel, so the underline becomes the AppShell nav's inset
+          fill instead. Eleven sections are a lot to read from a picker, and
+          tabs show where you are among them (DESIGN §5). */}
+      <ScrollTabs
+        tabs={tabs}
+        selected={tab}
+        onSelect={(id) => setTab(id as TabId)}
+        ariaLabel="Settings sections"
+        testidPrefix="settings-tab"
+        rail
+      />
 
       <div
         role="tabpanel"
@@ -323,11 +255,43 @@ function ConnectionsSection() {
   const claim = useClaimConnection();
   const del = useDeleteConnection();
   const trigger = useTriggerSync();
+  const rename = useUpdateConnection();
 
   const tokenId = useFieldId("setup-token");
   const [token, setToken] = useState("");
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  // Which connection's rename form is open, and the field's own draft value —
+  // kept separate from the connection's own `display_name` so typing does not
+  // fight a background refetch mid-edit.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  function startRename(id: string, current: string | null) {
+    setRenaming(id);
+    setRenameValue(current ?? "");
+    setRenameError(null);
+  }
+
+  function cancelRename() {
+    setRenaming(null);
+    setRenameError(null);
+  }
+
+  function submitRename(id: string) {
+    rename.mutate(
+      { id, body: { display_name: renameValue } },
+      {
+        onSuccess: () => setRenaming(null),
+        onError: (err) => setRenameError((err as Error).message),
+      },
+    );
+  }
+
+  function resetToBankName(id: string) {
+    rename.mutate({ id, body: { display_name: "" } }, { onSuccess: () => setRenaming(null) });
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -414,12 +378,64 @@ function ConnectionsSection() {
           <ul className="divide-y divide-border rounded-control bg-surface-inset/40" data-testid="connection-list">
             {connections.data.map((c) => (
               <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg">
-                    {c.org_name ?? "Unnamed connection"}
-                  </span>
-                  <ConnectionBadge connection={c} />
-                </div>
+                {renaming === c.id ? (
+                  <div className="space-y-2" data-testid={`rename-form-${c.id}`}>
+                    <Input
+                      autoFocus
+                      value={renameValue}
+                      placeholder={c.org_name ?? "Unnamed connection"}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitRename(c.id);
+                        if (e.key === "Escape") cancelRename();
+                      }}
+                      aria-label={`Rename ${connectionName(c)}`}
+                      data-testid={`rename-input-${c.id}`}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        disabled={rename.isPending}
+                        onClick={() => submitRename(c.id)}
+                        data-testid={`rename-save-${c.id}`}
+                      >
+                        {rename.isPending && <Spinner />}
+                        Save
+                      </Button>
+                      <Button variant="ghost" onClick={cancelRename} data-testid={`rename-cancel-${c.id}`}>
+                        Cancel
+                      </Button>
+                      {c.display_name && (
+                        <Button
+                          variant="ghost"
+                          disabled={rename.isPending}
+                          onClick={() => resetToBankName(c.id)}
+                          data-testid={`rename-reset-${c.id}`}
+                        >
+                          Reset to bank name
+                        </Button>
+                      )}
+                    </div>
+                    {renameError && (
+                      <p className="text-sm text-negative" role="alert">
+                        {renameError}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-fg">{connectionName(c)}</span>
+                    <ConnectionBadge connection={c} />
+                  </div>
+                )}
+                {/* When renamed, the bank's own name stays visible but small —
+                    the local name augments it, and the origin should never
+                    disappear behind it. */}
+                {renaming !== c.id && c.display_name && c.org_name && (
+                  <p className="text-xs text-fg-muted" data-testid={`conn-bank-name-${c.id}`}>
+                    {c.org_name}
+                  </p>
+                )}
                 <p className="text-xs text-fg-muted">
                   {c.last_synced_at ? (
                     <>
@@ -434,23 +450,32 @@ function ConnectionsSection() {
                     {c.last_error}
                   </p>
                 )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    disabled={trigger.isPending || !c.is_enabled}
-                    onClick={() => trigger.mutate(c.id)}
-                    data-testid={`sync-now-${c.id}`}
-                  >
-                    Sync now
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setDisconnecting(disconnecting === c.id ? null : c.id)}
-                    data-testid={`disconnect-${c.id}`}
-                  >
-                    Disconnect
-                  </Button>
-                </div>
+                {renaming !== c.id && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      disabled={trigger.isPending || !c.is_enabled}
+                      onClick={() => trigger.mutate(c.id)}
+                      data-testid={`sync-now-${c.id}`}
+                    >
+                      Sync now
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => startRename(c.id, c.display_name)}
+                      data-testid={`rename-${c.id}`}
+                    >
+                      Rename
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setDisconnecting(disconnecting === c.id ? null : c.id)}
+                      data-testid={`disconnect-${c.id}`}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                )}
 
                 {disconnecting === c.id && (
                   <div
@@ -460,7 +485,7 @@ function ConnectionsSection() {
                     {/* The reassuring half is the part people do not believe, so
                         it is stated with the same weight as the warning. */}
                     <p className="text-negative">
-                      Disconnect “{c.org_name ?? "this connection"}”? The accounts and every
+                      Disconnect “{connectionName(c, "this connection")}”? The accounts and every
                       transaction stay, and become hand-entered ones. Nothing is deleted, and
                       reconnecting later picks the same accounts back up rather than importing
                       them twice.
@@ -1221,6 +1246,10 @@ function OwnersSection() {
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<{ name: string; counts: OwnerReassignment } | null>(null);
+  // The owner whose income profile / paystubs are open, if any. ADR-0052: this
+  // is data entry, not a settings write — the income API is open to any member
+  // like the ledger itself — so the button is not gated on `canEdit`.
+  const [incomeFor, setIncomeFor] = useState<Owner | null>(null);
   const nameId = useFieldId("owner-name");
 
   return (
@@ -1263,6 +1292,7 @@ function OwnersSection() {
               owner={o}
               owners={owners.data ?? []}
               canEdit={canEdit}
+              onIncome={() => setIncomeFor(o)}
               onDeleted={(counts) => setDeleted({ name: o.name, counts })}
             />
           ))}
@@ -1279,6 +1309,14 @@ function OwnersSection() {
           </p>
         )}
       </Card>
+
+      {incomeFor && (
+        <IncomeDialog
+          owner={incomeFor}
+          householdCurrency={household.data?.base_currency ?? "USD"}
+          onClose={() => setIncomeFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1287,11 +1325,13 @@ function OwnerRow({
   owner,
   owners,
   canEdit,
+  onIncome,
   onDeleted,
 }: {
   owner: Owner;
   owners: Owner[];
   canEdit: boolean;
+  onIncome: () => void;
   onDeleted: (counts: OwnerReassignment) => void;
 }) {
   const update = useUpdateOwner();
@@ -1308,7 +1348,7 @@ function OwnerRow({
 
   return (
     <li className="space-y-2 rounded-control bg-surface-inset/40 px-3 py-2" data-testid={`owner-row-${owner.id}`}>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {canEdit ? (
           <Input
             value={name}
@@ -1330,6 +1370,19 @@ function OwnerRow({
           {owner.kind}
         </span>
         <div className="flex-1" />
+        {/* Income & pay is data entry on this owner, not a settings write:
+            the income API is open to every member, so the button is too. A
+            shared owner is not a person and has no income to record. */}
+        {!isShared && (
+          <Button
+            variant="secondary"
+            className="px-2 py-1 text-xs"
+            onClick={onIncome}
+            data-testid={`owner-income-${owner.id}`}
+          >
+            Income &amp; pay
+          </Button>
+        )}
         {canEdit && (
         <Button
           variant="secondary"
