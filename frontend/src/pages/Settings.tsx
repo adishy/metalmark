@@ -47,9 +47,11 @@ import {
   useConnections,
   useDeleteConnection,
   useTriggerSync,
+  useUpdateConnection,
 } from "@/api/sync";
 import RuleBuilder from "@/components/RuleBuilder";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import { connectionName } from "@/lib/bankFreshness";
 import { CloseIcon } from "@/components/icons";
 import { Day, Instant } from "@/components/datetime";
 import type { Owner, OwnerReassignment } from "@/api/types";
@@ -323,11 +325,43 @@ function ConnectionsSection() {
   const claim = useClaimConnection();
   const del = useDeleteConnection();
   const trigger = useTriggerSync();
+  const rename = useUpdateConnection();
 
   const tokenId = useFieldId("setup-token");
   const [token, setToken] = useState("");
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  // Which connection's rename form is open, and the field's own draft value —
+  // kept separate from the connection's own `display_name` so typing does not
+  // fight a background refetch mid-edit.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  function startRename(id: string, current: string | null) {
+    setRenaming(id);
+    setRenameValue(current ?? "");
+    setRenameError(null);
+  }
+
+  function cancelRename() {
+    setRenaming(null);
+    setRenameError(null);
+  }
+
+  function submitRename(id: string) {
+    rename.mutate(
+      { id, body: { display_name: renameValue } },
+      {
+        onSuccess: () => setRenaming(null),
+        onError: (err) => setRenameError((err as Error).message),
+      },
+    );
+  }
+
+  function resetToBankName(id: string) {
+    rename.mutate({ id, body: { display_name: "" } }, { onSuccess: () => setRenaming(null) });
+  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -414,12 +448,64 @@ function ConnectionsSection() {
           <ul className="divide-y divide-border rounded-control bg-surface-inset/40" data-testid="connection-list">
             {connections.data.map((c) => (
               <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg">
-                    {c.org_name ?? "Unnamed connection"}
-                  </span>
-                  <ConnectionBadge connection={c} />
-                </div>
+                {renaming === c.id ? (
+                  <div className="space-y-2" data-testid={`rename-form-${c.id}`}>
+                    <Input
+                      autoFocus
+                      value={renameValue}
+                      placeholder={c.org_name ?? "Unnamed connection"}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitRename(c.id);
+                        if (e.key === "Escape") cancelRename();
+                      }}
+                      aria-label={`Rename ${connectionName(c)}`}
+                      data-testid={`rename-input-${c.id}`}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        disabled={rename.isPending}
+                        onClick={() => submitRename(c.id)}
+                        data-testid={`rename-save-${c.id}`}
+                      >
+                        {rename.isPending && <Spinner />}
+                        Save
+                      </Button>
+                      <Button variant="ghost" onClick={cancelRename} data-testid={`rename-cancel-${c.id}`}>
+                        Cancel
+                      </Button>
+                      {c.display_name && (
+                        <Button
+                          variant="ghost"
+                          disabled={rename.isPending}
+                          onClick={() => resetToBankName(c.id)}
+                          data-testid={`rename-reset-${c.id}`}
+                        >
+                          Reset to bank name
+                        </Button>
+                      )}
+                    </div>
+                    {renameError && (
+                      <p className="text-sm text-negative" role="alert">
+                        {renameError}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-fg">{connectionName(c)}</span>
+                    <ConnectionBadge connection={c} />
+                  </div>
+                )}
+                {/* When renamed, the bank's own name stays visible but small —
+                    the local name augments it, and the origin should never
+                    disappear behind it. */}
+                {renaming !== c.id && c.display_name && c.org_name && (
+                  <p className="text-xs text-fg-muted" data-testid={`conn-bank-name-${c.id}`}>
+                    {c.org_name}
+                  </p>
+                )}
                 <p className="text-xs text-fg-muted">
                   {c.last_synced_at ? (
                     <>
@@ -434,23 +520,32 @@ function ConnectionsSection() {
                     {c.last_error}
                   </p>
                 )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    disabled={trigger.isPending || !c.is_enabled}
-                    onClick={() => trigger.mutate(c.id)}
-                    data-testid={`sync-now-${c.id}`}
-                  >
-                    Sync now
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setDisconnecting(disconnecting === c.id ? null : c.id)}
-                    data-testid={`disconnect-${c.id}`}
-                  >
-                    Disconnect
-                  </Button>
-                </div>
+                {renaming !== c.id && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      disabled={trigger.isPending || !c.is_enabled}
+                      onClick={() => trigger.mutate(c.id)}
+                      data-testid={`sync-now-${c.id}`}
+                    >
+                      Sync now
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => startRename(c.id, c.display_name)}
+                      data-testid={`rename-${c.id}`}
+                    >
+                      Rename
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setDisconnecting(disconnecting === c.id ? null : c.id)}
+                      data-testid={`disconnect-${c.id}`}
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
+                )}
 
                 {disconnecting === c.id && (
                   <div
@@ -460,7 +555,7 @@ function ConnectionsSection() {
                     {/* The reassuring half is the part people do not believe, so
                         it is stated with the same weight as the warning. */}
                     <p className="text-negative">
-                      Disconnect “{c.org_name ?? "this connection"}”? The accounts and every
+                      Disconnect “{connectionName(c, "this connection")}”? The accounts and every
                       transaction stay, and become hand-entered ones. Nothing is deleted, and
                       reconnecting later picks the same accounts back up rather than importing
                       them twice.

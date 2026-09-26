@@ -15,7 +15,7 @@ import {
 } from "@/api/hooks";
 import { downloadAccountCsv } from "@/api/portability";
 import { useConnections } from "@/api/sync";
-import { isStalled } from "@/lib/bankFreshness";
+import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { isoDay, todayIso } from "@/lib/dates";
@@ -193,7 +193,7 @@ export default function Accounts() {
           data-testid="bank-stalled"
         >
           {stalled.length === 1
-            ? `${stalled[0].org_name ?? "A bank"} hasn’t sent new transactions for a while, though its syncs succeed.`
+            ? `${connectionName(stalled[0], "A bank")} hasn’t sent new transactions for a while, though its syncs succeed.`
             : `${stalled.length} banks haven’t sent new transactions for a while, though their syncs succeed.`}{" "}
           Check the link at SimpleFIN Bridge; Admin has the details.
         </p>

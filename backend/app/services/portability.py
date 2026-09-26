@@ -284,8 +284,8 @@ _GROUP_FIELDS = ("id", "name", "type", "sort")
 _CATEGORY_FIELDS = ("id", "group_id", "name", "icon", "color", "rollover", "sort")
 _TAG_FIELDS = ("id", "name", "color")
 # ``access_url_encrypted`` is not in this tuple and must never be.
-_CONNECTION_FIELDS = ("id", "provider", "org_name", "status", "is_enabled",
-                      "sync_interval_minutes")
+_CONNECTION_FIELDS = ("id", "provider", "org_name", "display_name", "status",
+                      "is_enabled", "sync_interval_minutes")
 _ACCOUNT_FIELDS = (
     "id", "connection_id", "external_id", "external_key", "name", "type", "subtype",
     "institution", "currency", "current_balance", "available_balance", "balance_date",
@@ -927,6 +927,10 @@ async def _import_connections(session: AsyncSession, household_id: uuid.UUID,
             provider=provider,
             access_url_encrypted=None,
             org_name=_text(entry, "org_name", where, required=False),
+            # Absent in an older file (no ``display_name`` column existed yet at
+            # export time) reads the same as a present-but-null field: NULL,
+            # meaning "use the bank's name" — which is correct either way.
+            display_name=_text(entry, "display_name", where, required=False),
             status="auth_error",
             last_error=CREDENTIAL_NOT_EXPORTED,
             is_enabled=_bool(entry, "is_enabled", where, required=False) is not False,

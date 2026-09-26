@@ -512,6 +512,7 @@ register(
     id=K,
     provider=Code(),
     org_name=Pseudonym("Institution"),
+    display_name=Pseudonym("Institution"),
     status=Code(),
     last_synced_at=K,
     last_error=EXT,

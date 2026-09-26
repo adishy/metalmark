@@ -496,3 +496,65 @@ def test_0011_marks_every_existing_holding_manual_and_downgrade_drops_only_synce
         tickers = [r[0] for r in conn.execute("SELECT ticker FROM securities").fetchall()]
         assert tickers == ["VTI"]
         assert conn.execute("SELECT count(*) FROM security_prices").fetchone()[0] == 0
+
+
+# ---- 0012: account_connections.display_name --------------------------------
+
+
+def test_0012_adds_display_name_nullable_and_touches_nothing_else(scratch_db):
+    """Purely additive: an existing connection's ``org_name`` and every other
+    row are untouched, the new column is NULL for it, and the round trip through
+    upgrade/downgrade/upgrade is a fixed point."""
+    _alembic(scratch_db, "upgrade", "0011")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from today's metadata, so undo the column to be the shape
+        # an install on 0011 actually has.
+        conn.execute(
+            "ALTER TABLE account_connections DROP COLUMN IF EXISTS display_name"
+        )
+        hid, owner = _household(conn)
+        conn.execute(
+            "INSERT INTO account_connections (household_id, provider, org_name, "
+            "status, is_enabled, sync_interval_minutes) "
+            "VALUES (%s, 'simplefin', 'First Federal', 'ok', true, 360)",
+            (hid,),
+        )
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0012")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT display_name FROM account_connections"
+        ).fetchall() == [(None,)]
+        assert conn.execute(
+            "SELECT org_name FROM account_connections"
+        ).fetchall() == [("First Federal",)]
+        assert _fingerprint(conn) == before
+        # What the API's PATCH would now write.
+        conn.execute(
+            "UPDATE account_connections SET display_name = 'Chase — joint'"
+        )
+
+    _alembic(scratch_db, "downgrade", "0011")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        columns = {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'account_connections'"
+        ).fetchall()}
+        assert "display_name" not in columns
+        # Lossy for the name, honestly so — but the connection itself and
+        # everything else in the fingerprint survived untouched.
+        assert conn.execute(
+            "SELECT org_name FROM account_connections"
+        ).fetchall() == [("First Federal",)]
+        assert _fingerprint(conn) == before
+
+    # And back up again: the shape-detecting add is safe to re-run.
+    _alembic(scratch_db, "upgrade", "0012")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT display_name FROM account_connections"
+        ).fetchall() == [(None,)]

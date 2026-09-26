@@ -180,6 +180,7 @@ function demoConnection(
     id,
     provider: "simplefin",
     org_name,
+    display_name: null,
     status,
     last_synced_at: null,
     last_error: null,

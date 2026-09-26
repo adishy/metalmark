@@ -18,7 +18,7 @@ import { useState } from "react";
 
 import { useAgentTokens, useCreateAgentToken, useRevokeAgentToken } from "@/api/agent";
 import { useAutoCategorizeAll } from "@/api/hooks";
-import { isStalled } from "@/lib/bankFreshness";
+import { connectionName, isStalled } from "@/lib/bankFreshness";
 import {
   useCancelJob,
   useChecks,
@@ -155,7 +155,8 @@ export default function Admin() {
 
   function label(connectionId: string | null): string {
     if (connectionId === null) return "unknown";
-    return byId.get(connectionId)?.org_name ?? "a removed connection";
+    const c = byId.get(connectionId);
+    return c ? connectionName(c, "a removed connection") : "a removed connection";
   }
 
   return (
@@ -223,7 +224,7 @@ export default function Admin() {
               <li key={c.id} className="space-y-2 p-3" data-testid={`conn-row-${c.id}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-fg">
-                    {c.org_name ?? "Unnamed connection"}
+                    {connectionName(c)}
                   </span>
                   <ConnectionBadge connection={c} />
                 </div>
@@ -310,7 +311,7 @@ export default function Admin() {
                         )
                       }
                       disabled={update.isPending || !defaults.data}
-                      aria-label={`Sync interval for ${c.org_name ?? "this connection"}`}
+                      aria-label={`Sync interval for ${connectionName(c, "this connection")}`}
                       inline
                       className="w-auto"
                       data-testid={`interval-${c.id}`}
@@ -408,7 +409,7 @@ export default function Admin() {
             <option value="">All connections</option>
             {connectionList.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.org_name ?? c.id}
+                {connectionName(c, c.id)}
               </option>
             ))}
           </Select>
