@@ -253,7 +253,134 @@ async def test_link_rejects_a_same_account_or_same_sign_pair(household_factory):
     assert orphans == []
 
 
+async def test_link_refuses_a_leg_that_moves_nothing(household_factory):
+    """A zero-amount leg is not the opposite of a positive one.
+
+    ``(a.amount > 0) == (b.amount > 0)`` reads `0 > 0` as False — the same side as
+    an expense — so a $0.00 row pairs with a real $500 deposit and takes it out of
+    cash-flow and spending with nothing on the other side to account for it. ADR-0049
+    pairs equal-and-opposite legs, and $0.00 has no opposite.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b = await _accounts(s, hh, "USD", "USD")
+        zero = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("0.0000"), transacted_at=_dt(2026, 1, 10)))
+        real = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+
+        # Either position: the zero leg offered, and the zero leg asked for.
+        with pytest.raises(LedgerError) as as_other_exc:
+            await txns.link_transfer(s, hh, zero.id, real.id)
+        with pytest.raises(LedgerError) as as_subject_exc:
+            await txns.link_transfer(s, hh, real.id, zero.id)
+
+        groups = (await s.execute(select(TransferGroup.id))).scalars().all()
+        linked = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(
+                    Transaction.id.in_([zero.id, real.id])
+                )
+            )
+        ).scalars().all()
+    assert as_other_exc.value.status == 400
+    assert as_subject_exc.value.status == 400
+    assert groups == []
+    assert all(leg is None for leg in linked)
+
+
+async def test_link_refuses_a_leg_that_is_already_in_a_transfer(household_factory):
+    """The picker hides taken legs; this is where it is enforced.
+
+    Re-linking one leg of a pair moves it into the new group and leaves the old one
+    one-legged: still excluded from cash-flow and spending, but no longer a pair —
+    a state nothing else in the app can produce, and nothing can repair, because
+    unlinking the group that is left deletes it and orphans the leg it still holds.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c = await _accounts(s, hh, "USD", "USD", "USD")
+        out = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("-500"), transacted_at=_dt(2026, 1, 10)))
+        into = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        free = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=c.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        group = await txns.link_transfer(s, hh, out.id, into.id)
+
+        # One leg taken, the other free — and the pair that is already a pair.
+        with pytest.raises(LedgerError) as taken_exc:
+            await txns.link_transfer(s, hh, out.id, free.id)
+        with pytest.raises(LedgerError) as again_exc:
+            await txns.link_transfer(s, hh, out.id, into.id)
+
+        # The group it was in is untouched, and the free leg is still free.
+        groups = (await s.execute(select(TransferGroup.id))).scalars().all()
+        legs = (
+            await s.execute(
+                select(Transaction.id).where(Transaction.transfer_group_id == group.id)
+            )
+        ).scalars().all()
+        free_group = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(Transaction.id == free.id)
+            )
+        ).scalar_one()
+    assert taken_exc.value.status == 400
+    assert again_exc.value.status == 400
+    assert groups == [group.id]
+    assert sorted(legs) == sorted([out.id, into.id])
+    assert free_group is None
+
+
 # ---- Candidates -----------------------------------------------------------
+
+
+async def test_the_picker_offers_nothing_the_linker_would_refuse(household_factory):
+    """The picker's stated property, on the rows this change moved.
+
+    A zero row used to be offered to a positive subject (``amount <= 0``) and
+    accepted by the linker; a taken leg used to be hidden as a *row* but the subject
+    itself was never checked. Both are now refusals on the link side, so neither may
+    be offered here — and what is offered has to link, which is asserted rather than
+    argued.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c, d = await _accounts(s, hh, "USD", "USD", "USD", "USD")
+        subject = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("500"), transacted_at=_dt(2026, 1, 10)))
+        # A row that moves nothing, in an account of its own: the shape the old
+        # `amount <= 0` predicate let through.
+        zero = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("0"), transacted_at=_dt(2026, 1, 10)))
+        counterpart = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("-500"), transacted_at=_dt(2026, 1, 10)))
+        taken_out = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=c.id, amount=D("-700"), transacted_at=_dt(2026, 1, 10)))
+        taken_in = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=d.id, amount=D("700"), transacted_at=_dt(2026, 1, 10)))
+        await txns.link_transfer(s, hh, taken_out.id, taken_in.id)
+
+        offered = await txns.list_transfer_candidates(s, hh, subject.id)
+        # A zero subject pairs with nothing at all.
+        no_pair = await txns.list_transfer_candidates(s, hh, zero.id)
+        # And neither does one that is already half of a transfer.
+        taken = await txns.list_transfer_candidates(s, hh, taken_out.id)
+
+        assert [c.txn.id for c in offered] == [counterpart.id]
+
+        # The property itself: the row offered is a row the linker takes.
+        (only,) = offered
+        group = await txns.link_transfer(s, hh, subject.id, only.txn.id)
+        subject_group = (
+            await s.execute(
+                select(Transaction.transfer_group_id).where(Transaction.id == subject.id)
+            )
+        ).scalar_one()
+    assert no_pair == []
+    assert taken == []
+    assert subject_group == group.id
 
 
 async def test_candidates_offer_the_counterpart_and_nothing_else(household_factory):
@@ -426,6 +553,280 @@ async def test_hidden_rows_are_still_offered_as_candidates(household_factory):
         cands = await txns.list_transfer_candidates(s, hh, subject.id)
 
     assert [c.txn.id for c in cands] == [hidden.id]
+
+
+# ---- The auto-matcher (ADR-0049) ------------------------------------------
+#
+# `auto_match_transfers` had no test of its own until this section: the pairs it
+# links are exercised through sync. These pin the three rules the docstring states
+# — closest or none, a leg already linked is not free (including one this same pass
+# linked), and the picker's cap and ordering bound it — because the pass below them
+# was rewritten to discover candidates in one query instead of one per subject, and
+# the outcome has to be the same outcome.
+
+
+def _at(y, m, d, h):
+    return datetime(y, m, d, h, tzinfo=UTC)
+
+
+async def _linked_ids(session) -> set:
+    return set(
+        (await session.execute(
+            select(Transaction.id).where(Transaction.transfer_group_id.is_not(None))
+        )).scalars().all()
+    )
+
+
+async def test_the_auto_matcher_takes_the_closest_and_refuses_what_it_cannot_tell(
+    household_factory,
+):
+    """A household that moves $20k on two consecutive days, two more $900 out/in
+    within one day, and one $700 against two equally likely $700 deposits.
+
+    The first block is the docstring's own case — "each withdrawal has one deposit
+    on its own day and one a day off" — and the second is the sharper version of it:
+    the deposits are two hours either side of the withdrawals, so which one belongs
+    to which is decided by proximity and by what the pass has already taken, not by
+    the amount that happens to be equal. The caller's order decides that, which is
+    why it is given explicitly here rather than left to collection order.
+
+    The last block is a tie, and it is refused — **from the side that can see it**.
+    The withdrawal has two candidates an equal distance away, so the matcher cannot
+    tell which is the transfer and links neither. Its pass then reaches the first
+    deposit, which is a subject in its own right and has exactly one candidate; from
+    there the pair is not ambiguous, so it links. The refusal is per subject, not per
+    pair, and the outcome depends on the order the ids arrive in — that is the
+    behaviour here, and the reason the fixture states the order.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c = await _accounts(s, hh, "USD", "USD", "USD")
+        made = []
+
+        async def _mk(account, amount, when, description):
+            txn = await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=account.id, amount=D(amount), transacted_at=when,
+                description=description,
+            ))
+            made.append(txn)
+            return txn
+
+        # Two consecutive days, $20k each way: each withdrawal has a deposit on its
+        # own day (distance 0) and one a day off (distance 24h).
+        day1_out = await _mk(a, "-20000", _at(2026, 1, 10, 9), "To savings")
+        day1_in = await _mk(b, "20000", _at(2026, 1, 10, 9), "From checking")
+        day2_out = await _mk(a, "-20000", _at(2026, 1, 11, 9), "To savings")
+        day2_in = await _mk(b, "20000", _at(2026, 1, 11, 9), "From checking")
+        # A row only a careless matcher would pair with either of them: same date,
+        # opposite sign, wrong amount.
+        noise = await _mk(c, "5000", _at(2026, 1, 10, 9), "An unrelated deposit")
+
+        # Two withdrawals an hour apart, two deposits two hours apart. The first
+        # withdrawal's nearest deposit is taken; the second's only remaining deposit
+        # is an hour off — and that same deposit is *tied* with the other one for the
+        # first withdrawal, so which pair exists depends on the order.
+        near_out_1 = await _mk(a, "-900", _at(2026, 1, 20, 10), "Out 1")
+        near_out_2 = await _mk(a, "-900", _at(2026, 1, 20, 11), "Out 2")
+        near_in_1 = await _mk(b, "900", _at(2026, 1, 20, 10), "In 1")
+        near_in_2 = await _mk(b, "900", _at(2026, 1, 20, 12), "In 2")
+
+        # The tie: two identical deposits two hours either side of the withdrawal.
+        tie_out = await _mk(a, "-700", _at(2026, 1, 25, 12), "Out")
+        tie_in_1 = await _mk(b, "700", _at(2026, 1, 25, 10), "In a")
+        tie_in_2 = await _mk(b, "700", _at(2026, 1, 25, 14), "In b")
+
+        # Seen from the withdrawal, the two are interchangeable — the fixture says so
+        # rather than the test assuming it. (A third row is offered and does not
+        # match: the $900 deposit five days back, which is inside the window and the
+        # wrong amount.)
+        tie_view = await txns.list_transfer_candidates(s, hh, tie_out.id)
+        tie_matching = [c for c in tie_view if c.within_tolerance]
+        assert len(tie_matching) == 2
+        assert {c.txn.id for c in tie_matching} == {tie_in_1.id, tie_in_2.id}
+        gaps = [
+            abs((c.txn.transacted_at - tie_out.transacted_at).total_seconds())
+            for c in tie_matching
+        ]
+        # Equal to the second: a tie, which is what the matcher refuses on. Which of
+        # the two comes first in the list is decided by the query's last ordering key
+        # (their ids), so the two are compared as a set and not in order.
+        assert gaps[0] == gaps[1]
+
+        linked = await txns.auto_match_transfers(
+            s, hh,
+            [t.id for t in (day1_out, day1_in, day2_out, day2_in, noise,
+                            near_out_1, near_out_2, near_in_1, near_in_2,
+                            tie_out, tie_in_1, tie_in_2)],
+        )
+
+        groups = {}
+        for txn in made:
+            groups[txn.id] = (
+                await s.execute(
+                    select(Transaction.transfer_group_id).where(Transaction.id == txn.id)
+                )
+            ).scalar_one()
+
+    assert linked == 5
+    grouped = {txn_id: group for txn_id, group in groups.items() if group is not None}
+    assert set(grouped) == {
+        day1_out.id, day1_in.id, day2_out.id, day2_in.id,
+        near_out_1.id, near_in_1.id, near_out_2.id, near_in_2.id,
+        tie_out.id, tie_in_1.id,
+    }
+    # Every pair is its own group, and each group is exactly one pair.
+    assert len(set(grouped.values())) == 5
+    # The consecutive-day case pairs by proximity, not by the amount that happens to
+    # be equal: day 1 with day 1, day 2 with day 2.
+    assert grouped[day1_out.id] == grouped[day1_in.id]
+    assert grouped[day2_out.id] == grouped[day2_in.id]
+    # And the same-day case by the nearest, in the order the ids arrived: Out 1 takes
+    # the deposit on the same hour, which leaves Out 2 the one two hours later.
+    assert grouped[near_out_1.id] == grouped[near_in_1.id]
+    assert grouped[near_out_2.id] == grouped[near_in_2.id]
+    assert grouped[day1_out.id] != grouped[day2_out.id]
+
+    # The tie is linked from the deposit's side and not the withdrawal's, and the
+    # second deposit is left for a human — as is the wrong-amount row.
+    assert grouped[tie_out.id] == grouped[tie_in_1.id]
+    assert tie_in_2.id not in grouped
+    assert noise.id not in grouped
+
+
+async def test_the_auto_matcher_skips_a_leg_this_same_pass_linked(household_factory):
+    """A deposit that the pass has already linked is not free to be a subject.
+
+    The fixture is built so a matcher that re-examined it would not merely do
+    redundant work but pick a *different* pair: the deposit's only remaining
+    candidate is the second withdrawal, which the first withdrawal did not take.
+    The link guard would refuse that attempt anyway, so the pass has to know.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b = await _accounts(s, hh, "USD", "USD")
+        out_1 = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("-900"), transacted_at=_at(2026, 1, 20, 10)))
+        out_2 = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("-900"), transacted_at=_at(2026, 1, 20, 11)))
+        into = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=b.id, amount=D("900"), transacted_at=_at(2026, 1, 20, 10)))
+
+        linked = await txns.auto_match_transfers(s, hh, [out_1.id, into.id, out_2.id])
+        remaining = await _linked_ids(s)
+
+    assert linked == 1
+    assert remaining == {out_1.id, into.id}
+
+
+async def test_the_auto_matcher_is_bounded_by_the_pickers_cap(household_factory):
+    """The cap is a bound on the work the picker does, and the matcher is bound by it.
+
+    A matching row beyond the cap is not found — here the 25 offered rows are all the
+    wrong amount, and the exact counterpart sits just past them at five days out. The
+    same query with the cap lifted *does* include it, which is what makes this about
+    the cap rather than about the window or the amount rule.
+    """
+    hh = await household_factory(base="USD")
+    async with scoped_session(household_id=hh) as s:
+        a, b, c = await _accounts(s, hh, "USD", "USD", "USD")
+        subject = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=a.id, amount=D("-500"), transacted_at=_dt(2026, 1, 10)))
+        for _ in range(txns.CANDIDATE_LIMIT):
+            await txns.create_transaction(s, hh, TransactionCreate(
+                account_id=b.id, amount=D("400"), transacted_at=_dt(2026, 1, 10)))
+        distant = await txns.create_transaction(s, hh, TransactionCreate(
+            account_id=c.id, amount=D("500"), transacted_at=_dt(2026, 1, 15)))
+
+        capped = await txns.list_transfer_candidates(s, hh, subject.id)
+        uncapped = await txns.list_transfer_candidates(
+            s, hh, subject.id, limit=txns.CANDIDATE_LIMIT + 1
+        )
+        linked = await txns.auto_match_transfers(s, hh, [subject.id])
+
+        still_free = await _linked_ids(s)
+
+    assert len(capped) == txns.CANDIDATE_LIMIT
+    assert distant.id not in [c.txn.id for c in capped]
+    assert distant.id in [c.txn.id for c in uncapped]
+    assert linked == 0
+    assert still_free == set()
+
+
+async def test_the_pass_is_the_same_however_the_subjects_are_chunked(
+    household_factory, monkeypatch
+):
+    """The candidates are discovered a chunk of subjects at a time, not one at a time.
+
+    ``CANDIDATE_CHUNK`` is a transport detail — how many ids one query carries — and
+    it must not be part of the rule. The same fixture is built in a fresh household
+    at each chunk size, and the pairs that come out have to be the same ones. A chunk
+    of one *is* the per-subject discovery this replaced, so this is the two of them
+    answering one fixture the same way; four puts the whole fixture in one chunk, and
+    two and three cut across the only place it can go wrong: the second withdrawal's
+    nearest deposit is the one the first withdrawal has just taken, so a pass that
+    forgot what it had linked at a boundary would reach for a leg that is no longer
+    free — and ``link_transfer`` refuses those outright.
+
+    Both shapes of near-duplicate are here: the same amount on consecutive days,
+    where the pick is by distance, and two pairs inside one day an hour apart, where
+    the pick is by distance *and* by what the pass has already taken.
+    """
+
+    async def run(chunk: int) -> tuple[int, tuple]:
+        hh = await household_factory(base="USD")
+        async with scoped_session(household_id=hh) as s:
+            a, b = await _accounts(s, hh, "USD", "USD")
+            labels: dict = {}
+
+            async def _mk(account, amount, when, label):
+                txn = await txns.create_transaction(s, hh, TransactionCreate(
+                    account_id=account.id, amount=D(amount), transacted_at=when))
+                labels[txn.id] = label
+                return txn
+
+            # $20k each way on two consecutive days.
+            day1_out = await _mk(a, "-20000", _at(2026, 1, 10, 9), "day1 out")
+            day1_in = await _mk(b, "20000", _at(2026, 1, 10, 9), "day1 in")
+            day2_out = await _mk(a, "-20000", _at(2026, 1, 11, 9), "day2 out")
+            day2_in = await _mk(b, "20000", _at(2026, 1, 11, 9), "day2 in")
+            # $900 each way, two withdrawals an hour apart and two deposits two
+            # hours apart.
+            out_1 = await _mk(a, "-900", _at(2026, 1, 20, 10), "out 1")
+            out_2 = await _mk(a, "-900", _at(2026, 1, 20, 11), "out 2")
+            in_1 = await _mk(b, "900", _at(2026, 1, 20, 11), "in 1")
+            in_2 = await _mk(b, "900", _at(2026, 1, 20, 13), "in 2")
+
+            monkeypatch.setattr(txns, "CANDIDATE_CHUNK", chunk)
+            linked = await txns.auto_match_transfers(
+                s, hh,
+                [day1_out.id, day1_in.id, day2_out.id, day2_in.id,
+                 out_1.id, out_2.id, in_1.id, in_2.id],
+            )
+
+            groups: dict = {}
+            for txn_id, label in labels.items():
+                group = (
+                    await s.execute(
+                        select(Transaction.transfer_group_id).where(
+                            Transaction.id == txn_id
+                        )
+                    )
+                ).scalar_one()
+                if group is not None:
+                    groups.setdefault(group, []).append(label)
+            return linked, tuple(sorted(tuple(sorted(v)) for v in groups.values()))
+
+    expected = (
+        4,
+        (
+            ("day1 in", "day1 out"),
+            ("day2 in", "day2 out"),
+            ("in 1", "out 1"),
+            ("in 2", "out 2"),
+        ),
+    )
+    for chunk in (1, 2, 3, 4, 5, 8, txns.CANDIDATE_CHUNK):
+        assert await run(chunk) == expected, f"chunk size {chunk}"
 
 
 # ---- The wire contract ----------------------------------------------------

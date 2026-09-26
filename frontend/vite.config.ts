@@ -86,5 +86,11 @@ export default defineConfig({
     // — the import works, the tokens are simply absent, and `token()` throws
     // "Unknown design token" from whatever test happens to touch a chart.
     css: true,
+    // Vitest's 5 s default is tight for jsdom plus a real React render on a busy
+    // machine, where a test can be slow rather than stuck. 15 s still fails a
+    // genuine hang; it is a ceiling for the runner, not a fix for a slow test
+    // (#42 tracks that one).
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 });

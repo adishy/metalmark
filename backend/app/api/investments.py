@@ -13,7 +13,7 @@ for the reason in the service's module docstring.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -41,13 +41,6 @@ from app.services.errors import LedgerError
 router = APIRouter(prefix="/investments", tags=["investments"])
 
 _GROUP_PATTERN = "^(" + "|".join(ALLOCATION_GROUPS) + ")$"
-
-
-def _today() -> date:
-    # UTC, matching the ledger's own default. A "today" that depends on the
-    # server's local zone would make the same request value differently on two
-    # machines, and a snapshot written from it could land on the wrong day.
-    return datetime.now(UTC).date()
 
 
 def _holding_out(record: svc.HoldingRecord) -> HoldingOut:
@@ -322,7 +315,10 @@ async def portfolio(
 ):
     """Every investment account valued as of a date, with the pieces that could
     not be valued listed rather than counted as zero (ADR-0032 §5)."""
-    as_of = on or _today()
+    # "Today" is the ledger's today (`ledger_svc.today()`), not this router's own
+    # idea of it: the same request must value the same day everywhere, and a
+    # snapshot filed from a different "today" would land on the wrong day.
+    as_of = on or ledger_svc.today()
     base = await ledger_svc.base_currency(ctx.session, ctx.household_id)
     account_ids = {account_id} if account_id is not None else None
     valuations, total = await svc.value_portfolio(
@@ -350,7 +346,7 @@ async def allocation(
     portfolio, so a reader can see where all their money sits, not just the
     invested part of it.
     """
-    as_of = on or _today()
+    as_of = on or ledger_svc.today()
     base = await ledger_svc.base_currency(ctx.session, ctx.household_id)
     result = await svc.allocation(
         ctx.session, on=as_of, base_ccy=base, group_by=group_by,
