@@ -157,6 +157,35 @@ describe("the budgets tab", () => {
     expect(within(row).getByTestId("budget-edit-cat-fun").textContent).toBe("Set a budget");
   });
 
+  it("puts the figure beside what it is a share of at lg:, where the row is columns", () => {
+    renderTab();
+    const row = screen.getByTestId("budget-row-cat-food");
+    // §9.4: at `lg:` the row gains columns rather than height. The phone's first
+    // line is `contents` there, so the figure becomes a cell of the row's own
+    // grid — and the cell after it is the sentence that qualifies it.
+    expect(row.className).toContain("lg:grid");
+    // The widths themselves live in `ROW_COLUMNS`; what matters here is that the
+    // row *is* a column layout above `lg:` rather than a stack.
+    expect(row.className).toContain("lg:grid-cols-[");
+    const figure = screen.getByTestId("budget-spent-cat-food");
+    expect(figure.parentElement?.className).toContain("lg:contents");
+    // The sentence is one cell, so no row width can come between "$450.00" and
+    // "of $400.00 planned for Sep 2026": the amount ends the cell before it and
+    // the sentence is the whole of the next one.
+    expect(figure.nextElementSibling).toBeNull();
+    const qualifier = figure.parentElement?.nextElementSibling as HTMLElement;
+    expect(qualifier.textContent).toBe("of $400.00 planned for Sep 2026");
+
+    // The row with no plan keeps its missing bar as a *missing bar*: its
+    // sentence takes the columns the plan, the bar and the difference would have
+    // used, rather than leaving a gap where a track would read as empty.
+    const noPlan = screen.getByTestId("budget-noplan-cat-fun");
+    expect(noPlan.className).toContain("lg:col-span-3");
+    expect(
+      within(screen.getByTestId("budget-row-cat-fun")).queryByTestId("budget-bar-cat-fun"),
+    ).toBeNull();
+  });
+
   it("writes the plan for the month on screen, in the month's own period key", async () => {
     const user = userEvent.setup();
     renderTab();

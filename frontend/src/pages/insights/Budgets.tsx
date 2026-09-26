@@ -280,6 +280,39 @@ function Figure({
 }
 
 /**
+ * The row's columns at `lg:` (§9.4), written once because Tailwind reads source
+ * *text* — `grid-cols-${n}` is never generated, and the failure is silent (the
+ * row collapses to one column and still renders, just wrong).
+ *
+ * A row here is a sentence: **the figure, then what it is a share of**. On a
+ * phone those are two lines and the sentence reads straight down them, because
+ * both lines are short. At 1280 the same two lines were 1100 px apart — the
+ * figure at the right edge of the first, its "of $1,000.00 planned for Sep 2026"
+ * at the left edge of the second — and a sentence has to be read, not
+ * reassembled. So the figure gets a column of its own (7rem, right-aligned, so
+ * the amounts decimal-align down the list) and its qualifier the column
+ * immediately after it: 16 px apart at every width above `lg:`, and nothing can
+ * be inserted between them because a column boundary is where that cell *ends*.
+ *
+ * The name and the qualifier are the two columns that take what is left over,
+ * and they do not take it evenly: `0.6fr` against `1.4fr`, because a category
+ * name is a short label ("Public Transit") and the qualifier is the sentence the
+ * row exists to say. Evenly split, at 1024 px the sentence lost a word to the
+ * next line — "…planned for Sep / 2026" — for no gain to the name. Nothing is
+ * truncated either way: §6.5 gives way to a second line, never to an ellipsis
+ * over a number. The bar, the difference sentence and the action are
+ * fixed-width or content-sized, so the columns that matter line up down the
+ * list; the action is last, so its own width — "Edit" against "Set a budget" —
+ * shifts nothing but itself.
+ *
+ * `minmax(0,…)` rather than `1fr` because a grid item's default `min-width:
+ * auto` refuses to shrink below its content, which is how one long category
+ * name pushes a row into sideways scroll (§5).
+ */
+const ROW_COLUMNS =
+  "lg:grid-cols-[minmax(0,0.6fr)_7rem_minmax(0,1.4fr)_9rem_13rem_max-content] lg:gap-x-4";
+
+/**
  * One category: what was spent, what was planned, and which way the difference
  * points.
  *
@@ -288,6 +321,14 @@ function Figure({
  * overflowing the card, and the sentence below already says the amount over. It
  * is `aria-hidden` because it carries no information the two figures and the
  * sentence do not (§2.9 — a picture is never the only way to read a value).
+ *
+ * At `lg:` the row gains columns rather than height (§9.4): the phone's stacked
+ * lines become cells of one grid, one line tall, and the row is *shorter* than
+ * its phone form — never under 48 px, because §5's 44 px target rule is not a
+ * touch-only rule. One tree, two layouts: the phone's first line is `contents`
+ * at `lg:` and stops being layout, which promotes the name and the figure to
+ * cells of the row's own grid (§9 — no second tree to drift, and the row's
+ * accessible text is the same at both widths).
  *
  * The three states a row can be in, and what each says:
  *
@@ -328,14 +369,25 @@ function BudgetLine({
   const over = row.budget !== null && differenceMinor > 0;
 
   return (
-    <li className="space-y-1 py-3" data-testid={`budget-row-${row.category_id}`}>
-      <div className="flex items-baseline justify-between gap-3">
+    <li
+      className={`space-y-1 py-3 lg:grid lg:min-h-12 lg:items-center lg:space-y-0 lg:py-2 ${ROW_COLUMNS}`}
+      data-testid={`budget-row-${row.category_id}`}
+    >
+      {/* Phone: the name and the figure share a line, `justify-between`, so the
+          row opens with its subject and its amount. At `lg:` this wrapper is
+          `contents` — it stops being layout and its two children become cells of
+          the row's own grid, the name in the first column and the figure in the
+          second, immediately left of the sentence that qualifies it. The amount
+          is right-aligned in its column so the figures decimal-align down the
+          list (§6.1), which is also what the phone line does with one figure on
+          it. */}
+      <div className="flex items-baseline justify-between gap-3 lg:contents">
         <span className="min-w-0 text-sm">
           {row.category_icon ? `${row.category_icon} ` : ""}
           {row.category_name}
         </span>
         <span
-          className="shrink-0 text-base font-semibold text-fg"
+          className="shrink-0 text-base font-semibold text-fg lg:text-right"
           data-testid={`budget-spent-${row.category_id}`}
         >
           {formatMoney(row.spent, ccy)}
@@ -343,12 +395,19 @@ function BudgetLine({
       </div>
 
       {row.budget === null ? (
-        <p className="text-xs text-fg-muted" data-testid={`budget-noplan-${row.category_id}`}>
+        // The sentence takes the three columns the plan, the bar and the
+        // difference would have used, so it is never squeezed into the width of
+        // one of them — and the bar it does not have leaves no gap that reads as
+        // a bar at zero.
+        <p
+          className="min-w-0 text-xs text-fg-muted lg:col-span-3"
+          data-testid={`budget-noplan-${row.category_id}`}
+        >
           No plan for {monthLabel} — this is spending nothing has been budgeted for.
         </p>
       ) : (
         <>
-          <p className="text-xs text-fg-muted">
+          <p className="min-w-0 text-xs text-fg-muted">
             of{" "}
             <span className="font-medium text-fg" data-testid={`budget-planned-${row.category_id}`}>
               {formatMoney(row.budget, ccy)}
