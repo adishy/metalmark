@@ -13,7 +13,7 @@
 // So this asserts the format, not just that a colour came back — a string that
 // starts with "rgb(" and looks right is exactly the failure mode.
 import { describe, expect, it } from "vitest";
-import { chartTokens, token } from "./chartTokens";
+import { chartTokens, token, tokenHex } from "./chartTokens";
 
 /** Comma-separated `rgb()`/`rgba()`, which is all zrender's parser accepts. */
 const PARSEABLE = /^rgba?\(\d+, ?\d+, ?\d+(, ?[\d.]+)?\)$/;
@@ -33,6 +33,16 @@ describe("chart token colours", () => {
     // spaced form with a slash — is unparseable for the same reason.
     expect(token("accent", 0.15)).toMatch(PARSEABLE);
     expect(token("accent", 0.15)).toContain("rgba(");
+  });
+
+  it("hands a colour over for storage as #rrggbb", () => {
+    // The other direction, and the opposite strictness: what the colour picker
+    // writes into `categories.color` is a stored value, so it is a six-digit
+    // lower-case hex and never the "R G B" triplet the variables hold. A
+    // missing token is `null`, not a throw — the picker has a caller that can
+    // do without it, and this one runs during the first render.
+    expect(tokenHex("chart-1")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(tokenHex("not-a-token")).toBeNull();
   });
 
   it("still fails loudly on a token that does not exist", () => {

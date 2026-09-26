@@ -9,6 +9,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import Chart from "@/components/Chart";
+import ColorPicker from "@/components/ColorPicker";
 import Dialog from "@/components/Dialog";
 import OwnerFilterChips from "@/components/OwnerFilterChips";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -26,7 +27,7 @@ import {
 } from "@/components/form";
 import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
-import { token, useChartTokens } from "@/theme/chartTokens";
+import { token, tokenHex, useChartTokens } from "@/theme/chartTokens";
 import {
   barEndRadius,
   chartArea,
@@ -238,6 +239,10 @@ export default function DesignSystem() {
   const [checks, setChecks] = useState({ a: true, b: false });
   const [picked, setPicked] = useState("");
   const [pickedErr, setPickedErr] = useState("");
+  // Seeded from a token, never from a literal: this file is one of the three
+  // design-lint §8.5 reads for hardcoded hex, and a demo value is exactly the
+  // kind of "just this once" that would make the rule meaningless.
+  const [swatch, setSwatch] = useState(() => tokenHex("chart-5") ?? "");
   const ids = {
     text: useFieldId("ds-text"),
     money: useFieldId("ds-money"),
@@ -545,6 +550,27 @@ export default function DesignSystem() {
         <p className="text-xs text-fg-muted">
           A tag or badge always carries its text. The <code>categories.color</code> column is for
           charts and icons, never the only rendering of a category.
+        </p>
+      </Section>
+
+      <Section
+        title="Colour picker"
+        note="The ten swatches are the chart tokens, read at runtime — a swatch is the colour this theme's charts are drawn in. What a pick *stores* is a value, not a token, so the last control keeps any colour reachable."
+      >
+        <ColorPicker
+          label="Colour"
+          value={swatch}
+          onChange={setSwatch}
+          testid="ds-color"
+        />
+        <p className="text-xs text-fg-muted">
+          Each swatch is the <code>type="radio"</code> itself, restyled rather than replaced, so the
+          arrow keys, the checked state and the announced name (“Teal, 1 of 11”) come from the
+          platform rather than from here. The selection is marked by an outline <em>outside</em> the
+          swatch: a tick drawn on top of it would have to be white or black, and this palette holds
+          both pale amber and near-black teal. The value is also written out under the strip — a
+          ring says “one of these” to a sighted user and nothing at all to anyone else, and a
+          category’s colour is never the only rendering of it (§4.5).
         </p>
       </Section>
 

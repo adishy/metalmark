@@ -106,9 +106,32 @@ test("add, rename and delete a category in settings", async ({ page }) => {
   // group's type, because a category's type is its group's and the reports read
   // it. Anything else would be a list of one.
   const spare = `Pumps ${run}`;
+  // The colour is picked from the palette rather than typed into a raw colour
+  // input: ten named swatches, each one a token read at runtime. Pink, so the
+  // assertion below is about a colour that *was* picked — the default is the
+  // first swatch, and a test that never moved it would pass on a picker that
+  // ignored the click.
   await page.getByTestId("category-name").fill(name);
+  await page.getByRole("radio", { name: "Pink" }).check();
+  await expect(page.getByTestId("category-color-current")).toHaveText(/^Selected: Pink · /);
+  const picked = await page
+    .getByRole("radio", { name: "Pink" })
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
   await page.getByTestId("category-save").click();
   await expect(page.getByTestId("category-list")).toContainText(name);
+  // What was picked is what was stored: the dot beside the new category's name
+  // is the colour of the swatch that was clicked, read back from the server
+  // rather than from the form's own state. Compared against the swatch's own
+  // computed style, so a palette change moves both and only a broken round trip
+  // fails.
+  // `.last()` because the rows are nested inside the group's own <li>, so the
+  // group matches `hasText` too — the same scoping the rename below uses.
+  await expect(
+    page
+      .locator('[data-testid="category-list"] li', { hasText: name })
+      .last()
+      .locator('[data-testid^="category-dot-"]'),
+  ).toHaveCSS("background-color", picked);
   await page.getByTestId("category-name").fill(spare);
   await page.getByTestId("category-save").click();
   await expect(page.getByTestId("category-list")).toContainText(spare);

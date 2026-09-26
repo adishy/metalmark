@@ -55,7 +55,9 @@ import ConnectionBadge from "@/components/ConnectionBadge";
 import Dialog from "@/components/Dialog";
 import IncomeDialog from "@/components/IncomeDialog";
 import { connectionName } from "@/lib/bankFreshness";
+import ColorPicker from "@/components/ColorPicker";
 import { CloseIcon } from "@/components/icons";
+import { tokenHex } from "@/theme/chartTokens";
 import { Day, Instant } from "@/components/datetime";
 import ScrollTabs from "@/components/ScrollTabs";
 import type {
@@ -547,7 +549,13 @@ function CategoriesSection() {
   const [gType, setGType] = useState("expense");
   const [cName, setCName] = useState("");
   const [cGroup, setCGroup] = useState("");
-  const [cColor, setCColor] = useState("#14b8a6");
+  // The picker's default is the first entry in its own palette, read from the
+  // tokens rather than written out: a literal teal would open the picker on
+  // "Custom" in one of the two themes, and a new category opening on a colour
+  // that is not one of the ten reads as a bug. The fallback is the colour this
+  // form used before there was a palette, for a document that cannot resolve
+  // the custom properties at all.
+  const [cColor, setCColor] = useState(() => tokenHex("chart-1") ?? "#14b8a6");
   const [cIcon, setCIcon] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [cErr, setCErr] = useState<string | null>(null);
@@ -563,7 +571,6 @@ function CategoriesSection() {
     gType: useFieldId("group-type"),
     cName: useFieldId("cat-name"),
     cGroup: useFieldId("cat-group"),
-    cColor: useFieldId("cat-color"),
     cIcon: useFieldId("cat-icon"),
   };
 
@@ -621,8 +628,15 @@ function CategoriesSection() {
       </Card>
 
       <Card title="Add category">
+        {/* Three fields, then the colour strip across the full width, then the
+            button on its own row. The order is the reading order *and* the tab
+            order, which a one-row grid cannot give: the picker is a fieldset of
+            eleven targets and does not fit in a fifth of a 616 px form.
+            The button's row follows the picker rather than sitting in the first
+            row as a fifth cell, which is also what fixed it — see the note on
+            the Emoji field. */}
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-5"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-3"
           data-testid="add-category-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -658,12 +672,23 @@ function CategoriesSection() {
               data-testid="category-group"
             />
           </Field>
-          <Field label="Emoji" htmlFor={ids.cIcon} hint="Optional, e.g. 🛒">
-            <Input id={ids.cIcon} value={cIcon} maxLength={16} onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
+          {/* The example moved from `hint` into the placeholder. A hint is a
+              second line under the control, so this one column was 20 px taller
+              than the rest of the row — and the button, bottom-aligned in its
+              own cell, was pushed to the bottom of the tallest cell. That is
+              the misalignment: the button sat 20 px below the inputs it was
+              supposed to line up with. An example is not a hint (§4.14) and
+              does not need a line of its own. */}
+          <Field label="Emoji" htmlFor={ids.cIcon}>
+            <Input id={ids.cIcon} value={cIcon} maxLength={16} placeholder="🛒" onChange={(e) => setCIcon(e.target.value)} data-testid="category-icon" />
           </Field>
-          <Field label="Color" htmlFor={ids.cColor}>
-            <Input id={ids.cColor} type="color" value={cColor} onChange={(e) => setCColor(e.target.value)} data-testid="category-color" className="h-10 p-1" />
-          </Field>
+          <ColorPicker
+            className="sm:col-span-3"
+            label="Color"
+            value={cColor}
+            onChange={setCColor}
+            testid="category-color"
+          />
           <div className="flex items-end">
             <Button type="submit" disabled={createCat.isPending || !groups.data?.length} data-testid="category-save">Add category</Button>
           </div>
@@ -782,7 +807,11 @@ function CategoryRow({
           <span
             className="inline-block h-3 w-3 shrink-0 rounded-full"
             style={{ background: category.color ?? "#64748b" }}
+            // Decorative: the name beside it is the label (§4.5). Only the
+            // colour picker's e2e has anything to say about it, which is that
+            // the swatch that was clicked is the colour that came back.
             aria-hidden="true"
+            data-testid={`category-dot-${category.id}`}
           />
         )}
         <span className="min-w-0 flex-1 truncate text-fg">{category.name}</span>
@@ -1064,16 +1093,19 @@ function TagsSection() {
   const createTag = useCreateTag();
   const delTag = useDeleteTag();
   const [name, setName] = useState("");
-  const [color, setColor] = useState("#38bdf8");
+  // The same rule as the category form's default, one palette slot along: a tag
+  // has no emoji to carry it, so its colour is the whole of its identity.
+  const [color, setColor] = useState(() => tokenHex("chart-2") ?? "#38bdf8");
   const [err, setErr] = useState<string | null>(null);
   const nameId = useFieldId("tag-name");
-  const colorId = useFieldId("tag-color");
 
   return (
     <div className="space-y-4">
       <Card title="Add tag">
+        {/* One column at every width: a tag is a name and a colour, and the
+            picker's strip needs the full width to stay on one line. */}
         <form
-          className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+          className="grid grid-cols-1 gap-3"
           data-testid="add-tag-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -1086,9 +1118,12 @@ function TagsSection() {
           <Field label="Tag name" htmlFor={nameId} required error={err}>
             <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} data-testid="tag-name" />
           </Field>
-          <Field label="Color" htmlFor={colorId}>
-            <Input id={colorId} type="color" value={color} onChange={(e) => setColor(e.target.value)} data-testid="tag-color" className="h-10 p-1" />
-          </Field>
+          <ColorPicker
+            label="Color"
+            value={color}
+            onChange={setColor}
+            testid="tag-color"
+          />
           <div className="flex items-end">
             <Button type="submit" disabled={createTag.isPending} data-testid="tag-save">Add tag</Button>
           </div>
