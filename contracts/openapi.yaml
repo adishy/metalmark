@@ -917,6 +917,182 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /budgets:
+    get:
+      tags:
+      - budgets
+      summary: Budget Report
+      description: 'The period''s plans, and every figure they are read against.
+
+
+        ``spent`` on each row is the Spending report''s figure for the same window,
+
+        and ``total_spent`` is that report''s total to the cent — a test holds them
+
+        equal, because a budget bar that disagrees with the report printed beside it
+
+        is the one outcome this feature must not have. Spend with no category at all
+
+        is not a row; it is ``unbudgeted_spent``, named rather than dropped.
+
+
+        ``period`` defaults to the current month so a reader can open the page and
+
+        see "this month" without working out what month it is in the household''s
+
+        timezone — a subscription the server already pays for everywhere else.'
+      operationId: budget_report_budgets_get
+      parameters:
+      - name: period
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Any day in the period; defaults to this month
+          title: Period
+        description: Any day in the period; defaults to this month
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetReport'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /budgets/{category_id}:
+    put:
+      tags:
+      - budgets
+      summary: Set Budget
+      description: 'Set or replace one category''s plan for one period.
+
+
+        Idempotent on the pair, so a retry after a dropped response is not a second
+
+        budget. Only an **expense** category is accepted — ``spending_by_category``
+
+        counts money out, so a plan on an income category would be compared against
+
+        a quantity the report does not compute — and the 422 says which type the
+
+        category actually is rather than a generic refusal.'
+      operationId: set_budget_budgets__category_id__put
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: period
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Any day in the period; defaults to this month
+          title: Period
+        description: Any day in the period; defaults to this month
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetSet'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - budgets
+      summary: Clear Budget
+      description: 'Remove one category''s plan for one period.
+
+
+        Clearing one that was never set is a **204, not a 404**: the state the caller
+
+        asked for is the state that holds. A category that does not exist is still a
+
+        404, because that is a wrong id rather than a request to remove nothing.
+
+
+        Nothing in the ledger moves. A plan is a statement about a period, and
+
+        removing it does not un-spend the money.'
+      operationId: clear_budget_budgets__category_id__delete
+      parameters:
+      - name: category_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Category Id
+      - name: period
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          description: Any day in the period; defaults to this month
+          title: Period
+        description: Any day in the period; defaults to this month
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /owners:
     get:
       tags:
@@ -5285,6 +5461,165 @@ components:
       required:
       - file
       title: Body_preview_ofx_import_ofx_preview_post
+    BudgetOut:
+      properties:
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+        period:
+          type: string
+          format: date
+          title: Period
+        amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+      type: object
+      required:
+      - category_id
+      - period
+      - amount
+      title: BudgetOut
+      description: 'One stored plan, as written. Echoes ``period`` so a client that sent a
+
+        month knows the row it got is keyed on the month it meant.'
+    BudgetReport:
+      properties:
+        base_currency:
+          type: string
+          title: Base Currency
+        period_start:
+          type: string
+          format: date
+          title: Period Start
+        period_end:
+          type: string
+          format: date
+          title: Period End
+        rows:
+          items:
+            $ref: '#/components/schemas/BudgetRow'
+          type: array
+          title: Rows
+        total_budget:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Budget
+        total_spent:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Spent
+        budgeted_spent:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Budgeted Spent
+        unbudgeted_spent:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Unbudgeted Spent
+        attribution:
+          type: string
+          title: Attribution
+          default: row
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          default: []
+      type: object
+      required:
+      - base_currency
+      - period_start
+      - period_end
+      - rows
+      - total_budget
+      - total_spent
+      - budgeted_spent
+      - unbudgeted_spent
+      title: BudgetReport
+      description: "One period, whole: every plan, and every figure the plans are read against.\n\n**The\
+        \ window is stated, both ends.** A figure that says what was spent\nwithout saying over what window\
+        \ is the exact bug this app has been burned\nby, so ``period_start`` and ``period_end`` are required\
+        \ fields and every\nsurface that shows a number from here shows the period with it.\n\nThe three\
+        \ totals partition each other:\n\n* ``total_spent`` — everything ``/reports/spending`` reports\
+        \ for the same\n  window, to the cent, including spend no plan can cover.\n* ``budgeted_spent``\
+        \ — the part of it that falls on a planned category.\n* ``unbudgeted_spent`` — the rest: unplanned\
+        \ categories, uncategorized rows\n  and investment events. Surfaced rather than hidden, because\
+        \ a budget\n  screen that silently omits spend is a budget screen that lies.\n* ``total_budget``\
+        \ — the plans added up. Not comparable to ``total_spent``\n  by itself: ``total_spent`` includes\
+        \ categories with no plan, which is why\n  ``unbudgeted_spent`` sits beside them."
+    BudgetRow:
+      properties:
+        category_id:
+          type: string
+          format: uuid
+          title: Category Id
+        category_name:
+          type: string
+          title: Category Name
+        category_icon:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category Icon
+        budget:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Budget
+        spent:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Spent
+      type: object
+      required:
+      - category_id
+      - category_name
+      - spent
+      title: BudgetRow
+      description: 'One category''s line in the period: the plan, the spend, or both.
+
+
+        Every row carries a real category — ``category_id`` is never null. Spend
+
+        that has no category at all (uncategorized, and the investment events the
+
+        spending report names for what they were) is not a line here: it rolls into
+
+        ``BudgetReport.unbudgeted_spent``, because there is no category to show it
+
+        beside and inventing one would be inventing a row.
+
+
+        ``budget`` is null for a category the household has not planned for. That is
+
+        a **state**, not a missing value: the row is there because the category has
+
+        spend, and the app says "no budget" rather than showing a bar of zero.'
+    BudgetSet:
+      properties:
+        amount:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          title: Amount
+      type: object
+      required:
+      - amount
+      title: BudgetSet
+      description: 'The body of a ``PUT``: the whole of what a budget is.
+
+
+        There is no partial form. A budget is one number, and "change it to X" is
+
+        the only edit there is — which is also why the route is idempotent on
+
+        ``(category_id, period)`` rather than a patch of a row id.'
     CashFlowPoint:
       properties:
         date:

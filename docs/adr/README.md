@@ -153,3 +153,4 @@ current spelling is the one the wider self-hosting tooling looks for.
 | [0054](0054-allocation-counts-bank-cash.md) | Allocation counts bank cash | Accepted |
 | [0056](0056-a-split-is-exact-in-both-modes.md) | A split is exact in both modes | Accepted |
 | [0057](0057-review-is-a-deck-on-a-phone-and-a-table-at-lg.md) | Review is a deck on a phone and a triage table at `lg:` — §9's one recorded exception | Accepted |
+| [0058](0058-a-budget-is-a-plan-for-one-period.md) | A budget is a plan for one category in one period, compared to the spending report | Accepted |

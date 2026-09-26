@@ -1,6 +1,7 @@
 """SQLAlchemy models. Import all here so Alembic sees the full metadata."""
 
 from app.models.agent import AgentToken  # noqa: F401
+from app.models.budgets import Budget  # noqa: F401
 from app.models.fx import FxRate  # noqa: F401
 from app.models.identity import (  # noqa: F401
     Household,
@@ -35,6 +36,7 @@ from app.models.sync import SyncJob, SyncRun, SyncRunEvent  # noqa: F401
 
 __all__ = [
     "AgentToken",
+    "Budget",
     "FxRate",
     "Household",
     "HouseholdMember",
