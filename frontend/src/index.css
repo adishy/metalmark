@@ -18,8 +18,8 @@
  *     3.75 dark), which is what this replaced.
  *   - `border-strong` is a control boundary, so it must clear 3:1 (1.4.11) —
  *     4.07:1 light, 3.07:1 dark. `border` is decorative and has no minimum.
- *   - `accent` flips *value*, not just shade: teal-500 is 7.17:1 on the dark
- *     surface but 2.49:1 on white, so light uses teal-700.
+ *   - `accent` flips *value*, not just shade: teal-500 is 6.92:1 on the dark
+ *     card but 2.49:1 on white, so light uses teal-700.
  *
  * The three surfaces are one ramp, and it is bounded in both themes. Light:
  * `warning` is 4.54:1 on the page and 4.30:1 on a well, so the page cannot go
@@ -78,12 +78,12 @@
   --fg-muted: 148 163 184; /* slate-400  */
   --accent: 45 212 191; /* teal-400   */
   --accent-fg: 2 6 23; /* slate-950  */
-  --accent-ink: 45 212 191; /* the accent already clears 6.3:1 on its tint */
+  --accent-ink: 45 212 191; /* the accent already clears 6.04:1 on its tint */
   --positive: 52 211 153; /* emerald-400 */
   --negative: 248 113 113; /* red-400    */
   --negative-ink: 248 113 113;
   --warning: 251 191 36; /* amber-400  */
-  --warning-ink: 251 191 36; /* 6.9:1 on its tint already */
+  --warning-ink: 251 191 36; /* 6.61:1 on its tint already */
   --danger: 185 28 28; /* same fill in both themes */
   --focus: 45 212 191; /* teal-400   */
 
