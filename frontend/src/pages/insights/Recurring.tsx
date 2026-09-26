@@ -315,25 +315,37 @@ function SuggestionRow({
 }) {
   const create = useCreateRecurring();
   return (
-    <li className="flex flex-wrap items-center gap-2 py-3" data-testid={`suggestion-${suggestion.transaction_id}`}>
-      <div className="min-w-0 flex-1">
+    // §5's phone row with two actions and an amount in it: the name and its one
+    // meta line take the full width, so a long merchant wraps as words rather
+    // than one per line, and the amount and the Review/Track it pair follow on
+    // the next line — the pair right-aligned like every amount in every list
+    // (§6.1), with a wider gutter on the phone so the money and the button
+    // beside it never read as one string. From `sm:` up the block takes the free
+    // space instead and this is the one-line row it always was, gaps included.
+    <li
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 sm:gap-x-2"
+      data-testid={`suggestion-${suggestion.transaction_id}`}
+    >
+      <div className="w-full min-w-0 sm:w-auto sm:flex-1">
         <p className="text-sm font-medium text-fg">{suggestion.name}</p>
-        <p className="text-xs text-fg-muted">
+        <p className="whitespace-nowrap text-xs text-fg-muted">
           {CADENCE_LABEL[suggestion.cadence]} · {suggestion.occurrences} seen, last{" "}
           <Day value={suggestion.last_date} style="compact" />
         </p>
       </div>
-      <span className="text-base font-semibold text-fg">
+      <span className="ml-auto shrink-0 text-right text-base font-semibold text-fg">
         {formatMoney(suggestion.amount, suggestion.currency)}
       </span>
       <Button
         variant="secondary"
+        className="shrink-0"
         onClick={onPick}
         data-testid={`suggestion-edit-${suggestion.transaction_id}`}
       >
         Review
       </Button>
       <Button
+        className="shrink-0"
         disabled={create.isPending}
         onClick={() =>
           create.mutate({
