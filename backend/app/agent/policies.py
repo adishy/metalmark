@@ -533,6 +533,7 @@ register(
     as_of=K,
     base_currency=CUR,
     group_by=Code("security", "type", "account", "currency"),
+    include_cash_accounts=K,
     total_base=K,
     rows=N,
     unpriced_positions=K,
@@ -546,6 +547,19 @@ register(
     value_base=K,
     percent=K,
     holdings=K,
+    sources=N,
+)
+register(
+    inv.AllocationSourceOut,
+    account_id=K,
+    account_name=Pseudonym("Account"),
+    institution=Pseudonym("Institution"),
+    value_base=K,
+    share_of_group=K,
+    quantity=K,
+    price=K,
+    price_currency=CUR,
+    price_date=K,
 )
 
 # ---- checks, connections, sync --------------------------------------------------

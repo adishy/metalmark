@@ -3582,10 +3582,16 @@ paths:
       tags:
       - investments
       summary: Allocation
-      description: 'The consolidated cross-account allocation (ADR-0011).
+      description: 'The consolidated cross-account allocation (ADR-0011, ADR-0054).
 
 
-        Unpriced positions are counted separately and never folded into a row as zero.'
+        Unpriced positions are counted separately and never folded into a row as zero.
+
+        ``include_cash_accounts`` folds the household''s bank balances in beside the
+
+        portfolio, so a reader can see where all their money sits, not just the
+
+        invested part of it.'
       operationId: allocation_investments_allocation_get
       parameters:
       - name: 'on'
@@ -3605,6 +3611,13 @@ paths:
           pattern: ^(security|type|account|currency)$
           default: security
           title: Group By
+      - name: include_cash_accounts
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Cash Accounts
       - name: metalmark_session
         in: cookie
         required: false
@@ -4672,6 +4685,9 @@ components:
         group_by:
           type: string
           title: Group By
+        include_cash_accounts:
+          type: boolean
+          title: Include Cash Accounts
         total_base:
           type: string
           pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
@@ -4697,6 +4713,7 @@ components:
       - as_of
       - base_currency
       - group_by
+      - include_cash_accounts
       - total_base
       - rows
       - unpriced_positions
@@ -4722,6 +4739,12 @@ components:
         holdings:
           type: integer
           title: Holdings
+        sources:
+          items:
+            $ref: '#/components/schemas/AllocationSourceOut'
+          type: array
+          title: Sources
+          default: []
       type: object
       required:
       - key
@@ -4730,6 +4753,63 @@ components:
       - percent
       - holdings
       title: AllocationRowOut
+    AllocationSourceOut:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        account_name:
+          type: string
+          title: Account Name
+        institution:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Institution
+        value_base:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Value Base
+        share_of_group:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Share Of Group
+        quantity:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Quantity
+        price:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Price
+        price_currency:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Price Currency
+        price_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Price Date
+      type: object
+      required:
+      - account_id
+      - account_name
+      - value_base
+      - share_of_group
+      title: AllocationSourceOut
+      description: 'One account''s contribution to an allocation row (ADR-0054) — what lets the
+
+        UI answer "which accounts is this made of" for a row that can be one holding,
+
+        several accounts'' cash, or both.'
     AutoCategorizeResult:
       properties:
         examined:

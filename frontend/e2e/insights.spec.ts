@@ -146,3 +146,44 @@ test("/reports redirects to Insights' Overview tab, carrying its query string", 
   await expect(page.getByTestId("report-net-worth")).toBeVisible();
   await expect(page.getByTestId("insights-tab-overview")).toHaveAttribute("aria-selected", "true");
 });
+
+// The Allocations tab (ADR-0054) is the only surface whose whole point is the
+// round trip the component tests cannot make: `useAllocation(groupBy,
+// includeCashAccounts)` against a real server, the toggle changing what that
+// server counts, and `sources` coming back named. The component test stubs the
+// hook entirely — rightly, it owns the call — so this is the only place that
+// proves the request the UI sends and the rows the API answers with line up.
+//
+// The seeded household has bank accounts and no investment accounts, which is
+// exactly the case ADR-0054 was written for: with the toggle on there is a
+// "Cash" row to read and to tap, and with it off the portfolio is empty.
+test("allocations counts bank cash when asked and names its sources on tap", async ({ page }) => {
+  await login(page);
+  await page.goto("/insights/allocations");
+
+  await expect(page.getByTestId("insights-tab-allocations")).toHaveAttribute("aria-selected", "true");
+  // The toggle defaults on (ADR-0054: the household's own choice, remembered),
+  // so the seeded bank balances are the allocation from the first paint.
+  await expect(page.getByTestId("allocation-include-cash")).toBeChecked();
+  const cashRow = page.getByTestId("allocation-row-cash");
+  await expect(cashRow).toHaveText(/Cash/);
+
+  // Off: the same household has no positions to allocate, and the page says so
+  // rather than showing an empty total. This is the flag reaching the server and
+  // back — a UI that ignored it would leave the Cash row standing.
+  await page.getByTestId("allocation-include-cash").click();
+  await expect(page.getByTestId("allocation-empty")).toHaveText(/No holdings yet/);
+
+  // On again, and tap through: the sheet names which accounts the row is made
+  // of — the seeded household's bank accounts, not a holdings list it has none of.
+  await page.getByTestId("allocation-include-cash").click();
+  await cashRow.click();
+  const sources = page.getByTestId("allocation-detail-sources");
+  await expect(sources).toContainText("Everyday Checking");
+  await expect(sources).toContainText("High-Yield Savings");
+  await expect(sources).toContainText("Euro Savings");
+
+  // Each source is a way back to Accounts, so the trail from "where is our
+  // money" to the accounts themselves is one tap, not a navigation hunt.
+  await expect(page.getByTestId("allocation-detail-close")).toBeVisible();
+});

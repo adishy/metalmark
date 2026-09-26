@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Account, Allocation, Owner, Portfolio } from "@/api/types";
+import type { Account, Owner, Portfolio } from "@/api/types";
 import Accounts from "@/pages/Accounts";
 import { formatMoney } from "@/lib/format";
 import { todayIso } from "@/lib/dates";
@@ -11,7 +12,6 @@ import { todayIso } from "@/lib/dates";
 // are never driven here, but the page calls them on every render and they reach the
 // network through TanStack Query otherwise.
 const h = vi.hoisted(() => ({
-  allocation: vi.fn(),
   portfolio: vi.fn(),
   holdings: vi.fn(),
   create: vi.fn(),
@@ -25,7 +25,6 @@ vi.mock("@/api/investments", async () => {
   const actual = await vi.importActual<typeof import("@/api/investments")>("@/api/investments");
   return {
     ...actual,
-    useAllocation: () => h.allocation(),
     usePortfolio: () => h.portfolio(),
     useHoldings: () => h.holdings(),
   };
@@ -123,17 +122,6 @@ const NET_WORTH = {
   unconverted_currencies: [],
 } as unknown as ReturnType<typeof import("@/api/hooks").useNetWorth>["data"];
 
-const ALLOCATION = {
-  as_of: "2026-09-20",
-  base_currency: "USD",
-  group_by: "security",
-  total_base: "3000.00",
-  rows: [{ key: "sec-vti", label: "VTI", value_base: "3000.00", percent: "100.0000", holdings: 1 }],
-  unpriced_positions: 0,
-  no_rate_positions: 0,
-  max_stale_days: null,
-} as unknown as Allocation;
-
 // One account, not none: the holdings view shows no total card when there is
 // nothing to total (§4.10 — `$0.00` over "No investment accounts yet." states a
 // figure about a household that has none), so an empty portfolio here would mean
@@ -168,16 +156,8 @@ beforeEach(() => {
   h.update.mockReset();
   h.putBalance.mockReset();
   h.deleteBalance.mockReset();
-  h.allocation.mockReset();
   h.portfolio.mockReset();
   h.holdings.mockReset();
-  h.allocation.mockImplementation(() => ({
-    data: ALLOCATION,
-    isPending: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  }));
   h.portfolio.mockImplementation(() => ({
     data: PORTFOLIO,
     isPending: false,
@@ -196,7 +176,7 @@ beforeEach(() => {
 
 describe("<Accounts /> views", () => {
   it("opens on the balances view, with the page's one heading above both", () => {
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
 
     expect(screen.getByTestId("accounts-view-balances")).toHaveAttribute("aria-selected", "true");
     expect(within(screen.getByTestId("accounts-view-panel-balances")).getByTestId("account-list"))
@@ -212,13 +192,14 @@ describe("<Accounts /> views", () => {
 
   it("swaps the panel for the investments view without leaving the page", async () => {
     const user = userEvent.setup();
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
 
     await user.click(screen.getByTestId("accounts-view-investments"));
 
     expect(screen.getByTestId("investments-view")).toBeInTheDocument();
-    // The allocation and the valued holdings list are what the second view is.
-    expect(screen.getByTestId("allocation-total")).toHaveTextContent(formatMoney("3000.00", "USD"));
+    // The allocation moved to Insights (session 09, task B4); what's left here
+    // is a link to it, plus the valued holdings list.
+    expect(screen.getByTestId("allocation-moved-link")).toHaveAttribute("href", "/insights/allocations");
     expect(screen.getByTestId("portfolio-total")).toHaveTextContent(formatMoney("3000.00", "USD"));
     // The tab narrows the list to investment accounts (there are none here, so
     // it says so) and keeps the net worth above it: the page's whole is always
@@ -229,7 +210,7 @@ describe("<Accounts /> views", () => {
   });
 
   it("offers a tab only for the kinds of account the household has", () => {
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.getByTestId("accounts-view-cash")).toBeInTheDocument();
     expect(screen.getByTestId("accounts-view-credit")).toBeInTheDocument();
     expect(screen.queryByTestId("accounts-view-loans")).not.toBeInTheDocument();
@@ -240,7 +221,7 @@ describe("<Accounts /> views", () => {
   });
 
   it("names the owner with an avatar, not a line of text", () => {
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
     const avatar = screen.getByTestId("account-owner-acct-1");
     expect(avatar).toHaveAccessibleName("Owner: Alice");
     expect(avatar).toHaveTextContent("AL");
@@ -250,7 +231,7 @@ describe("<Accounts /> views", () => {
   });
 
   it("puts the net worth, its change and its line first", () => {
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.getByTestId("net-worth")).toHaveTextContent(formatMoney("100.00", "USD"));
     expect(screen.getByTestId("net-worth-change")).toHaveTextContent(
       `Up ${formatMoney("60.00", "USD")} over 3 months`,
@@ -260,7 +241,7 @@ describe("<Accounts /> views", () => {
 
   it("keeps the panel addressable from the tab that selected it", async () => {
     const user = userEvent.setup();
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
 
     const tab = screen.getByTestId("accounts-view-investments");
     await user.click(tab);
@@ -274,7 +255,7 @@ describe("<Accounts /> views", () => {
 
   it("says the portfolio ignores an active owner filter, rather than swapping totals silently", async () => {
     const user = userEvent.setup();
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
 
     // No filter yet, so there is nothing to warn about and no note.
     expect(screen.queryByTestId("investments-owner-note")).not.toBeInTheDocument();
@@ -292,7 +273,7 @@ describe("<Accounts /> views", () => {
 
   it("moves between the views with the arrow keys", async () => {
     const user = userEvent.setup();
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
 
     // One tab stop for the group, then the arrow keys move inside it.
     const balances = screen.getByTestId("accounts-view-balances");
@@ -314,9 +295,11 @@ describe("balance writes", () => {
   // client even though nothing here reaches the network.
   const renderPage = () =>
     render(
-      <QueryClientProvider client={new QueryClient()}>
-        <Accounts />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={new QueryClient()}>
+          <Accounts />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
   const sentUpdate = () => h.update.mock.calls[0][0].body as Record<string, unknown>;
 
@@ -364,9 +347,11 @@ describe("balance writes", () => {
 describe("liabilities", () => {
   const renderPage = () =>
     render(
-      <QueryClientProvider client={new QueryClient()}>
-        <Accounts />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={new QueryClient()}>
+          <Accounts />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
 
   it("shows a card's debt as the amount owed", () => {
@@ -420,9 +405,11 @@ describe("liabilities", () => {
 describe("stale accounts", () => {
   it("marks an account the bank stopped reporting", () => {
     render(
-      <QueryClientProvider client={new QueryClient()}>
-        <Accounts />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={new QueryClient()}>
+          <Accounts />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
     expect(screen.getByTestId("account-stale-acct-card")).toHaveTextContent("Not reported since");
     expect(screen.queryByTestId("account-stale-acct-1")).toBeNull();
@@ -431,7 +418,11 @@ describe("stale accounts", () => {
 
 describe("balance history", () => {
   const wrap = (ui: React.ReactNode) =>
-    render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>);
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>
+      </MemoryRouter>,
+    );
 
   it("lists the recorded balances and saves a past one on its own day", async () => {
     const user = userEvent.setup();
@@ -493,7 +484,7 @@ describe("a bank that stopped sending", () => {
         last_new_data_at: new Date(Date.now() - 3 * 864e5).toISOString(),
       },
     ];
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.getByTestId("bank-stalled")).toHaveTextContent("Chase hasn’t sent new transactions");
     h.connections = [];
   });
@@ -505,7 +496,7 @@ describe("a bank that stopped sending", () => {
         last_new_data_at: new Date(Date.now() - 20 * 36e5).toISOString(),
       },
     ];
-    render(<Accounts />);
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
     expect(screen.queryByTestId("bank-stalled")).not.toBeInTheDocument();
     h.connections = [];
   });
