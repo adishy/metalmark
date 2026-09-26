@@ -225,3 +225,53 @@ describe("<TxnDetailSheet /> transfers", () => {
     expect(screen.getByTestId("transfer-candidate-txn-odd")).toBeEnabled();
   });
 });
+
+describe("<TxnDetailSheet /> split gate", () => {
+  /** Open the split editor on `parent` and type the legs in. */
+  async function typeSplits(parent: Transaction, legs: string[]) {
+    const user = userEvent.setup();
+    renderSheet(parent);
+    await user.click(screen.getByTestId("split-open"));
+    for (const [i, leg] of legs.entries()) {
+      await user.type(screen.getByTestId(`split-amount-${i}`), leg);
+    }
+    return user;
+  }
+
+  const PARENT = txn({ amount: "-0.30", description: "Sub-cent split" });
+
+  // The client's gate and the server's rule are the same rule (ADR-0056): the
+  // legs are whole minor units and sum to the parent exactly. `POST /splits`
+  // refuses anything else with a 400, so a Save this enables must be one the API
+  // accepts — which is what the old half-cent float tolerance got wrong.
+  it("accepts legs that sum to the parent, float error or not", async () => {
+    // 0.1 + 0.2 as floats is 0.30000000000000004; as money it is exactly 0.30.
+    await typeSplits(PARENT, ["-0.1", "-0.2"]);
+    expect(screen.getByTestId("split-save")).toBeEnabled();
+    expect(screen.getByTestId("split-sum")).toHaveTextContent("−$0.30");
+  });
+
+  it("refuses legs that are off by less than a cent", async () => {
+    // −0.15 + −0.149 is −0.299, a hundredth of a cent short of the parent. The
+    // old gate (`Math.abs(sum - target) < 0.005`) called this balanced; the API
+    // answers 400 "Split amounts must sum to the transaction amount".
+    await typeSplits(PARENT, ["-0.15", "-0.149"]);
+    expect(screen.getByTestId("split-save")).toBeDisabled();
+  });
+
+  it("says why a leg finer than the currency's smallest unit cannot be saved", async () => {
+    // A leg that is not a whole cent has no minor-unit representation, so the
+    // sum is not a total that can be stated — the sheet says that rather than
+    // showing a rounded figure beside a warning.
+    await typeSplits(PARENT, ["-0.15", "-0.149"]);
+    expect(screen.getByTestId("split-sum")).toHaveTextContent("whole $0.01");
+  });
+
+  it("still refuses a set that is a whole cent out", async () => {
+    // The case the old tolerance already caught, kept so the fix cannot quietly
+    // become "anything within a cent is fine".
+    await typeSplits(PARENT, ["-0.15", "-0.14"]);
+    expect(screen.getByTestId("split-save")).toBeDisabled();
+    expect(screen.getByTestId("split-sum")).toHaveTextContent("−$0.29");
+  });
+});

@@ -22,7 +22,7 @@
 //   there needed changing.
 import type { EChartsOption } from "echarts";
 import type { CategorySpendRow } from "@/api/types";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, fromMinorUnits, sumMinorUnits, toMinorUnits } from "@/lib/format";
 import {
   chartLegend,
   chartTooltip,
@@ -58,7 +58,14 @@ export function donutOption(
   ccy: string,
   box: ChartBox,
 ): EChartsOption {
-  const total = rows.reduce((sum, r) => sum + Number(r.total), 0);
+  // The slice totals are the chart's one running total, so they are added as
+  // integer minor units (ADR-0005): floats lose the last place on the way, and
+  // this number is both the denominator of every share below and the figure a
+  // reader adds up against the legend.
+  const total = sumMinorUnits(
+    rows.map((r) => r.total),
+    ccy,
+  ).minor;
   // Slices are named by the row's **key**, not by the words a reader sees, for the
   // reason the graph gives: ECharts merges data items that share a name, so two rows
   // with the same label would become one slice with their totals added — a chart
@@ -72,11 +79,13 @@ export function donutOption(
     tooltip: chartTooltip(t, {
       trigger: "item",
       formatter: (p: TooltipPoint) => {
-        const value = Number(p.value);
+        // Both sides of the share are minor units, so the percentage is a ratio
+        // of two exact integers rather than of two floats.
+        const value = toMinorUnits(Number(p.value), ccy);
         const share = total === 0 ? 0 : (value / total) * 100;
         // `share` replaces ECharts' `{d}`, which is only available to the
         // template-string form — and the template cannot map a key to a name.
-        return `${nameOf(p.name)}: ${formatMoney(value, ccy)} (${share.toFixed(0)}%)`;
+        return `${nameOf(p.name)}: ${formatMoney(fromMinorUnits(value, ccy), ccy)} (${share.toFixed(0)}%)`;
       },
     }),
     legend: chartLegend(t, { bottom: 0, type: "scroll", formatter: nameOf }),

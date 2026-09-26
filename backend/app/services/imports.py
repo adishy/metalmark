@@ -46,6 +46,7 @@ from app.schemas.transactions import TransactionCreate
 from app.services import ofx, rules
 from app.services.errors import LedgerError
 from app.services.ledger import get_account, record_balance
+from app.services.ledger import today as ledger_today
 from app.services.transactions import create_transaction
 
 log = get_logger(__name__)
@@ -755,8 +756,10 @@ async def _statement_balance(
         on=(
             statement.ledger_balance_at.date()
             if statement.ledger_balance_at is not None
-            # An undated balance is today's, never the account's last date.
-            else datetime.now(UTC).date()
+            # An undated balance is today's, never the account's last date — and
+            # "today" is the ledger's, so an import and a sync cannot file the
+            # same undated statement on two different days.
+            else ledger_today()
         ),
         snapshot=not derived,
     )
