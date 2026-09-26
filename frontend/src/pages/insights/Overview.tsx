@@ -292,16 +292,22 @@ export default function Overview() {
 
   return (
     // No `mx-auto max-w-6xl` of its own any more — that's `Insights.tsx` now
-    // (§9.1 gives this content the middle width because it's a two-up grid at
-    // `lg:`, and a 1280 px pair of charts is two 620 px charts; the second
-    // column isn't worth the stretch), and the heading above the tabs is the
-    // page's one `<h1>`, so this tab doesn't carry its own.
+    // (§9.1 gives this content the middle width: these reports are charts, which
+    // read this wide and no wider), and the heading above the tabs is the page's
+    // one `<h1>`, so this tab doesn't carry its own.
     //
-    // §9.3's two-up, and the grid is the page rather than a wrapper around two
-    // of its children, so a section's place is decided by one class on it and
+    // §9.3's grid, and the grid is the page rather than a wrapper around two of
+    // its children, so a section's place is decided by one class on it and
     // nothing has to know how many rows came before. `space-y-6` is the phone
     // stack; at `lg:` the gap does the same job on both axes, which is why the
     // vertical step is turned off rather than left to double up with it.
+    //
+    // **Every card now claims both columns** (issue #33). The grid is not
+    // decoration: it is still where placement is declared, and a section whose
+    // height is set by something that cannot grow — a chart, a control — can
+    // claim one column without touching a sibling. What it cannot do is put two
+    // cards of unrelated height side by side, which is what "the charts pair two
+    // per row" asked for and what `report-net-worth` below explains the end of.
     <div
       className="space-y-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0"
       data-testid="insights-overview-page"
@@ -332,11 +338,30 @@ export default function Overview() {
         </p>
       )}
 
-      {/* The pair. These two carry no column classes at all, and that is the
-          point: they are the charts that survive half a page, so they take the
-          next two free cells and land side by side without anything being
-          counted. Adding a section above them re-pairs them for free. */}
-      <section className="rounded-card bg-surface-raised p-6" data-testid="report-net-worth">
+      {/* These two used to share a row — §9.3's "the charts pair two per row
+          above `lg:`" — and issue #33 is why they no longer do.
+
+          A grid row is as tall as its tallest cell, and the shorter cell's
+          column is then blank for the difference. Here that was about 400 px
+          (this card ≈750 px beside a 356 px cash-flow chart), and it is not a
+          number that settles: the card is not one chart but a headline, the
+          four-term identity behind it (`Reconciliation`), a chart and the
+          report's own caveats — and the identity's length follows the
+          household's *account* count while the cash-flow card's follows nothing.
+          Twenty accounts put the blank column at roughly 900 px.
+
+          Capping was the other way out and is worse than the gutter: the chart
+          is the last thing in the card, so a cap short enough to matter scrolls
+          the figure's own evidence out of sight — and a cap is a number that is
+          wrong at the next content size, which is what §9.3's own "space is
+          spent on content" is trying to avoid. Two cards whose heights are set
+          by unrelated content do not share a row, so each claims the full width:
+          the net-worth chart is a time series and reads better wide, and the
+          cash-flow bars do too.
+
+          §9.3 and `e2e/desktop.spec.ts` were updated with this — a rule the
+          pages cannot keep is not a rule. */}
+      <section className="rounded-card bg-surface-raised p-6 lg:col-span-2" data-testid="report-net-worth">
         <p className="text-sm text-fg-muted">Net worth change</p>
         {blocked ? (
           notDrawn
@@ -372,7 +397,10 @@ export default function Overview() {
         )}
       </section>
 
-      <section className="rounded-card bg-surface-raised p-6" data-testid="report-cash-flow">
+      {/* Full width, for the reason the section above states at length: it had a
+          partner, and a pair leaves a blank column under whichever of the two is
+          shorter. */}
+      <section className="rounded-card bg-surface-raised p-6 lg:col-span-2" data-testid="report-cash-flow">
         <p className="mb-2 text-sm text-fg-muted">Income vs expense</p>
         {blocked ? (
           notDrawn

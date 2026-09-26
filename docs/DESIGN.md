@@ -1621,7 +1621,7 @@ One global width is the bug. Width follows what the content *is*:
 | Content | Max width | Why |
 |---|---|---|
 | Ledger lists, tables, Admin | `max-w-7xl` (1280) | Tabular content earns every pixel it can get |
-| Insights, Accounts | `max-w-6xl` (1152) | Two-up grids need room to become two-up |
+| Insights, Accounts | `max-w-6xl` (1152) | Accounts' balances are a two-up card grid; the Insights reports are charts, which read this wide and no wider |
 | Settings, forms, dialogs, prose | `max-w-2xl` (672) | A 1280 px-wide paragraph is unreadable |
 
 The shell sets the **widest** case and pages narrow themselves; a page that needs less
@@ -1653,10 +1653,18 @@ Five shapes, and they are the whole of it:
   with the detail panel in the second column, shown when a row is selected and a quiet
   empty state otherwise. This is the single biggest win: the phone's row → sheet → back
   loop becomes one click with no navigation.
-- **Insights (Overview) — two-up.** KPI row spans both columns; the charts pair two per
-  row above `lg:`. The Sankey (§2.9) is full-width, because flow diagrams lose their
-  meaning when squeezed. The tab strip above it is `ScrollTabs` (§5), not part of this
-  shape.
+- **Insights (Overview) — one card per row, each claiming both columns.** It said
+  "the charts pair two per row above `lg:`" until issue #33: the net-worth card is a
+  headline, the four-term identity behind it, a chart and the report's caveats, so its
+  height follows the household's *account* count — ≈750 px in the demo household, ≈900 px
+  with twenty accounts — beside a 356 px cash-flow chart. A grid row is as tall as its
+  tallest cell, so the pairing left a blank column of that difference, and no cap closes
+  it: the chart is the last thing in the card, so any cap short enough to matter scrolls
+  the figure's own evidence out of sight. **Two cards whose heights are set by unrelated
+  content do not share a row.** The Sankey (§2.9) is full-width for the reason it always
+  was — flow diagrams lose their meaning when squeezed — and so is the spending
+  breakdown, whose legend is a list of categories with totals. The tab strip above is
+  `ScrollTabs` (§5), not part of this shape.
 - **Accounts and Admin — card grids.** `lg:grid-cols-2` and `lg:grid-cols-3`. Cards keep
   their internal layout and simply stop being full-width.
 - **Settings — rail and content.** The tab list becomes a vertical rail in the first

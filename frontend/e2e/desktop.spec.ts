@@ -51,28 +51,14 @@ const SHAPES: Shape[] = [
     ratio: 2,
   },
   {
-    name: "insights overview: net worth paired with income vs expense",
-    route: "/insights/overview",
-    root: "[data-testid=insights-overview-page]",
-    columns: 2,
-  },
-  {
+    // Three *columns*, each a stack of cards — issue #33. The assertion below
+    // is the one that would notice a column count changing or the cells going
+    // unequal; "no cell is padded to the height of its neighbour" is what the
+    // dedicated trend/card tests in this file measure.
     name: "admin: three questions, three columns",
     route: "/admin",
-    root: "[data-testid=admin-page]",
+    root: "[data-testid=admin-columns]",
     columns: 3,
-  },
-  {
-    // The allocation moved to Insights → Allocations (ADR-0054); what shares
-    // this grid now is the pointer to it and the holdings list.
-    name: "investments: the Insights pointer beside holdings",
-    route: "/accounts",
-    root: "[data-testid=investments-view]",
-    columns: 2,
-    prepare: async (page) => {
-      await page.getByTestId("accounts-view-investments").click();
-      await expect(page.getByTestId("investments-view")).toBeVisible();
-    },
   },
 ];
 
@@ -140,6 +126,88 @@ for (const vp of VIEWPORTS) {
 
         expect(await overflows(page), `${shape.name}: sideways overflow`).toBeLessThanOrEqual(0);
       }
+    });
+
+    // Replaces the shape SHAPES used to carry for this page ("net worth paired
+    // with income vs expense"). Issue #33 retired that pair — see DESIGN §9.3 —
+    // so what is worth asserting is the opposite claim: each card claims the full
+    // row, which is what stops a grid row from padding the shorter card's column
+    // with blank space.
+    test("the insights cards each take the full row, none is paired (#33)", async ({ page }) => {
+      await login(page);
+      await settle(page, "/insights/overview");
+
+      const geo = await page.evaluate(() => {
+        const root = document.querySelector("[data-testid=insights-overview-page]") as HTMLElement;
+        const box = root.getBoundingClientRect();
+        const cards = [...root.querySelectorAll("section[data-testid]")].map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            t: (el as HTMLElement).dataset.testid!,
+            width: r.width,
+            top: r.top,
+            bottom: r.bottom,
+          };
+        });
+        return { display: getComputedStyle(root).display, width: box.width, cards };
+      });
+
+      expect(geo.display, "the page's placement grid is gone").toBe("grid");
+      // A selector that stopped matching would make every claim below vacuous.
+      expect(geo.cards.length, "every report card must be found").toBeGreaterThanOrEqual(3);
+
+      for (const card of geo.cards) {
+        // One column is half the row minus the gap; two columns is the row. The
+        // 2 px is float noise, not tolerance: the difference being caught is
+        // ~550 px.
+        expect(Math.abs(card.width - geo.width), `${card.t} is not full width`).toBeLessThan(2);
+      }
+
+      const stacked = [...geo.cards].sort((a, b) => a.top - b.top);
+      for (let i = 1; i < stacked.length; i += 1) {
+        expect(
+          stacked[i].top,
+          `${stacked[i].t} shares a row with ${stacked[i - 1].t}`,
+        ).toBeGreaterThanOrEqual(stacked[i - 1].bottom - 1);
+      }
+    });
+
+    test("the investments pointer is a row above the holdings, not a column beside them (#33)", async ({
+      page,
+    }) => {
+      await login(page);
+      await page.goto("/accounts");
+      await page.getByTestId("accounts-view-investments").click();
+      await expect(page.getByTestId("investments-view")).toBeVisible();
+      await expect(page.getByTestId("portfolio")).toBeVisible();
+
+      const geo = await page.evaluate(() => {
+        const view = document.querySelector("[data-testid=investments-view]") as HTMLElement;
+        const link = document.querySelector("[data-testid=allocation-moved-link]") as HTMLElement;
+        const holdings = document.querySelector("[data-testid=portfolio]") as HTMLElement;
+        const v = view.getBoundingClientRect();
+        const l = link.getBoundingClientRect();
+        const h = holdings.getBoundingClientRect();
+        return {
+          viewWidth: v.width,
+          linkWidth: l.width,
+          linkBottom: l.bottom,
+          linkHeight: l.height,
+          holdingsWidth: h.width,
+          holdingsTop: h.top,
+        };
+      });
+
+      // Both take the full width: the pointer used to be a 44 px card in a grid
+      // cell whose row was as tall as the holdings list, with a blank column
+      // under it.
+      expect(geo.linkWidth).toBeGreaterThan(geo.viewWidth - 2);
+      expect(geo.holdingsWidth).toBeGreaterThan(geo.viewWidth - 2);
+      // And the pointer comes *before* the holdings, not beside them.
+      expect(geo.linkBottom).toBeLessThanOrEqual(geo.holdingsTop);
+      // §9.4: 44 px is the floor at `lg:` too, and the pointer is the one target
+      // on this view.
+      expect(geo.linkHeight).toBeGreaterThanOrEqual(44);
     });
 
     test("no route scrolls sideways", async ({ page }) => {
