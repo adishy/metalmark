@@ -415,7 +415,15 @@ The mapping, per chart:
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
-Four further chart rules:
+Five further chart rules:
+
+- **A money value axis says it is money, and stays short.** `chartAxis(t, { tick })`
+  takes a currency formatter; every money axis passes `formatMoneyTick` (§6.5), so
+  the ticks read `$5k`/`$40k` rather than a bare `5000`/`40000` whose currency the
+  reader has to infer. The gutter is then **measured, not reserved**: those options
+  set `grid: { containLabel: true, left: 8 }`, because a constant `left: 60` spends
+  a fifth of a 310 px phone canvas on gutter when the ticks are short and clips them
+  when they are long.
 
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
@@ -1286,6 +1294,17 @@ currencies.
 - **No abbreviations.** `$1.2K`, `$1.2M`, `1,2 mil` are all forbidden in this app. If
   a figure does not fit, shrink the type, wrap it, or give it its own row — never
   round it in the display.
+- **One exception, and it is not an abbreviation: a value axis's tick may be
+  shortened only where the short form is the same figure.** `formatMoneyTick()` in
+  `src/lib/format.ts` is the implementation and the whole of the licence —
+  `2,000` → `$2k` and `2,500` → `$2.5k` (both exact), `1,234` → `$1,234.00`
+  (nothing shorter states it). The rule it answers is the one above: a tick is a
+  *scale mark*, so it has no room for six characters of zeros on a
+  phone-width chart, and a shortened tick that rounded would be the display
+  inventing a number the ledger never held. It is never used for a figure a
+  reader acts on: amounts, totals and headline figures use `formatMoney`. The
+  exact value stays one tap away in the tooltip, and the chart's `aria-label`
+  states the finding in full.
 - **No CSS truncation on an amount.** `truncate`, `overflow-hidden`, and `text-ellipsis`
   must never be applied to an element rendering a number. Grep in §8.
 - A displayed amount equals the stored decimal rounded to the currency's minor unit

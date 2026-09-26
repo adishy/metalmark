@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMoney, formatDuration, negateAmount } from "@/lib/format";
+import { formatMoney, formatMoneyTick, formatDuration, negateAmount } from "@/lib/format";
 
 // Intl uses NBSP / narrow-NBSP between symbol and digits in some runtimes;
 // normalize to a plain space so assertions are locale-runtime-stable.
@@ -51,6 +51,60 @@ describe("formatMoney", () => {
     // Intl throws on a bogus ISO code; the fn must not crash.
     const out = norm(formatMoney("5", "NOTREAL"));
     expect(out).toContain("5.00");
+    expect(out).toContain("NOTREAL");
+  });
+});
+
+describe("formatMoneyTick", () => {
+  // The one licence this formatter takes is *exact* shortening: `$2k` and
+  // `$2,000.00` are the same number, and the moment they are not, the full
+  // figure comes back. That is the property these tests exist to hold, because
+  // "shorten a money string" is one refactor away from "round it in the display"
+  // — which §6.5 forbids outright.
+  it("shortens only where the short form is the same figure", () => {
+    expect(norm(formatMoneyTick(2000))).toBe("$2k");
+    expect(norm(formatMoneyTick(40000))).toBe("$40k");
+    expect(norm(formatMoneyTick(2500))).toBe("$2.5k");
+    expect(norm(formatMoneyTick(1250000))).toBe("$1.25M");
+    expect(norm(formatMoneyTick(2_000_000_000))).toBe("$2B");
+  });
+
+  it("falls back to the full figure rather than rounding into a different number", () => {
+    // 1234 is not 1.2k. A tick that said so would be the display inventing a
+    // number the ledger never held.
+    expect(norm(formatMoneyTick(1234))).toBe("$1,234.00");
+    expect(norm(formatMoneyTick("1234.56"))).toBe("$1,234.56");
+  });
+
+  it("prefers the largest unit that is still exact", () => {
+    // 1,250,000 is 1.25M *and* 1,250k; the shorter form is the point.
+    expect(norm(formatMoneyTick(1_250_000))).toBe("$1.25M");
+  });
+
+  it("signs negatives with U+2212, like every other money string", () => {
+    const out = norm(formatMoneyTick(-2000));
+    expect(out).toBe("−$2k");
+    expect(out.charCodeAt(0)).toBe(0x2212);
+  });
+
+  it("keeps a short figure as it is", () => {
+    // Below a thousand there is nothing to save, and `$850` is not `$0.85k`.
+    expect(norm(formatMoneyTick(850))).toBe("$850.00");
+  });
+
+  it("states zero without minor units, as a tick and not an amount", () => {
+    expect(norm(formatMoneyTick(0))).toBe("$0");
+  });
+
+  it("honours the currency, including one with no minor unit", () => {
+    const jpy = norm(formatMoneyTick(3000, "JPY"));
+    expect(jpy).not.toContain(".");
+    expect(jpy.replace(/[^0-9]/g, "")).toBe("3");
+    expect(jpy).toContain("k");
+  });
+
+  it("falls back for an unknown currency code instead of throwing", () => {
+    const out = norm(formatMoneyTick(2000, "NOTREAL"));
     expect(out).toContain("NOTREAL");
   });
 });

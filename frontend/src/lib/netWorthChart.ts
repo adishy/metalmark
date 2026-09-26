@@ -17,7 +17,7 @@
 import type { EChartsOption } from "echarts";
 import type { MissingAccount, MissingReason, NetWorthSeries } from "@/api/types";
 import { formatDay, isoDay } from "@/lib/dates";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatMoneyTick } from "@/lib/format";
 import {
   chartArea,
   chartAxis,
@@ -112,7 +112,10 @@ export function netWorthOption(data: NetWorthSeries | undefined, t: ChartTokens)
   const ccy = data?.base_currency ?? "USD";
   const byTs = new Map(points.map((p, i) => [dayTs(p.date), i]));
   return {
-    grid: { top: 20, right: 16, bottom: 30, left: 60 },
+    // `containLabel`: the gutter is the labels' own width, measured, rather than
+    // a constant. `left: 60` was a guess that spends a phone's scarce plot area
+    // when the ticks are short (`$10k`) and clips a long one (`1,234,567.89`).
+    grid: { top: 16, right: 8, bottom: 8, left: 8, containLabel: true },
     tooltip: chartTooltip(t, {
       formatter: (param: TooltipPoint) => {
         // An axis tooltip hands every series at the pointer; there is one.
@@ -128,7 +131,13 @@ export function netWorthOption(data: NetWorthSeries | undefined, t: ChartTokens)
       ...chartAxis(t),
       axisLabel: { ...chartAxis(t).axisLabel, hideOverlap: true },
     },
-    yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+    // The ticks are money, and the axis says so: `$10k`, `$20k` — these read
+    // `10,000`, `20,000` with no currency at all until this. The exact figure is
+    // in the tooltip and in the headline the section prints above the chart.
+    yAxis: {
+      type: "value",
+      ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, ccy) }),
+    },
     series: [
       {
         type: "line",

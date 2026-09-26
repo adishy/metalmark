@@ -195,11 +195,21 @@ export function chartTooltip(
   };
 }
 
-/** Axis styling. `grid` adds the horizontal rules, so it is for the value axis. */
-export function chartAxis(t: ChartTokens, { grid = false } = {}) {
+/**
+ * Axis styling. `grid` adds the horizontal rules, so it is for the value axis.
+ *
+ * `tick` is how a **money** value axis says so: pass `formatMoneyTick` and a
+ * currency. It lives here rather than in each option for the same reason the
+ * tooltip does — one implementation across the charts, so the net-worth, cash-flow
+ * and design-system axes cannot end up three different shapes.
+ */
+export function chartAxis(
+  t: ChartTokens,
+  { grid = false, tick }: { grid?: boolean; tick?: (value: number) => string } = {},
+) {
   return {
     axisLine: { lineStyle: { color: t.axis } },
-    axisLabel: { color: t.label },
+    axisLabel: { color: t.label, ...(tick ? { formatter: tick } : {}) },
     ...(grid ? { splitLine: { lineStyle: { color: t.split } } } : {}),
   };
 }

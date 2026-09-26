@@ -17,7 +17,7 @@ import {
 } from "@/api/hooks";
 import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatMoneyTick } from "@/lib/format";
 import { coverageNotes, netWorthOption } from "@/lib/netWorthChart";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
 import {
@@ -111,7 +111,10 @@ export default function Overview() {
 
   const cashFlowOption: EChartsOption = useMemo(
     () => ({
-      grid: { top: 30, right: 16, bottom: 30, left: 60 },
+      // `top` clears the legend row. `containLabel` is the phone's share: the
+      // tick gutter is measured from the labels rather than reserved as 60 px of
+      // a 310 px-wide canvas.
+      grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
@@ -119,7 +122,12 @@ export default function Overview() {
         data: bucketLabels(cashFlow.data),
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      // Money ticks: `$5k` in a gutter that used to read `5,000` with no
+      // currency anywhere on the axis.
+      yAxis: {
+        type: "value",
+        ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, ccy) }),
+      },
       series: [
         {
           name: "Income",
@@ -152,7 +160,7 @@ export default function Overview() {
         },
       ],
     }),
-    [cashFlow.data, t],
+    [cashFlow.data, t, ccy],
   );
 
   const donutOption: EChartsOption = useMemo(() => {

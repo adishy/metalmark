@@ -25,7 +25,7 @@ import {
   emphasisLine,
   emphasisPie,
 } from "@/theme/chartInteraction";
-import { formatDuration, formatMoney } from "@/lib/format";
+import { formatDuration, formatMoney, formatMoneyTick } from "@/lib/format";
 import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
 import AccountMark from "@/components/AccountMark";
 import { MetalMark } from "@/components/MetalMark";
@@ -214,14 +214,14 @@ export default function DesignSystem() {
 
   const lineOption: EChartsOption = useMemo(
     () => ({
-      grid: { top: 20, right: 16, bottom: 30, left: 60 },
+      grid: { top: 16, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       xAxis: {
         type: "category",
         data: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, "USD") }) },
       series: [
         {
           type: "line",
@@ -239,7 +239,7 @@ export default function DesignSystem() {
 
   const barOption: EChartsOption = useMemo(
     () => ({
-      grid: { top: 30, right: 16, bottom: 30, left: 60 },
+      grid: { top: 30, right: 8, bottom: 8, left: 8, containLabel: true },
       tooltip: chartTooltip(t),
       legend: chartLegend(t, { top: 0 }),
       xAxis: {
@@ -247,7 +247,7 @@ export default function DesignSystem() {
         data: ["Jan", "Feb", "Mar", "Apr"],
         ...chartAxis(t),
       },
-      yAxis: { type: "value", ...chartAxis(t, { grid: true }) },
+      yAxis: { type: "value", ...chartAxis(t, { grid: true, tick: (v) => formatMoneyTick(v, "USD") }) },
       series: [
         {
           name: "Income",
