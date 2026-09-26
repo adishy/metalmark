@@ -38,16 +38,25 @@ import { ReviewQueueBody, ReviewRemaining } from "@/pages/ReviewQueue";
  * source *text*: `grid-cols-${n}` is never generated, and the failure is silent
  * (the row collapses to one column and still renders, just wrong).
  *
- * Every width here is the ledger's, column for column, so the two pages' rows
- * line up with each other: the merchant takes what is left, and each fixed
- * column is sized to hold its own worst value with the actions column last.
- * None of it carries a `lg:` variant — this component is only ever mounted at
- * `lg:` (see `Review`), so a variant would be a prefix that never applies.
+ * Every width here is the ledger's, column for column except one, so the two
+ * pages' rows line up with each other: the merchant takes what is left, and each
+ * fixed column is sized to hold its own worst value with the actions column
+ * last. None of it carries a `lg:` variant — this component is only ever mounted
+ * at `lg:` (see `Review`), so a variant would be a prefix that never applies.
+ *
+ * **Category is `10rem` here and `7rem` in the ledger, and the difference is the
+ * control.** The ledger's cell holds twelve-pixel text ("Uncategorized" is 72 px
+ * of it); this one holds a *pill* — 24 px of its own padding, a border, and the
+ * category's emoji before the same word — and it is the row's primary action, so
+ * the word it is named by has to be legible. At 7rem it ellipsised every
+ * unfiled row to "Uncate…" while the merchant column beside it had 450 px of
+ * nothing. The 3rem comes from that column and not from the amount: §6.5's "the
+ * merchant gives way first" is the rule, and the merchant still has 500 px.
  *
  * Every control in a row is `min-h-11`, so the row is 56 px and the row's own
  * `min-h-12` is a floor rather than the thing setting the height (§9.4).
  */
-const ROW_COLUMNS = "grid-cols-[1.75rem_minmax(0,1fr)_5rem_7rem_5.5rem_7rem_10rem] gap-x-3";
+const ROW_COLUMNS = "grid-cols-[1.75rem_minmax(0,1fr)_5rem_10rem_5.5rem_7rem_10rem] gap-x-3";
 
 export default function ReviewTable() {
   const queue = useTransactions({ review_status: "needs_review" });
