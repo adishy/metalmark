@@ -232,6 +232,66 @@ export function chartLegend(t: ChartTokens, extra: Record<string, unknown> = {})
   };
 }
 
+/**
+ * How round a bar's outer end is, on the chart's own canvas.
+ *
+ * Measured rather than picked: a bar on the cash-flow chart is 36 px wide on a
+ * 310 px phone canvas and 79 px on a 620 px card, so 4 px is about a tenth of
+ * the width — a corner that reads as a corner, not a capsule. It is deliberately
+ * *not* one of §2.6's radii: those size a surface (a card, a control, a sheet),
+ * and a bar is a mark with its own geometry, which is why the value is written
+ * down in §2.9 instead.
+ */
+export const BAR_RADIUS = 4;
+
+/**
+ * The radius for the end of a bar stack that faces away from the baseline —
+ * `"top"` for a stack growing up, `"bottom"` for one growing down. ECharts takes
+ * the four corners in CSS order (top-left, top-right, bottom-right, bottom-left).
+ *
+ * Only the outer end is rounded. Rounding every segment would turn a stack into a
+ * row of pills and imply a gap the data does not have; the inner ends are joins,
+ * and a join has no corner to make. The outer end is where the value *is*, so it
+ * gets the round.
+ *
+ * A bar thinner or shorter than the radius does not overflow it: zrender scales
+ * the radii down to fit the rect (`zrender/lib/graphic/helper/roundRect.js`, the
+ * four `> width` / `> height` branches), so a one-pixel sliver comes out square
+ * rather than spilling over the axis.
+ */
+export function barEndRadius(end: "top" | "bottom"): [number, number, number, number] {
+  return end === "top" ? [BAR_RADIUS, BAR_RADIUS, 0, 0] : [0, 0, BAR_RADIUS, BAR_RADIUS];
+}
+
+/**
+ * The rule at zero, for a chart whose bars grow both ways.
+ *
+ * An income-vs-expense chart is read from its baseline outwards: the bar above the
+ * line is what came in, the bar below it is what went out, and the net line is
+ * what is left. Without a rule, that baseline is one gridline among five of the
+ * same weight, at whatever value the axis happened to choose — the reader is left
+ * to infer which one it is. This states it.
+ *
+ * `silent` and `symbol: none`: it is a fact about the chart, not a series to be
+ * pointed at, so it takes no tooltip and draws no arrowheads. It is dashed in the
+ * axis colour — furniture, at the weight of an axis, never of a data mark.
+ *
+ * ECharts paints a mark line *above* the series it belongs to (verified against
+ * the SVG renderer: the dashed path comes after the bar paths), which is what this
+ * wants — the rule divides the two halves of each bar instead of hiding behind
+ * them.
+ */
+export function zeroRule(t: ChartTokens) {
+  return {
+    silent: true,
+    symbol: "none" as const,
+    animation: false,
+    label: { show: false },
+    lineStyle: { color: t.axis, width: 1, type: "dashed" as const },
+    data: [{ yAxis: 0 }],
+  };
+}
+
 function areaStyleFor(c: string, opacity: number) {
   return { color: c, opacity };
 }

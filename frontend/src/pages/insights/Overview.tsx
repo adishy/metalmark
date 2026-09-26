@@ -35,6 +35,7 @@ import RangeControl, { useReportRange } from "@/components/RangeControl";
 import Reconciliation from "@/components/Reconciliation";
 import { useChartTokens } from "@/theme/chartTokens";
 import {
+  barEndRadius,
   chartAxis,
   chartLegend,
   chartTooltip,
@@ -42,6 +43,7 @@ import {
   emphasisLine,
   emphasisPie,
   emphasisSankey,
+  zeroRule,
   type TooltipEdge,
   type TooltipPoint,
 } from "@/theme/chartInteraction";
@@ -133,15 +135,19 @@ export default function Overview() {
           name: "Income",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: t.positive },
+          // Round the end the value is at, and state the baseline the two halves
+          // are measured from — a chart that grows both ways has to say where
+          // zero is rather than leaving it to whichever gridline the axis chose.
+          itemStyle: { color: t.positive, borderRadius: barEndRadius("top") },
           emphasis: emphasisBar(t, t.positive),
+          markLine: zeroRule(t),
           data: cashFlow.data?.points.map((p) => Number(p.income)) ?? [],
         },
         {
           name: "Expense",
           type: "bar",
           stack: "cash-flow",
-          itemStyle: { color: t.negative },
+          itemStyle: { color: t.negative, borderRadius: barEndRadius("bottom") },
           emphasis: emphasisBar(t, t.negative),
           // Expenses are summed as positive magnitudes by some backends and as
           // negatives by others; plot them downward either way.

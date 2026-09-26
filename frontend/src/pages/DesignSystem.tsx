@@ -17,6 +17,7 @@ import { CloseIcon } from "@/components/icons";
 import { useTheme } from "@/theme/theme";
 import { token, useChartTokens } from "@/theme/chartTokens";
 import {
+  barEndRadius,
   chartArea,
   chartAxis,
   chartLegend,
@@ -24,6 +25,7 @@ import {
   emphasisBar,
   emphasisLine,
   emphasisPie,
+  zeroRule,
 } from "@/theme/chartInteraction";
 import { formatDuration, formatMoney, formatMoneyTick } from "@/lib/format";
 import { formatDay, formatMonth, relativeTime, todayIso, type DayStyle } from "@/lib/dates";
@@ -253,15 +255,16 @@ export default function DesignSystem() {
           name: "Income",
           type: "bar",
           stack: "cf",
-          itemStyle: { color: t.positive },
+          itemStyle: { color: t.positive, borderRadius: barEndRadius("top") },
           emphasis: emphasisBar(t, t.positive),
+          markLine: zeroRule(t),
           data: [3200, 3400, 3100, 3600],
         },
         {
           name: "Expense",
           type: "bar",
           stack: "cf",
-          itemStyle: { color: t.negative },
+          itemStyle: { color: t.negative, borderRadius: barEndRadius("bottom") },
           emphasis: emphasisBar(t, t.negative),
           data: [-2100, -2450, -1980, -2300],
         },

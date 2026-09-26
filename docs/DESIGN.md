@@ -415,7 +415,7 @@ The mapping, per chart:
 | sankey node colour | `positive` (money in), `negative` (money out), `accent` for the window and its two residual nodes |
 | sankey link colour | its source node's, at `0.4` — `lineStyle.color: "source"` |
 
-Five further chart rules:
+Six further chart rules:
 
 - **A money value axis says it is money, and stays short.** `chartAxis(t, { tick })`
   takes a currency formatter; every money axis passes `formatMoneyTick` (§6.5), so
@@ -424,6 +424,20 @@ Five further chart rules:
   set `grid: { containLabel: true, left: 8 }`, because a constant `left: 60` spends
   a fifth of a 310 px phone canvas on gutter when the ticks are short and clips them
   when they are long.
+
+- **A bar stack is rounded at the end the value is at, and a chart that grows both
+  ways rules its baseline.** `barEndRadius("top" | "bottom")` rounds the *outer* end
+  of each stack and only that end: the inner ends are joins, and a pill on every
+  segment would imply a gap the data does not have. The radius is 4 px and is
+  deliberately not one of §2.6's — those size a surface, and a bar is a mark whose
+  corner is a chart decision. It is measured rather than tasteful: a bar is 36 px
+  wide on a 310 px phone canvas and 79 px at 620 px, so 4 px is a corner rather than
+  a capsule, and zrender scales a radius down to fit a thinner or shorter bar instead
+  of letting it spill past the axis. An income-vs-expense chart then draws
+  `zeroRule(t)` — silent, dashed, 1 px, in the axis colour — because the line the
+  bars are measured *from* is otherwise one gridline among five of the same weight,
+  and which one it is becomes a guess. ECharts paints a mark line above its series,
+  so the rule divides the two halves of each bar rather than hiding behind them.
 
 - **A chart is never the only way to read a value.** Canvas is invisible to screen
   readers, so every chart ships with a text equivalent: keep the `<ul>` of
