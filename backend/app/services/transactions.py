@@ -13,10 +13,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import and_, delete, extract, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from app.core.money import allocate, minor_unit, quantize_storage
 from app.models import (
@@ -677,6 +678,106 @@ class TransferCandidate:
     within_tolerance: bool
 
 
+def _match_tolerance(subject: Transaction, base: str) -> Decimal:
+    """How far a pair's residual may sit from zero and still count as a match.
+
+    A share of the amount being matched. With no base amount on the subject there is
+    no scale to take a share of, and every residual comes out ``None`` anyway — the
+    minor-unit floor is what that degenerate case falls back to.
+    """
+    return max(abs(subject.base_amount or Decimal(0)) * _FX_MATCH_TOLERANCE, minor_unit(base))
+
+
+def _candidate_for(subject: Transaction, row: Transaction, tol: Decimal) -> TransferCandidate:
+    """One row, priced as the subject's other leg.
+
+    The pricing is ``link_transfer``'s own arithmetic, so the residual a human reads
+    before linking is by construction the number the link stores.
+    """
+    residual = _residual_base(subject, row)
+    return TransferCandidate(
+        txn=row,
+        days_apart=abs(row.transacted_at - subject.transacted_at).days,
+        fx_cost_base=residual,
+        within_tolerance=_matches_on_amounts(subject, row, residual, tol),
+    )
+
+
+def _candidate_filters(
+    other: Any,
+    *,
+    subject_id: Any,
+    subject_account_id: Any,
+    subject_amount: Any,
+    subject_transacted_at: Any,
+    window: timedelta,
+) -> list:
+    """The conditions a row must meet to be offered as a subject's other leg.
+
+    ``link_transfer``'s own rules — a different account, opposite signs, a leg that
+    moves money, neither leg already spoken for by a group — plus the one that makes
+    a row a *candidate* rather than a leg: not the subject itself. A row that
+    survives them is a row the link endpoint would accept, which is the property
+    that keeps the picker from offering choices that then fail.
+
+    ``other`` is ``Transaction`` or an alias of it, and the subject's four operands
+    are values or columns: SQLAlchemy takes either in the same expression, which is
+    what lets the picker (one subject, its loaded values) and the matcher (every
+    subject at once, an alias's columns in a self-join) share this definition rather
+    than each keeping a copy that has to be kept in agreement with the other.
+    """
+    return [
+        other.id != subject_id,
+        other.account_id != subject_account_id,
+        # A leg already in a group is not free to match again, and a second link
+        # would strand the group it is already in.
+        other.transfer_group_id.is_(None),
+        other.transacted_at >= subject_transacted_at - window,
+        other.transacted_at <= subject_transacted_at + window,
+        # The complement of the sign test ``link_transfer`` rejects on. Strict on both
+        # sides, so a zero-amount row is not offered either — pairing one with a real
+        # leg would take that leg out of cash-flow with nothing to balance it, which
+        # is what "a leg that moves money" refuses over there.
+        or_(
+            and_(subject_amount > 0, other.amount < 0),
+            and_(subject_amount < 0, other.amount > 0),
+        ),
+    ]
+
+
+def _candidate_order(
+    other: Any, *, subject_transacted_at: Any, subject_base_amount: Any
+) -> list:
+    """The ordering candidates come back in, as sort keys, best first.
+
+    Time first, base amount second: a transfer posts within days of its other leg
+    (ARCHITECTURE §3 "within a few days"), so proximity in time is the stronger
+    signal and the base-amount gap only breaks ties inside a date. Rows whose base
+    amount is unknown sort last within their date rather than dropping out — "we
+    cannot price this" is not "this is wrong". ``other.id`` last makes the order
+    total, so a cap on the rows is deterministic.
+
+    The same value-or-column freedom as ``_candidate_filters``, with one asymmetry:
+    a subject with no base amount of its own (a value, on the picker's side — an
+    alias attribute is never ``None``, so the matcher always gets this key) leaves
+    the gap key out entirely. An all-NULL key ties every row and leaves the id to
+    decide, so omitting it says the same thing without NULL arithmetic.
+    """
+    # Distance as a number rather than an interval difference: "within N days" is
+    # the only meaning the window has, and it sorts.
+    distance = func.abs(extract("epoch", other.transacted_at - subject_transacted_at))
+    keys = [distance.asc()]
+    if subject_base_amount is not None:
+        # The base gap is NULL whenever either side has no base amount — a leg that
+        # cannot be measured against the subject's cannot be "closest". The NULLS
+        # LAST that implies falls out of the arithmetic rather than being asked for.
+        keys.append(
+            func.abs(other.base_amount + subject_base_amount).asc().nulls_last()
+        )
+    keys.append(other.id.asc())
+    return keys
+
+
 async def list_transfer_candidates(
     session: AsyncSession,
     household_id: uuid.UUID,
@@ -692,13 +793,10 @@ async def list_transfer_candidates(
     the one that makes a row a *candidate* rather than a leg: not the subject itself.
     A row that survives the query is therefore a row the link endpoint would accept,
     which is the property that keeps the picker from offering choices that then
-    fail.
-
-    Ordering is time first, base amount second: a transfer posts within days of
-    its other leg (ARCHITECTURE §3 "within a few days"), so proximity in time is
-    the stronger signal and the base-amount gap only breaks ties inside a date.
-    Rows whose base amount is unknown sort last within their date rather than
-    dropping out — "we cannot price this" is not "this is wrong".
+    fail. They live in ``_candidate_filters`` rather than here because the
+    auto-matcher asks this same question of every row a sync touched, a chunk of
+    subjects per query (``_candidates_for_subjects``), and one definition is one
+    thing to keep right.
 
     Hidden rows are included on purpose: hiding is a decision about the list, not
     a claim that a row is not half of a transfer.
@@ -717,70 +815,50 @@ async def list_transfer_candidates(
         # caller asked about rather than to the legs offered.
         return []
     base = await base_currency(session, household_id)
-    # The tolerance is a share of the amount being matched. With no base amount on
-    # the subject there is no scale to take a share of, and every residual below
-    # comes out None anyway — the minor-unit floor is what that degenerate case
-    # falls back to.
-    tol = max(abs(subject.base_amount or Decimal(0)) * _FX_MATCH_TOLERANCE, minor_unit(base))
-
-    window = timedelta(days=days)
-    conds = [
-        Transaction.id != subject.id,
-        Transaction.account_id != subject.account_id,
-        # A leg already in a group is not free to match again, and a second link
-        # would strand the group it is already in.
-        Transaction.transfer_group_id.is_(None),
-        Transaction.transacted_at >= subject.transacted_at - window,
-        Transaction.transacted_at <= subject.transacted_at + window,
-    ]
-    # The complement of the sign test ``link_transfer`` rejects on, written as a
-    # range so the two can never drift apart. Strict on both sides, so a zero-amount
-    # row is not offered either — that is what "a leg that moves money" means over
-    # there, and a non-strict `<= 0` here would offer rows the linker now refuses.
-    if subject.amount > 0:
-        conds.append(Transaction.amount < 0)
-    else:
-        conds.append(Transaction.amount > 0)
-
-    # Distance as a number rather than an interval difference: "within N days" is
-    # the only meaning the window has, and it sorts.
-    distance = func.abs(extract("epoch", Transaction.transacted_at - subject.transacted_at))
-    order = [distance.asc()]
-    if subject.base_amount is not None:
-        # NULLS LAST falls out of the arithmetic: a leg with no base amount cannot
-        # be measured against the subject's, so it cannot be "closest".
-        order.append(
-            func.abs(Transaction.base_amount + subject.base_amount).asc().nulls_last()
-        )
-    order.append(Transaction.id.asc())  # a total order, so the cap is deterministic
 
     stmt = (
         select(Transaction)
         .options(selectinload(Transaction.splits))
-        .where(and_(*conds))
-        .order_by(*order)
+        .where(
+            and_(
+                *_candidate_filters(
+                    Transaction,
+                    subject_id=subject.id,
+                    subject_account_id=subject.account_id,
+                    subject_amount=subject.amount,
+                    subject_transacted_at=subject.transacted_at,
+                    window=timedelta(days=days),
+                )
+            )
+        )
+        .order_by(
+            *_candidate_order(
+                Transaction,
+                subject_transacted_at=subject.transacted_at,
+                subject_base_amount=subject.base_amount,
+            )
+        )
         .limit(limit)
     )
     rows = (await session.execute(stmt)).scalars().all()
 
-    candidates = []
-    for row in rows:
-        residual = _residual_base(subject, row)
-        candidates.append(
-            TransferCandidate(
-                txn=row,
-                days_apart=abs(row.transacted_at - subject.transacted_at).days,
-                fx_cost_base=residual,
-                within_tolerance=_matches_on_amounts(subject, row, residual, tol),
-            )
-        )
-    return candidates
+    tol = _match_tolerance(subject, base)
+    return [_candidate_for(subject, row, tol) for row in rows]
 
 
 # The window the auto-matcher scans. Deliberately the picker's own default: the
 # two answer the same question, and a different number here would mean the picker
 # offering a pair the matcher would never propose, or linking one it never showed.
 TRANSFER_MATCH_DAYS = 5
+
+# How many subjects the matcher asks about in one query. The same kind of number as
+# ``rules.APPLY_CHUNK``: large enough that the rows one sync touched are a couple of
+# round trips, small enough that one result set stays a slice of the ledger. It
+# bounds two things — the id list, which is one query parameter (so this can never
+# reach the protocol's parameter limit however long the caller's list is), and the
+# subject windows one result spans, since a chunk's rows are the union of its
+# subjects' windows and a dense stretch of ledger makes those overlap.
+CANDIDATE_CHUNK = 250
 
 
 def _closest_unambiguous(
@@ -807,8 +885,8 @@ async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
     """Link unambiguous transfer pairs among ``txn_ids``. Returns how many it linked.
 
     ADR-0018's automatic half. The conditions are ``list_transfer_candidates``'
-    exactly — it is *called*, not reimplemented — so a pair the picker would
-    refuse to offer is a pair this cannot link.
+    exactly — the filters and the ordering are the picker's own functions, so a pair
+    the picker would refuse to offer is a pair this cannot link.
 
     **One candidate closer than every other, or none.** The picker shows a human
     the alternatives and lets them choose; the matcher has nobody to ask. Two
@@ -823,26 +901,159 @@ async def auto_match_transfers(session: AsyncSession, household_id: uuid.UUID,
     A second pass over the rows a sync touched, never inside the insert loop:
     two legs arriving in the same payload would otherwise each be examined before
     the other existed, and neither would find its counterpart.
+
+    Candidates are discovered a chunk of subjects at a time (``CANDIDATE_CHUNK``),
+    and each chunk is resolved in ``txn_ids`` order before the next one is fetched.
+    The resolution is not a detail of the optimisation — it is the rule: a leg an
+    earlier subject links is not free to match a later one. Links made while
+    resolving a chunk are flushed by ``link_transfer``, so the next chunk's query is
+    asked with them already gone; inside a chunk, ``taken`` is what keeps the same
+    rule — it holds both legs of everything the pass has linked so far, including the
+    leg a subject linked as someone's *candidate*, which the loop is not holding as a
+    subject and so cannot ask about any other way.
     """
+    subjects = await _subjects(session, household_id, txn_ids)
+
     linked = 0
-    for txn_id in txn_ids:
-        txn = await get_transaction(session, txn_id)
-        if txn.transfer_group_id is not None:
-            # Already half of a transfer — matched earlier in this pass, or by the
-            # user — and so not free to match again.
-            continue
-        candidates = await list_transfer_candidates(
-            session, household_id, txn_id, days=TRANSFER_MATCH_DAYS
-        )
-        matching = [c for c in candidates if c.within_tolerance]
-        chosen = _closest_unambiguous(txn, matching)
-        if chosen is None:
-            continue
-        await link_transfer(
-            session, household_id, txn_id, chosen.txn.id, matched_by="auto"
-        )
-        linked += 1
+    taken: set[uuid.UUID] = set()
+    for start in range(0, len(subjects), CANDIDATE_CHUNK):
+        chunk = subjects[start:start + CANDIDATE_CHUNK]
+        candidates = await _candidates_for_subjects(session, household_id, chunk)
+        for subject in chunk:
+            if subject.transfer_group_id is not None or subject.id in taken:
+                # Already half of a transfer — matched earlier in this pass, or by
+                # the user — and so not free to match again.
+                continue
+            # The picker's cap, applied where the picker applied it: to the rows
+            # still free when this subject's turn comes, before the match test
+            # narrows them. A row this pass has taken has to be dropped first, or a
+            # subject could be offered a 26th row the picker would never have shown.
+            offered = [
+                c for c in candidates.get(subject.id, ()) if c.txn.id not in taken
+            ]
+            matching = [c for c in offered[:CANDIDATE_LIMIT] if c.within_tolerance]
+            chosen = _closest_unambiguous(subject, matching)
+            if chosen is None:
+                continue
+            await link_transfer(
+                session, household_id, subject.id, chosen.txn.id, matched_by="auto"
+            )
+            taken.add(subject.id)
+            taken.add(chosen.txn.id)
+            linked += 1
     return linked
+
+
+async def _subjects(session: AsyncSession, household_id: uuid.UUID,
+                    txn_ids: list[uuid.UUID]) -> list[Transaction]:
+    """The given ids as rows, in the order given, in one query.
+
+    The order is the caller's and it decides the pass: a leg an earlier subject
+    links is not free for a later one, so "which of these two identical deposits
+    pairs with which withdrawal" has an answer here even when the two rows are
+    otherwise indistinguishable. An id repeated in the list names one row once.
+
+    ``splits`` is eager-loaded because that is how ``get_transaction`` hands a row
+    out, and a row must not differ in what it already has loaded according to which
+    path fetched it.
+    """
+    unique = list(dict.fromkeys(txn_ids))
+    if not unique:
+        return []
+    rows = (
+        await session.execute(
+            select(Transaction)
+            .options(selectinload(Transaction.splits))
+            .where(
+                Transaction.id.in_(unique),
+                Transaction.household_id == household_id,
+            )
+        )
+    ).scalars().all()
+    by_id = {row.id: row for row in rows}
+    for txn_id in unique:
+        if txn_id not in by_id:
+            # One at a time, so an id that names nothing raises the 404 every other
+            # lookup of it raises, from the same place and with the same message.
+            await get_transaction(session, txn_id)
+    return [by_id[txn_id] for txn_id in unique]
+
+
+async def _candidates_for_subjects(
+    session: AsyncSession,
+    household_id: uuid.UUID,
+    subjects: list[Transaction],
+    *,
+    days: int = TRANSFER_MATCH_DAYS,
+) -> dict[uuid.UUID, list[TransferCandidate]]:
+    """One chunk of subjects' candidates, in one query instead of one per subject.
+
+    One self-join, with the subjects on one side and the rows that could pair with
+    them on the other, filtered and ordered by the picker's own functions — so this
+    is ``list_transfer_candidates``' question asked of a whole chunk at once, which
+    is what the matcher needs: it runs over every row a sync just touched, and a
+    round trip per row was the whole cost of the pass.
+
+    Two differences from calling the picker per subject, both deliberate:
+
+    * a subject's list is **not** capped at ``CANDIDATE_LIMIT``. The cap falls on
+      the rows still free *when that subject's turn comes*, so it is applied by the
+      caller, which is the only place that knows what the pass has taken since: a
+      query cannot both apply it and see the rows the cap would then have to be
+      re-applied to.
+
+    * a leg this pass has linked *within the chunk* is still one of these rows, for
+      the same reason — the pass took it after the query ran (legs linked in an
+      earlier chunk are excluded here, by the ``transfer_group_id IS NULL`` filter).
+
+    The keys are exactly the subjects given, and rows arrive grouped by subject.
+    """
+    if not subjects:
+        return {}
+    by_id = {subject.id: subject for subject in subjects}
+    base = await base_currency(session, household_id)
+    tol = {subject.id: _match_tolerance(subject, base) for subject in subjects}
+
+    subject = aliased(Transaction)
+    other = aliased(Transaction)
+    stmt = (
+        select(subject.id, other)
+        .select_from(subject)
+        .join(
+            other,
+            and_(
+                *_candidate_filters(
+                    other,
+                    subject_id=subject.id,
+                    subject_account_id=subject.account_id,
+                    subject_amount=subject.amount,
+                    subject_transacted_at=subject.transacted_at,
+                    window=timedelta(days=days),
+                )
+            ),
+        )
+        # The picker's own early return, as a predicate: a subject already in a
+        # group is not free to match again, so it has no candidates to look for.
+        .where(subject.id.in_(list(by_id)), subject.transfer_group_id.is_(None))
+        .options(selectinload(other.splits))
+        # Grouped by subject, and inside a group in the picker's order — the order
+        # the caller reads them in and the one the cap is applied over.
+        .order_by(
+            subject.id.asc(),
+            *_candidate_order(
+                other,
+                subject_transacted_at=subject.transacted_at,
+                subject_base_amount=subject.base_amount,
+            ),
+        )
+    )
+
+    out: dict[uuid.UUID, list[TransferCandidate]] = {}
+    for subject_id, row in (await session.execute(stmt)).all():
+        out.setdefault(subject_id, []).append(
+            _candidate_for(by_id[subject_id], row, tol[subject_id])
+        )
+    return out
 
 
 # ---- Listing (keyset pagination) ------------------------------------------
