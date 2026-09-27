@@ -97,7 +97,15 @@ async function settle(page: Page, route: string, prepare?: (page: Page) => Promi
   await page.waitForTimeout(300);
 }
 
-const ROUTES = ["/accounts", "/transactions", "/review", "/insights/overview", "/settings", "/admin"];
+const ROUTES = [
+  "/accounts",
+  "/transactions",
+  "/review",
+  "/insights/overview",
+  "/insights/budgets",
+  "/settings",
+  "/admin",
+];
 
 for (const vp of VIEWPORTS) {
   test.describe(`desktop ${vp.width}x${vp.height} (§9.7)`, () => {

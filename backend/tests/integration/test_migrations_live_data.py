@@ -689,3 +689,114 @@ def test_0014_adds_recurring_series_with_rls_and_touches_nothing_else(scratch_db
     _alembic(scratch_db, "upgrade", "0014")
     with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
         assert _has_table(conn, "recurring_series")
+
+
+# ---- 0015: budgets -----------------------------------------------------------
+
+
+def test_0015_adds_budgets_with_rls_and_cascades_off_the_category(scratch_db):
+    """Additive, and its one interesting property is what it points at.
+
+    ``budgets.category_id`` is ``NOT NULL`` with ``ON DELETE CASCADE`` — the
+    opposite of the ``SET NULL`` the transaction and recurring-series tables use,
+    and for a reason that only shows up on a live database: a household deleting
+    a category it had planned for. The case here proves (a) the table arrives
+    RLS-protected without touching a row of the household's own data, (b) a plan
+    the API would write lands, and (c) deleting the category takes the plan and
+    leaves every other row alone — the household's plan for a *different*
+    category, and the ledger the plan was measured against, both survive.
+    """
+    _alembic(scratch_db, "upgrade", "0014")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # 0001 builds from today's metadata, so undo the table to be the shape
+        # an install on 0014 actually has.
+        conn.execute("DROP TABLE IF EXISTS budgets")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        group = conn.execute(
+            "INSERT INTO category_groups (household_id, name, type, sort) "
+            "VALUES (%s, 'Everyday', 'expense', 0) RETURNING id",
+            (hid,),
+        ).fetchone()[0]
+        groceries = conn.execute(
+            "INSERT INTO categories (household_id, group_id, name, rollover, sort) "
+            "VALUES (%s, %s, 'Groceries', false, 0) RETURNING id",
+            (hid, group),
+        ).fetchone()[0]
+        travel = conn.execute(
+            "INSERT INTO categories (household_id, group_id, name, rollover, sort) "
+            "VALUES (%s, %s, 'Travel', false, 1) RETURNING id",
+            (hid, group),
+        ).fetchone()[0]
+        txn = conn.execute(
+            "INSERT INTO transactions (household_id, account_id, amount, currency, "
+            "transacted_at, description, category_id, review_status, is_pending, "
+            "is_hidden, is_split_parent, source, field_sources) VALUES "
+            "(%s, %s, -50, 'USD', '2026-09-05', 'Market', %s, 'reviewed', false, "
+            "false, false, 'manual', '{}') RETURNING id",
+            (hid, acct, groceries),
+        ).fetchone()[0]
+        before = _fingerprint(conn)
+
+    _alembic(scratch_db, "upgrade", "0015")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "budgets")
+        assert conn.execute(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = 'budgets'"
+        ).fetchone()[0]
+        assert conn.execute(
+            "SELECT count(*) FROM pg_policies WHERE tablename = 'budgets'"
+        ).fetchone()[0] == 1
+        assert _fingerprint(conn) == before
+
+        # What the API would now write: two plans, one of them for a category
+        # that is about to be deleted.
+        conn.execute(
+            "INSERT INTO budgets (household_id, category_id, period, amount) "
+            "VALUES (%s, %s, '2026-09-01', 500), (%s, %s, '2026-09-01', 200)",
+            (hid, groceries, hid, travel),
+        )
+        assert conn.execute("SELECT count(*) FROM budgets").fetchone()[0] == 2
+
+        # One plan per category per period, enforced by the database and not only
+        # by the service that happens to check first.
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            conn.execute(
+                "INSERT INTO budgets (household_id, category_id, period, amount) "
+                "VALUES (%s, %s, '2026-09-01', 999)",
+                (hid, groceries),
+            )
+        # A plan is a magnitude.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO budgets (household_id, category_id, period, amount) "
+                "VALUES (%s, %s, '2026-10-01', -1)",
+                (hid, groceries),
+            )
+
+        # The CASCADE, on a live row: the category's plan goes with it, its
+        # sibling's plan and the transaction filed under it do not.
+        conn.execute("DELETE FROM categories WHERE id = %s", (groceries,))
+        left = conn.execute(
+            "SELECT b.category_id, b.period::text, b.amount::text FROM budgets b"
+        ).fetchall()
+        assert left == [(travel, "2026-09-01", "200.0000")]
+        assert conn.execute(
+            "SELECT category_id FROM transactions WHERE id = %s", (txn,)
+        ).fetchone()[0] is None
+
+    _alembic(scratch_db, "downgrade", "0014")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "budgets")
+        # The downgrade drops plans and nothing else: the category it was
+        # pointing at, and the ledger it was measured against, are untouched.
+        assert conn.execute("SELECT count(*) FROM categories").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM transactions").fetchone()[0] == 1
+
+    # And back up again: the shape-detecting create is safe to re-run.
+    _alembic(scratch_db, "upgrade", "0015")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _has_table(conn, "budgets")
+        assert conn.execute("SELECT count(*) FROM budgets").fetchone()[0] == 0

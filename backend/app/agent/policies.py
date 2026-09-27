@@ -44,6 +44,7 @@ from app.agent.anonymize import (
 )
 from app.schemas import agent as ag
 from app.schemas import auth as au
+from app.schemas import budgets as bu
 from app.schemas import checks as ch
 from app.schemas import connections as co
 from app.schemas import household as hh
@@ -492,6 +493,39 @@ register(
     warnings=TEXT,
 )
 register(rp.CategorySpendRow, key=Key(), category_id=K, category_name=Label("Category"), total=K)
+
+# ---- budgets ------------------------------------------------------------------
+#
+# A budget's category name is the household's own word for a category, so it is
+# the same `Label("Category")` a `CategoryOut.name` gets — and the same one
+# `CategorySpendRow.category_name` gets on the report this endpoint is arranged
+# to agree with, which is the point: an agent comparing the two rows should not
+# find the same category under two different labels.
+register(bu.BudgetOut, category_id=K, period=K, amount=K)
+register(
+    bu.BudgetRow,
+    category_id=K,
+    category_name=Label("Category"),
+    category_icon=Icon(),
+    # `budget` and `spent` are amounts, and the `None` on `budget` is "the
+    # household has not planned for this category" — a state, not a value, so it
+    # needs no policy of its own.
+    budget=K,
+    spent=K,
+)
+register(
+    bu.BudgetReport,
+    base_currency=CUR,
+    period_start=K,
+    period_end=K,
+    rows=N,
+    total_budget=K,
+    total_spent=K,
+    budgeted_spent=K,
+    unbudgeted_spent=K,
+    attribution=Code(),
+    warnings=TEXT,
+)
 
 # ---- investments ----------------------------------------------------------------
 

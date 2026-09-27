@@ -129,6 +129,16 @@ export function ChevronRightIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** The mirror of `ChevronRightIcon`, for a control that steps *back* — the
+ *  budget period, where next-month/previous-month is the whole navigation. */
+export function ChevronLeftIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M15 6l-6 6 6 6" />
+    </Svg>
+  );
+}
+
 export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Svg {...props}>

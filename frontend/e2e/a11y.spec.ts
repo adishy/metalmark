@@ -41,6 +41,7 @@ const ROUTES = [
   "/review",
   "/insights/overview",
   "/insights/allocations",
+  "/insights/budgets",
   "/admin",
 ] as const;
 

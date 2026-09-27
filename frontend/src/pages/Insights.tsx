@@ -16,6 +16,7 @@ import ScrollTabs from "@/components/ScrollTabs";
 import Overview from "@/pages/insights/Overview";
 import Allocations from "@/pages/insights/Allocations";
 import Recurring from "@/pages/insights/Recurring";
+import Budgets from "@/pages/insights/Budgets";
 
 // One declared list drives the tab strip, the route guard and which panel
 // renders — adding a tab is one line here plus one line in the switch below;
@@ -27,6 +28,7 @@ export const TABS = [
   { id: "overview", label: "Overview" },
   { id: "allocations", label: "Allocations" },
   { id: "recurring", label: "Recurring" },
+  { id: "budgets", label: "Budgets" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -64,6 +66,7 @@ export default function Insights() {
         {tab === "overview" && <Overview />}
         {tab === "allocations" && <Allocations />}
         {tab === "recurring" && <Recurring />}
+        {tab === "budgets" && <Budgets />}
       </div>
     </div>
   );

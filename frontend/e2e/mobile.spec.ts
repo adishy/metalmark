@@ -25,6 +25,7 @@ const ROUTES = [
   "/insights/overview",
   "/insights/allocations",
   "/insights/recurring",
+  "/insights/budgets",
   "/reports",
   "/settings",
   "/admin",

@@ -6,6 +6,8 @@ import type {
   AccountUpdate,
   AutoCategorizeResult,
   BalancePoint,
+  BudgetOut,
+  BudgetReport,
   CashFlowSankey,
   CashFlowSeries,
   Category,
@@ -209,6 +211,60 @@ export function useSpending(start: string | null, end: string, ownerId?: string 
   });
 }
 
+// -- budgets (ADR-0058) --
+
+/**
+ * The budget report for one period: the plans, and the spending report's own
+ * figures for the same window.
+ *
+ * `period` is **any day in the month** and may be null, which asks the server
+ * for the current one — it resolves "now" in the household's timezone and echoes
+ * the month it picked, so this side never has to work out what month it is. The
+ * key is null-not-undefined so the default period has exactly one cache entry.
+ *
+ * No `owner_id`: the spend this is read against is the household's, and
+ * narrowing one side of the comparison would compare two populations.
+ */
+export function useBudgetReport(period: string | null = null) {
+  return useQuery({
+    queryKey: ["budgets", period],
+    queryFn: () =>
+      api.get<BudgetReport>(period ? `/budgets?period=${period}` : "/budgets"),
+  });
+}
+
+/**
+ * Set one category's plan for one period — an upsert on `(category, period)`, so
+ * this is also the edit path.
+ *
+ * Both mutations invalidate the report rather than patching the cached row: the
+ * plan changes what `total_budget` and `budgeted_spent` are, and a client that
+ * recomputed those itself would be the second opinion on spend that ADR-0058
+ * exists to avoid.
+ */
+export function useSetBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { categoryId: string; period: string; amount: string }) =>
+      api.put<BudgetOut>(
+        `/budgets/${v.categoryId}?period=${encodeURIComponent(v.period)}`,
+        { amount: v.amount },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["budgets"] }),
+  });
+}
+
+/** Clear one category's plan for one period. Idempotent server-side: clearing a
+ *  plan that was never set is the state the caller asked for, not a 404. */
+export function useClearBudget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { categoryId: string; period: string }) =>
+      api.del<void>(`/budgets/${v.categoryId}?period=${encodeURIComponent(v.period)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["budgets"] }),
+  });
+}
+
 // ---- mutations ----
 
 export function useInvalidateLedger() {
@@ -220,6 +276,10 @@ export function useInvalidateLedger() {
     qc.invalidateQueries({ queryKey: ["report-net-worth"] });
     qc.invalidateQueries({ queryKey: ["report-cash-flow"] });
     qc.invalidateQueries({ queryKey: ["report-spending"] });
+    // Budgets are a *report on* the ledger, not a fact about it: every `spent`
+    // figure on the page is a sum over transactions, so recording, editing,
+    // deleting or re-categorizing one moves the number beside a plan.
+    qc.invalidateQueries({ queryKey: ["budgets"] });
     // The investments read side. These are in this list for the same reason the
     // reports are: a sync or an import can create an investment account, bring in
     // trades, or land a price — and the panel stays mounted while it does, so
@@ -354,6 +414,10 @@ function useInvalidateTaxonomy() {
     qc.invalidateQueries({ queryKey: ["categories"] });
     qc.invalidateQueries({ queryKey: ["category-groups"] });
     qc.invalidateQueries({ queryKey: ["tags"] });
+    // A budget row carries the category's *name* and its emoji, and deleting a
+    // category takes its plans with it (the FK is ON DELETE CASCADE), so the
+    // report is stale after any of these.
+    qc.invalidateQueries({ queryKey: ["budgets"] });
   };
 }
 

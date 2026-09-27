@@ -1052,3 +1052,58 @@ export interface RecurringFilter {
   direction?: "in" | "out" | null;
   q?: string | null;
 }
+
+// ---- budgets (ADR-0058) ------------------------------------------------------
+
+/**
+ * One category's plan for the period, and what has been spent against it.
+ *
+ * `budget` is `null` when the category has spend and no plan — the row that
+ * answers "what am I not budgeting for". A category with neither is not a row
+ * at all.
+ *
+ * Money with no category is *not* a row either: it is `unbudgeted_spent` on the
+ * report below, because there is no category for a plan to attach to (the
+ * Uncategorized bucket is a sentinel, not a row).
+ */
+export interface BudgetRow {
+  category_id: UUID;
+  category_name: string;
+  category_icon: string | null;
+  budget: Money | null;
+  spent: Money;
+}
+
+/**
+ * One period, whole: the plans and the spend they are read against.
+ *
+ * `period_start`/`period_end` are the window **every** figure here is over, and
+ * both ends are stated because a figure without its window is the bug this app
+ * has been burned by. `period_start` is a calendar month's first day — the
+ * server normalizes any day in the month to it and echoes it back.
+ *
+ * `total_spent` is the Spending report's total for the same window, to the cent,
+ * so this page cannot disagree with the report beside it. `budgeted_spent` and
+ * `unbudgeted_spent` partition it: the first is the spend on categories with a
+ * plan, the second everything else (unplanned categories, and the spend that has
+ * no category at all).
+ */
+export interface BudgetReport {
+  base_currency: string;
+  period_start: string;
+  period_end: string;
+  rows: BudgetRow[];
+  total_budget: Money;
+  total_spent: Money;
+  budgeted_spent: Money;
+  unbudgeted_spent: Money;
+  attribution: "row";
+  warnings: string[];
+}
+
+/** The answer to a write: the plan as stored, at the period it landed in. */
+export interface BudgetOut {
+  category_id: UUID;
+  period: string;
+  amount: Money;
+}
