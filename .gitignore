@@ -52,3 +52,7 @@ htmlcov/
 .coverage
 playwright-report/
 test-results/
+
+# Claude sessions / worktrees
+.claude/session*
+.claude/worktrees*
