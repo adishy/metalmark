@@ -221,6 +221,28 @@ export function measuredSpan(points: Point[], from: number, to: number): [number
 }
 
 /**
+ * How many accounts some point of the line leaves out because the ledger cannot
+ * value them (no rate, no price, no balance) — read from the points' own
+ * `missing` reasons, never from the wording of a note. Zero when the only thing
+ * to say is that an account starts partway through. It is what decides whether
+ * the collapsed coverage notes may stay a quiet title.
+ */
+export function leftOutAccounts(points: Point[]): number {
+  const ids = new Set<string>();
+  for (const p of points) for (const m of p.missing.filter(isGap)) ids.add(m.account_id);
+  return ids.size;
+}
+
+/** The collapsed coverage line: a neutral title, unless the line is short of
+ *  accounts — then the summary says so, in the warning tone. */
+export function coverageSummary(points: Point[]): { summary: string; tone: "neutral" | "warning" } {
+  const n = leftOutAccounts(points);
+  return n === 0
+    ? { summary: "History coverage", tone: "neutral" }
+    : { summary: `Chart leaves out ${n} ${n === 1 ? "account" : "accounts"} at some points`, tone: "warning" };
+}
+
+/**
  * The sentences under the chart: which accounts the line cannot fully count and
  * why, and which start partway through. Empty when every point counts everything.
  */

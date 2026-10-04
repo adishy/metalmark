@@ -497,6 +497,170 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents:
+    get:
+      tags:
+      - account documents
+      summary: List Documents
+      operationId: list_documents_accounts__account_id__documents_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountDocumentOut'
+                title: Response List Documents Accounts  Account Id  Documents Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - account documents
+      summary: Upload Document
+      operationId: upload_document_accounts__account_id__documents_post
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_document_accounts__account_id__documents_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDocumentOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents/{document_id}/content:
+    get:
+      tags:
+      - account documents
+      summary: Download Document
+      operationId: download_document_accounts__account_id__documents__document_id__content_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      - name: preview
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Preview
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents/{document_id}:
+    delete:
+      tags:
+      - account documents
+      summary: Delete Document
+      operationId: delete_document_accounts__account_id__documents__document_id__delete
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /category-groups:
     get:
       tags:
@@ -3795,7 +3959,11 @@ paths:
       tags:
       - investments
       summary: Update Holding
-      description: Edit a hand-entered position. 409 when history owns the column.
+      description: 'Edit a position. A quantity, basis or date written to a bank position stops
+
+        bank updates to it; a label or value does not (ADR-0059). 409 when history owns
+
+        the column.'
       operationId: update_holding_investments_holdings__holding_id__patch
       parameters:
       - name: holding_id
@@ -4603,6 +4771,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/transactions:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Transaction
+      description: 'Add one transaction. Requires transactions:write; inputs use real row IDs.
+
+
+        ``amount`` is signed in the account''s currency: negative is money out.
+
+        An agent cannot set a description or merchant; its optional ``note`` is stored
+
+        behind a fixed "Added by agent" prefix. The response is anonymized. A retried
+
+        POST creates another entry, and so does the bank''s own copy arriving later on
+
+        a synced account — check before adding. No updates or deletes.'
+      operationId: agent_add_transaction_agent_v1_transactions_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTransactionCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/investments/holdings:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Holding
+      description: 'Add one holding using an existing security ID. Requires holdings:write.
+
+
+        Existing positions (including bank/history positions) are refused with 409;
+
+        this permission cannot overwrite them. ``market_value`` is a total in the
+
+        security''s quote currency. Names, symbols and types cannot be set by an agent.'
+      operationId: agent_add_holding_agent_v1_investments_holdings_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentHoldingCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /anon_debug:
     get:
       tags:
@@ -4831,6 +5069,38 @@ components:
       - type
       - currency
       title: AccountCreate
+    AccountDocumentOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - account_id
+      - filename
+      - media_type
+      - size_bytes
+      - created_at
+      title: AccountDocumentOut
     AccountOut:
       properties:
         id:
@@ -5030,6 +5300,55 @@ components:
       - max_stale_days
       - is_fully_valued
       title: AccountValuationOut
+    AgentHoldingCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+          description: An existing security's id; agents cannot add one.
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
+          title: Quantity
+          description: Units held; negative for a short position.
+        cost_basis:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Cost Basis
+          description: Total cost of the whole position, in the security's quote currency.
+        as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: As Of
+          description: The day the quantity was confirmed.
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Optional total value of the whole position in the security's quote currency (not
+            the account's). Same sign as quantity.
+      additionalProperties: false
+      type: object
+      required:
+      - account_id
+      - security_id
+      - quantity
+      title: AgentHoldingCreate
     AgentTokenCreate:
       properties:
         name:
@@ -5043,6 +5362,8 @@ components:
             enum:
             - agent:read
             - debug:read
+            - transactions:write
+            - holdings:write
           type: array
           minItems: 1
           title: Scopes
@@ -5185,6 +5506,69 @@ components:
       - created_by
       - status
       title: AgentTokenOut
+    AgentTransactionCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          title: Amount
+          description: 'Signed, in the account''s own currency: negative is money out (an expense), positive
+            is money in. Send it as a string.'
+        transacted_at:
+          type: string
+          format: date-time
+          title: Transacted At
+          description: When it happened, with a UTC offset (e.g. 2026-10-01T12:00:00Z).
+        posted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Posted At
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+        is_pending:
+          type: boolean
+          title: Is Pending
+          default: false
+        tag_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          maxItems: 20
+          title: Tag Ids
+        note:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Note
+          description: 'Optional. Stored as ''Added by agent: <note>'' and shown to the household. Descriptions
+            and merchants cannot be set by an agent.'
+      additionalProperties: false
+      type: object
+      required:
+      - account_id
+      - amount
+      - transacted_at
+      title: AgentTransactionCreate
     AllocationOut:
       properties:
         as_of:
@@ -5296,7 +5680,6 @@ components:
         price:
           anyOf:
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           - type: 'null'
           title: Price
         price_currency:
@@ -5461,6 +5844,16 @@ components:
       required:
       - file
       title: Body_preview_ofx_import_ofx_preview_post
+    Body_upload_document_accounts__account_id__documents_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_upload_document_accounts__account_id__documents_post
     BudgetOut:
       properties:
         category_id:
@@ -6484,6 +6877,33 @@ components:
       title: HTTPValidationError
     HoldingCreate:
       properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          anyOf:
+          - type: string
+            pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          - type: 'null'
+          title: Security Type
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Total value of the position in the security's quote currency
         account_id:
           type: string
           format: uuid
@@ -6496,13 +6916,14 @@ components:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
           title: Quantity
+          description: Units held (shares, coins, or the amount for cash); negative for a short
         cost_basis:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
           - type: 'null'
           title: Cost Basis
         as_of:
@@ -6511,6 +6932,7 @@ components:
             format: date
           - type: 'null'
           title: As Of
+          description: The date the quantity was confirmed; it does not date the market value
       type: object
       required:
       - account_id
@@ -6569,6 +6991,22 @@ components:
             format: date
           - type: 'null'
           title: As Of
+        is_override:
+          type: boolean
+          title: Is Override
+          default: false
+        market_value_override:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Market Value Override
+        market_value_override_as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Market Value Override As Of
       type: object
       required:
       - id
@@ -6585,18 +7023,49 @@ components:
       title: HoldingOut
     HoldingUpdate:
       properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          anyOf:
+          - type: string
+            pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          - type: 'null'
+          title: Security Type
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Total value of the position in the security's quote currency
+        reset_overrides:
+          type: boolean
+          title: Reset Overrides
+          default: false
         quantity:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
           - type: 'null'
           title: Quantity
         cost_basis:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
           - type: 'null'
           title: Cost Basis
         as_of:
@@ -6641,7 +7110,6 @@ components:
         price:
           anyOf:
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           - type: 'null'
           title: Price
         price_date:
@@ -6683,6 +7151,18 @@ components:
           - type: string
           - type: 'null'
           title: Reason
+        market_value_override:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Market Value Override
+        market_value_override_as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Market Value Override As Of
       type: object
       required:
       - holding_id

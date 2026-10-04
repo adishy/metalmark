@@ -123,10 +123,12 @@ class Security(UUIDPkMixin, TimestampMixin, Base):
 class Holding(UUIDPkMixin, TimestampMixin, Base):
     """A position: one security, in one account (ADR-0011).
 
-    **Market value is not stored.** It is ``quantity × latest price on or before
+    **Ordinary market value is not stored.** It is ``quantity × latest price on or before
     the point's date``, converted to base — derived, because a stored market
     value is a second copy of a fact that changes when a price changes, and the
-    two would drift on the day someone forgets to recompute it. ADR-0032 §5 also
+    two would drift on the day someone forgets to recompute it. An explicit account-local
+    ``market_value_override`` is a human statement of the entire position's value
+    (ADR-0059), kept exactly rather than rounded through a derived unit price. ADR-0032 §5 also
     needs the price *series*, not one number, so the price is the thing worth
     keeping.
 
@@ -157,6 +159,20 @@ class Holding(UUIDPkMixin, TimestampMixin, Base):
         # well-defined and lets an importer upsert a position instead of
         # appending a second one that would double the account's value.
         UniqueConstraint("account_id", "security_id"),
+        # The pinned total is one fact in three columns: what it is, the quantity
+        # it was set at, and the day it applies from. All null or all set.
+        CheckConstraint(
+            "(market_value_override IS NULL AND market_value_override_quantity IS NULL "
+            "AND market_value_override_as_of IS NULL) OR "
+            "(market_value_override IS NOT NULL AND market_value_override_quantity IS NOT NULL "
+            "AND market_value_override_as_of IS NOT NULL AND market_value_override_quantity <> 0)",
+            name="override_value_complete",
+        ),
+        CheckConstraint(
+            "security_type_override IS NULL OR security_type_override IN (" +
+            ", ".join(f"'{t}'" for t in SECURITY_TYPES) + ")",
+            name="override_type_valid",
+        ),
         CheckConstraint("quantity <> 0", name="quantity_nonzero"),
         CheckConstraint(
             "source IN (" + ", ".join(f"'{s}'" for s in HOLDING_SOURCES) + ")",
@@ -182,7 +198,9 @@ class Holding(UUIDPkMixin, TimestampMixin, Base):
     cost_basis: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
     # When a human last confirmed this position. Prices carry their own age
     # (ADR-0032 §5); this is the other half of staleness — a holding nobody has
-    # touched in a year is worth flagging even if its price is current.
+    # touched in a year is worth flagging even if its price is current. It says
+    # when the *quantity* was confirmed and nothing about a pinned value, which
+    # carries its own date below.
     as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
     # ``simplefin`` when sync wrote the row from the bank's holdings (ADR-0051).
     # Such a row is the provider's statement, replaced on each sync and removed
@@ -190,6 +208,22 @@ class Holding(UUIDPkMixin, TimestampMixin, Base):
     source: Mapped[str] = mapped_column(
         String(10), nullable=False, default="manual", server_default="manual"
     )
+
+    # Account-local corrections retain the original security identity for sync matching.
+    # ``is_override`` freezes the bank's quantity and basis for this row (ADR-0059):
+    # it is set when a human writes one of those, not by a label or value edit.
+    is_override: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default=text("false")
+    )
+    name_override: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ticker_override: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    security_type_override: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # A total a human set, in the security's quote currency, with the quantity it
+    # was set at and the day it applies from. Exact at that quantity; a later
+    # trade or quantity change scales it (the unit price is what is pinned).
+    market_value_override: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
+    market_value_override_quantity: Mapped[Decimal | None] = mapped_column(QTY, nullable=True)
+    market_value_override_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     security: Mapped[Security] = relationship()
 

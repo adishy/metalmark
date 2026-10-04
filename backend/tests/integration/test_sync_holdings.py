@@ -23,7 +23,6 @@ from app.security.crypto import SecretBox
 from app.services import investments as inv
 from app.services import sync
 from app.services.aggregator import ProviderHolding
-from app.services.errors import LedgerError
 from app.services.fake_simplefin import FAKE_ACCESS_URL, FakeProvider
 from app.settings import get_settings
 from tests.fakes import simplefin as scenarios
@@ -288,7 +287,10 @@ async def test_a_line_without_a_share_count_is_left_to_the_remainder(hh) -> None
         assert valuation.unaccounted_cash_base == D("114485.51")
 
 
-async def test_a_synced_position_cannot_be_edited_by_hand_and_reads_as_provider(hh) -> None:
+async def test_a_bank_position_override_survives_sync_and_can_be_reset(
+    hh, monkeypatch
+) -> None:
+    monkeypatch.setattr(inv, "ledger_today", lambda: DAY)
     connection_id = await _connection(hh)
     await _sync(hh, connection_id, scenarios.demo())
 
@@ -296,11 +298,37 @@ async def test_a_synced_position_cannot_be_edited_by_hand_and_reads_as_provider(
         savings = await _savings(session)
         [record] = await inv.list_holdings(session, account_id=savings.id)
         assert record.position.source == inv.PROVIDER
-        with pytest.raises(LedgerError) as exc:
-            await inv.update_holding(
-                session, record.holding.id, HoldingUpdate(quantity=D(1))
-            )
-        assert exc.value.status == 409
+        holding_id = record.holding.id
+        await inv.update_holding(session, holding_id, HoldingUpdate(
+            quantity=D(1), market_value=D(100), name="My Apple", ticker="MYAAPL",
+            security_type="other", as_of=DAY,
+        ))
+    await _sync(hh, connection_id, _holdings())
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        assert record.position.source == inv.MANUAL
+        assert record.position.quantity == D(1)
+        assert record.holding.is_override
+        assert record.security.ticker == "AAPL"  # shared identity was not changed
+        valuation = await inv.value_account(session, savings, DAY, "USD")
+        [value] = valuation.holdings
+        assert value.name == "My Apple"
+        assert value.ticker == "MYAAPL"
+        assert value.security_type == "other"
+        assert value.value_native == D(100)
+        assert await inv.securities_value_base(
+            session, quantities={(savings.id, record.security.id): D(1)},
+            on=DAY, base_ccy="USD",
+        ) == D(100)
+        await inv.update_holding(session, holding_id, HoldingUpdate(reset_overrides=True))
+    await _sync(hh, connection_id, scenarios.demo())
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        assert not record.holding.is_override
+        assert record.position.source == inv.PROVIDER
+        assert record.position.quantity == D(550)
 
 
 async def test_an_account_retyped_by_hand_takes_no_positions(hh) -> None:
@@ -317,3 +345,101 @@ async def test_an_account_retyped_by_hand_takes_no_positions(hh) -> None:
     assert (outcome.counts.holdings_seen, outcome.counts.holdings_written) == (1, 0)
     async with scoped_session(hh) as session:
         assert (await session.execute(select(Holding))).scalars().all() == []
+
+
+async def test_a_label_or_value_edit_does_not_stop_bank_updates(hh, monkeypatch) -> None:
+    """Provenance is per field (ADR-0059): the household's name and value stay
+    theirs, and the quantity, basis and price they did not touch keep following
+    the bank."""
+    monkeypatch.setattr(inv, "ledger_today", lambda: DAY)
+    connection_id = await _connection(hh)
+    await _sync(hh, connection_id, scenarios.demo())
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        await inv.update_holding(session, record.holding.id, HoldingUpdate(
+            name="My Apple", ticker="MYAAPL", security_type="other", market_value=D(1100),
+        ))
+
+    [outcome] = await _sync(
+        hh, connection_id, _holdings(_holding("AAPL", "600", "120000", basis="60000"))
+    )
+
+    assert outcome.counts.holdings_written == 1
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        held = record.holding
+        assert not held.is_override
+        assert record.position.source == inv.PROVIDER
+        assert (held.quantity, held.cost_basis) == (D(600), D(60000))
+        assert (held.name_override, held.ticker_override) == ("My Apple", "MYAAPL")
+        assert held.security_type_override == "other"
+        assert held.market_value_override == D(1100)
+        assert held.market_value_override_quantity == D(550)
+        assert held.market_value_override_as_of == DAY
+        price = (
+            await session.execute(
+                select(SecurityPrice).where(SecurityPrice.price_date == DAY)
+            )
+        ).scalar_one()
+        assert (price.price, price.source) == (D(200), "auto")
+        # The value was set for 550 units; the bank now reports 600.
+        [value] = (await inv.value_account(session, savings, DAY, "USD")).holdings
+        assert value.value_native == D(1200)
+
+
+async def test_a_frozen_quantity_still_takes_the_banks_price(hh) -> None:
+    connection_id = await _connection(hh)
+    await _sync(hh, connection_id, scenarios.demo())
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        await inv.update_holding(session, record.holding.id, HoldingUpdate(quantity=D(1)))
+
+    [outcome] = await _sync(hh, connection_id, _holdings(_holding("AAPL", "600", "120000")))
+
+    assert outcome.counts.holdings_written == 0
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        assert record.holding.is_override
+        assert record.position.quantity == D(1)
+        price = (
+            await session.execute(
+                select(SecurityPrice).where(SecurityPrice.price_date == DAY)
+            )
+        ).scalar_one()
+        assert (price.price, price.source) == (D(200), "auto")
+        event = (
+            await session.execute(
+                select(SyncRunEvent).where(
+                    SyncRunEvent.sync_run_id == outcome.run_id,
+                    SyncRunEvent.event == "holdings.synced",
+                )
+            )
+        ).scalar_one()
+        assert event.detail["skipped"] == {"user_override": 1}
+
+
+async def test_a_small_total_value_survives_a_large_quantity(hh, monkeypatch) -> None:
+    monkeypatch.setattr(inv, "ledger_today", lambda: DAY)
+    connection_id = await _connection(hh)
+    await _sync(hh, connection_id, scenarios.demo())
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        await inv.update_holding(session, record.holding.id, HoldingUpdate(
+            quantity=D("300000000"), market_value=D("1.0000"), as_of=DAY,
+        ))
+    async with scoped_session(hh) as session:
+        savings = await _savings(session)
+        [record] = await inv.list_holdings(session, account_id=savings.id)
+        assert record.holding.market_value_override == D("1.0000")
+        assert record.holding.market_value_override_quantity == D("300000000")
+        valuation = await inv.value_account(session, savings, DAY, "USD")
+        assert valuation.market_value_account == D("1.0000")
+        assert await inv.securities_value_base(
+            session, quantities={(savings.id, record.security.id): D("300000000")},
+            on=DAY, base_ccy="USD",
+        ) == D("1.0000")

@@ -79,12 +79,34 @@ describe("Reconciliation", () => {
     );
     const rows = screen.getAllByTestId("reconciliation-attribution-row");
     expect(rows.map((r) => r.textContent)).toEqual([
-      `Everyday Checking${formatMoney("900.0000", "USD")}`,
+      // Signed like the step above them, so the rows visibly sum towards it.
+      `Everyday Checking+${formatMoney("900.0000", "USD")}`,
       `Brokerage${formatMoney("-500.0000", "USD")}`,
     ]);
+    expect(rows[1].textContent).toContain("−"); // U+2212, from formatMoney
     // "Of which", not "these add up to the number above": the parts too small to
     // name are still inside the residual, so the label must not promise a partition.
     expect(screen.getByTestId("reconciliation-attribution").textContent).toContain("Of which");
+    // Collapsed until asked for.
+    expect(screen.getByTestId("reconciliation-attribution")).not.toHaveAttribute("open");
+  });
+
+  it("never colours the residual as a gain or a loss, whichever way it points", () => {
+    // "Other balance changes" is where anything unattributed lands. Green or red
+    // would call it a result; it is muted, and its sign is still a character.
+    for (const [unexplained, sign] of [["-400.0000", "−"], ["400.0000", "+"]] as const) {
+      const { unmount } = render(<Reconciliation series={series({ unexplained })} />);
+      const li = screen.getByTestId("reconciliation-unexplained");
+      expect(li.textContent).toContain("Other balance changes");
+      expect(li.textContent).toContain(sign);
+      expect(li.innerHTML).not.toMatch(/(text|bg)-(positive|negative)/);
+      expect(li.querySelector(".tabular-nums")!.className).toContain("text-fg-muted");
+      unmount();
+    }
+    // The real terms keep their colours.
+    render(<Reconciliation series={series()} />);
+    expect(screen.getByTestId("reconciliation-cash-flow").innerHTML).toContain("text-positive");
+    expect(screen.getByTestId("reconciliation-revaluation").innerHTML).toContain("text-negative");
   });
 
   it("says so when the residual is too thin to blame on any one account", () => {
@@ -101,6 +123,15 @@ describe("Reconciliation", () => {
     const block = screen.getByTestId("reconciliation-warnings");
     expect(block.textContent).toContain("No rate for EUR on 2026-09-18.");
     expect(block.textContent).toContain("2 positions unpriced.");
+    expect(block).not.toHaveAttribute("open");
+  });
+
+  it("counts a warning that happened twice as two notes", () => {
+    const same = "No rate for EUR on 2026-09-18.";
+    render(<Reconciliation series={series({ warnings: [same, same] })} />);
+    const block = screen.getByTestId("reconciliation-warnings");
+    expect(block.querySelector("summary")).toHaveTextContent("2 notes");
+    expect(block).toHaveTextContent(`${same} ×2`);
   });
 
   it("hides the warnings block entirely when nothing is missing", () => {

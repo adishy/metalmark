@@ -35,95 +35,38 @@ Scope: the `frontend/` React app. Not the API, not the finance rules.
 
 ### 2.1 Colour roles
 
-Seventeen tokens: the nine content roles, five support tokens
-(`surface-inset`, `border-strong`, `accent-fg`, `danger`, `focus`), and three `-ink`
-variants for text on a tint (below the table). Contrast ratios
-below are computed against the surface each token is actually used on — `fg`,
-`fg-muted`, `border-strong` and `focus` on all three levels, the role colours on the page
-and on a card, `border` where a divider is drawn (a card), `accent-fg` on `accent` — and
-the **worst case in each theme** is the number shown. Every figure here is measured with the
-WCAG 2.x relative-luminance formula rather than estimated, and every figure that a change
-moves is re-measured in the same commit — re-deriving one takes five lines of any language
-with `Math.pow`.
+The current palette uses warm paper surfaces and soft mint accents inspired by Meltmeter, while retaining MetalMark’s semantic roles, icons and navigation. Pastel fills use darker ink, rather than pale text. RGB channels in `src/index.css` are authoritative. Ratios below are measured across all three surfaces (including input wells), using WCAG relative luminance.
 
-| Role | Light | Dark | Verified contrast (worst case) |
+| Role | Light | Dark | Minimum contrast: light / dark |
 |---|---|---|---|
-| `surface` — page background | `#f0f4f8` | `#020617` | — (base) |
-| `surface-raised` — cards, rows, sheets | `#ffffff` | `#131b2b` | — (base) |
-| `surface-inset` — inputs, wells, chips | `#e8eef5` | `#1e293b` | — (base) |
-| `border` — dividers, decorative only | `#cbd5e1` | `#2e394b` | 1.48:1 on a card, both themes (no requirement) |
-| `border-strong` — control boundaries | `#64748b` | `#64748b` | **4.07:1** light / **3.07:1** dark (needs 3:1) |
-| `fg` — primary text | `#0f172a` | `#f1f5f9` | **15.28:1** light / **13.35:1** dark (needs 4.5:1) |
-| `fg-muted` — secondary text, meta | `#475569` | `#94a3b8` | **6.49:1** light / **5.71:1** dark (needs 4.5:1) |
-| `accent` — brand, primary action | `#0f766e` | `#2dd4bf` | **4.95:1** light / **9.25:1** dark (needs 4.5:1) |
-| `accent-fg` — label on `accent` fill | `#ffffff` | `#020617` | **5.47:1** light / **10.84:1** dark (needs 4.5:1) |
-| `positive` — income, gain | `#047857` | `#34d399` | **4.96:1** light / **8.96:1** dark (needs 4.5:1) |
-| `negative` — loss, money owed | `#b91c1c` | `#f87171` | **5.85:1** light / **6.23:1** dark (needs 4.5:1) |
-| `warning` — missing FX rate, stale | `#b45309` | `#fbbf24` | **4.54:1** light / **10.32:1** dark (needs 4.5:1) |
-| `danger` — destructive button fill | `#b91c1c` | `#b91c1c` | **6.47:1** with `#ffffff` label, both themes |
-| `focus` — focus ring | `#0f766e` | `#2dd4bf` | **4.69:1** light / **7.86:1** dark on a well (needs 3:1) |
+| `surface` | `#fbf6f2` | `#1c1820` | decorative / decorative |
+| `surface-raised` | `#fffdfb` | `#26212b` | decorative / decorative |
+| `surface-inset` | `#f4ece7` | `#302935` | decorative / decorative |
+| `border` | `#e7dcd5` | `#3d3542` | decorative / decorative |
+| `border-strong` | `#8f8089` | `#8c7f91` | 3.20:1 / 3.72:1 |
+| `fg` | `#3a2f38` | `#f1e9ee` | 10.95:1 / 11.80:1 |
+| `fg-muted` | `#6b5c70` | `#b3a5b6` | 5.31:1 / 6.01:1 |
+| `accent` | `#0f6e67` | `#8fd1be` | 5.22:1 / 8.05:1 |
+| `accent-fg` | `#ffffff` | `#1c1820` | 6.09:1 / 10.02:1 |
+| `positive` | `#046e50` | `#8fd1b2` | 5.37:1 / 7.98:1 |
+| `negative` | `#b03f38` | `#ee9a92` | 4.98:1 / 6.47:1 |
+| `warning` | `#9b460a` | `#e6c879` | 5.50:1 / 8.63:1 |
+| `danger` | `#b03f38` | `#b03f38` | 5.81:1 (white label) / 5.81:1 (white label) |
+| `focus` | `#6558c4` | `#b7aef5` | 4.80:1 / 6.95:1 |
 
-**Ink tokens — text on a tint.** A selected chip (`bg-accent/20`), a "needs review"
-badge (`bg-warning/20`) and an error pill (`bg-negative/20`) put the role colour on a
-20 % wash of itself, and in light mode that fails 4.5:1 — measured on the page 3.77:1
-(accent), 3.47:1 (warning) and 4.17:1 (negative), and on a well 3.59 / 3.31 / 3.97. The
-one pairing that clears the floor is the negative pill on a card, at 4.57:1, which is not
-margin to build on. Each role has an **`-ink`** token for exactly this: one step darker in
-light mode (teal-800 5.23:1, amber-800 4.91:1, red-800 5.36:1 on the page; 4.98 / 4.67 /
-5.09 on a well), and equal to the role in dark mode, where a card gives 6.04:1 (accent),
-6.61:1 (warning) and 4.61:1 (negative). Rule: **text on a `bg-{role}/N` tint is
-`text-{role}-ink`**, never `text-{role}`.
+Text roles clear 4.5:1; control boundaries and focus clear 3:1. Decorative dividers carry no contrast requirement. `danger` uses white labels in both themes.
 
-`negative-ink` on `bg-negative/20` over a *dark well* is 3.93:1 — a known gap that
-predates this table, unchanged by it, and not fixed here because no call site puts those
-two together (every `bg-negative/20` pill sits on a card or the page). Closing it means
-changing `negative` itself — a content role — so it is left alone deliberately.
+**Tint ink.** Text on `bg-accent/20`, `bg-warning/20` or `bg-negative/20` uses the matching `-ink` token. Worst contrast on a 20% tint over all three surfaces:
 
-Four rules that follow from the table and are not negotiable:
+| Tint ink | Light | Dark | Minimum: light / dark |
+|---|---|---|---|
+| `accent-ink` | `#115550` | `#8fd1be` | 5.57:1 / 5.12:1 |
+| `warning-ink` | `#78350a` | `#e6c879` | 5.83:1 / 5.36:1 |
+| `negative-ink` | `#872722` | `#ffb4ae` | 5.79:1 / 5.60:1 |
 
-- **`fg-muted` is the floor.** There is no third, lighter text colour. The current
-  `text-slate-500` on `bg-slate-900` is 3.75:1 and fails WCAG 1.4.3; deleting that
-  class from the codebase is the single cheapest accessibility win available.
-- **`border` and `border-strong` are different jobs.** `border` is decorative and
-  has no contrast requirement. `border-strong` is what identifies a form control, so
-  it must clear 3:1 (WCAG 1.4.11) — `#94a3b8` looks like the natural light-mode
-  choice but computes to 2.56:1 and fails.
-- **`danger` is theme-independent.** `#b91c1c` works on both surfaces, so a
-  destructive button is the same red in every theme and never has to be re-reasoned.
-- **The three surfaces are a ramp with a ceiling in each theme, and a content role sets
-  it.** In light, the page cannot go darker than `#f0f4f8`: `warning` (`#b45309`, the
-  weakest content role, 5.02:1 on white) is used *on the page* (`NoticePermission`), so a
-  darker page drops it under 4.5:1 — and the well cannot go darker than `#e8eef5`, because the
-  two translucent wells that carry warning text measure 4.58:1 at `bg-surface-inset/60`
-  over a card and 4.72:1 at `/40`. In dark, `border-strong` at 3.07:1 on the well is the
-  ceiling for the well; with `page → inset` therefore fixed at 1.38:1, the two adjacent
-  steps trade off exactly against each other, so they are equalised at 1.17:1 rather than
-  the 1.13/1.22 split they replaced. `border` is the one role in the ramp with no
-  requirement on it, and in dark it needed the room: the well was painted in the *same
-  value* as the border, so a border drawn on a well was invisible (1.00:1).
+Categorical chart colours retain their ordered hues. Minimum mark contrast across all surfaces: 4.30:1 / 4.71:1.
 
-The ramp, measured (this is what "more contrast between the three levels" means, and it
-is the only place these three pairs are stated):
-
-| Adjacent step | Light | Dark |
-|---|---|---|
-| page → card | 1.05:1 → **1.11:1** | 1.13:1 → **1.17:1** |
-| card → well | 1.10:1 → **1.17:1** | 1.22:1 → **1.18:1** |
-| page → well | 1.05:1 → **1.06:1** | 1.38:1 → 1.38:1 |
-| border on a card | 1.23:1 → **1.48:1** | 1.22:1 → **1.48:1** |
-| border on a well | 1.13:1 → **1.27:1** | 1.00:1 → **1.26:1** |
-
-Light's two adjacent pairs both improve (1.05 → 1.11 and 1.10 → 1.17) and neither is
-bounded, so they could go further only by moving the page or the well past a content
-role. Dark's weakest adjacent pair rises from 1.13:1 to 1.17:1, which is the most the
-ceiling allows: the well is already at the value `border-strong` permits, so the two
-steps trade off exactly, and dark's `card → well` sheds 0.04 to buy the weaker step up.
-
-The two *ends* of the ramp are a different story: `page → well` is 1.06:1 in light and
-1.38:1 in dark, and light's cannot improve without one of the two bounds above breaking.
-A well sitting directly on the page — the active nav pill, an input outside a card — is
-identified by its `border-strong` outline (4.07:1 light against the well, 4.31:1 against
-the page), which is exactly the job §2.1 gives that token.
+Controls use an 8px radius, cards 14px, and overlays 22px. The base-layer focus treatment supplies an 8px fallback; component radius utilities override it so pill and card focus outlines keep their shape.
 
 ### 2.2 Wiring into Tailwind v3
 
@@ -183,8 +126,8 @@ export default {
       }),
       borderRadius: {
         control: "0.5rem", //  8px  — buttons, inputs, chips-with-corners
-        card: "0.75rem", //   12px  — sections, cards, list containers
-        overlay: "1rem", //   16px  — dialogs, bottom sheets
+        card: "0.875rem", //   12px  — sections, cards, list containers
+        overlay: "1.375rem", //   16px  — dialogs, bottom sheets
       },
       transitionDuration: { state: "120ms", overlay: "200ms" },
       fontFamily: {
@@ -205,70 +148,69 @@ is needed for the touch-target rules in §4 and §5.
 
 ### 2.3 The CSS variable block
 
-Paste into `src/index.css`, replacing the current `:root { color-scheme: dark }`.
+Paste into `src/index.css`, replacing the current `:root {
+  --surface: 251 246 242;
+  --surface-raised: 255 253 251;
+  --surface-inset: 244 236 231;
+  --border: 231 220 213;
+  --border-strong: 143 128 137;
+  --fg: 58 47 56;
+  --fg-muted: 107 92 112;
+  --accent: 15 110 103;
+  --accent-fg: 255 255 255;
 
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+  --accent-ink: 17 85 80;
+  --positive: 4 110 80;
+  --negative: 176 63 56;
 
-/* Light is the default; .dark on <html> overrides it. Every value is
-   "R G B" so Tailwind's /opacity modifier works. */
-:root {
-  --surface: 240 244 248;        /* #f0f4f8 — the page */
-  --surface-raised: 255 255 255; /* #ffffff — cards */
-  --surface-inset: 232 238 245;  /* #e8eef5 — wells */
-  --border: 203 213 225;         /* #cbd5e1 — slate-300 */
-  --border-strong: 100 116 139;  /* #64748b */
-  --fg: 15 23 42;                /* #0f172a */
-  --fg-muted: 71 85 105;         /* #475569 */
-  --accent: 15 118 110;          /* #0f766e */
-  --accent-fg: 255 255 255;      /* #ffffff */
-  --accent-ink: 17 94 89;        /* #115e59 — text on an accent tint */
-  --positive: 4 120 87;          /* #047857 */
-  --negative: 185 28 28;         /* #b91c1c */
-  --negative-ink: 153 27 27;     /* #991b1b — text on a negative tint */
-  --warning: 180 83 9;           /* #b45309 */
-  --warning-ink: 146 64 14;      /* #92400e — text on a warning tint */
-  --danger: 185 28 28;           /* #b91c1c */
-  --focus: 15 118 110;           /* #0f766e */
+  --negative-ink: 135 39 34;
+  --warning: 155 70 10;
 
-  /* Categorical series, ordered so neighbouring slices differ in lightness.
-     Worst series: 5.02:1 on a card, 4.54:1 on the page, 4.30:1 on a well
-     (WCAG 1.4.11 needs 3:1). */
-  --chart-1: 15 118 110;   --chart-2: 3 105 161;
-  --chart-3: 79 70 229;    --chart-4: 190 24 93;
-  --chart-5: 180 83 9;     --chart-6: 4 120 87;
-  --chart-7: 185 28 28;    --chart-8: 109 40 217;
-  --chart-9: 29 78 216;    --chart-10: 194 65 12;
+  --warning-ink: 120 53 10;
+  --danger: 176 63 56;
+  --focus: 101 88 196;
+
+  --chart-1: 15 118 110;
+  --chart-2: 3 105 161;
+  --chart-3: 79 70 229;
+  --chart-4: 190 24 93;
+  --chart-5: 180 83 9;
+  --chart-6: 4 120 87;
+  --chart-7: 185 28 28;
+  --chart-8: 109 40 217;
+  --chart-9: 29 78 216;
+  --chart-10: 194 65 12;
 }
 
 .dark {
-  --surface: 2 6 23;             /* #020617 — slate-950 */
-  --surface-raised: 19 27 43;    /* #131b2b — slate-900 lifted one step */
-  --surface-inset: 30 41 59;     /* #1e293b — at the border-strong ceiling */
-  --border: 46 57 75;            /* #2e394b — slate-800 toward slate-700 */
-  --border-strong: 100 116 139;  /* #64748b */
-  --fg: 241 245 249;             /* #f1f5f9 */
-  --fg-muted: 148 163 184;       /* #94a3b8 */
-  --accent: 45 212 191;          /* #2dd4bf */
-  --accent-fg: 2 6 23;           /* #020617 */
-  --accent-ink: 45 212 191;      /* = accent; already 6.04:1 on its tint */
-  --positive: 52 211 153;        /* #34d399 */
-  --negative: 248 113 113;       /* #f87171 */
-  --negative-ink: 248 113 113;   /* = negative */
-  --warning: 251 191 36;         /* #fbbf24 */
-  --warning-ink: 251 191 36;     /* = warning; 6.61:1 on its tint */
-  --danger: 185 28 28;           /* #b91c1c — same fill in both themes */
-  --focus: 45 212 191;           /* #2dd4bf */
+  --surface: 28 24 32;
+  --surface-raised: 38 33 43;
+  --surface-inset: 48 41 53;
+  --border: 61 53 66;
+  --border-strong: 140 127 145;
+  --fg: 241 233 238;
+  --fg-muted: 179 165 182;
+  --accent: 143 209 190;
+  --accent-fg: 28 24 32;
+  --accent-ink: 143 209 190;
+  --positive: 143 209 178;
+  --negative: 238 154 146;
+  --negative-ink: 255 180 174;
+  --warning: 230 200 121;
+  --warning-ink: 230 200 121;
+  --danger: 176 63 56;
+  --focus: 183 174 245;
 
-  /* Same ten hues, lifted for a dark surface. Worst series: 6.76:1 on the
-     page, 5.77:1 on a card, 4.90:1 on a well. */
-  --chart-1: 20 184 166;   --chart-2: 56 189 248;
-  --chart-3: 129 140 248;  --chart-4: 244 114 182;
-  --chart-5: 251 191 36;   --chart-6: 52 211 153;
-  --chart-7: 248 113 113;  --chart-8: 167 139 250;
-  --chart-9: 96 165 250;   --chart-10: 251 146 60;
+  --chart-1: 20 184 166;
+  --chart-2: 56 189 248;
+  --chart-3: 129 140 248;
+  --chart-4: 244 114 182;
+  --chart-5: 251 191 36;
+  --chart-6: 52 211 153;
+  --chart-7: 248 113 113;
+  --chart-8: 167 139 250;
+  --chart-9: 96 165 250;
+  --chart-10: 251 146 60;
 }
 
 html { color-scheme: light; }
@@ -291,7 +233,7 @@ body {
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid rgb(var(--focus));
   outline-offset: 2px;
-  border-radius: inherit;
+  border-radius: 0.5rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -349,8 +291,8 @@ the layout is wrong.
 | Element | Radius |
 |---|---|
 | Buttons, inputs, selects, small controls | 8 px (`rounded-control`) |
-| Cards, sections, list containers | 12 px (`rounded-card`) |
-| Dialogs, bottom sheets | 16 px (`rounded-overlay`) |
+| Cards, sections, list containers | 14 px (`rounded-card`) |
+| Dialogs, bottom sheets | 22 px (`rounded-overlay`) |
 | Chips, pills, avatars, status dots | 9999 px (`rounded-full`) |
 
 **Elevation is surface lightness plus a 1 px border, not a shadow.** In dark mode

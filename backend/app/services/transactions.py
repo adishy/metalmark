@@ -22,6 +22,8 @@ from sqlalchemy.orm import aliased, selectinload
 from app.core.money import allocate, minor_unit, quantize_storage
 from app.models import (
     Account,
+    Category,
+    Tag,
     Transaction,
     TransactionSplit,
     TransactionTag,
@@ -68,6 +70,29 @@ async def _account(session: AsyncSession, account_id: uuid.UUID) -> Account:
     if acct is None:
         raise LedgerError("Account not found", 404)
     return acct
+
+
+async def _require_refs(
+    session: AsyncSession, category_id: uuid.UUID | None, tag_ids: list[uuid.UUID] | None
+) -> None:
+    """Assert a supplied category and tags exist *in this household*.
+
+    The foreign keys alone would accept another household's id — a constraint is
+    satisfied by a row that exists anywhere, RLS only governs what this session
+    can see — so each is looked up through the scoped session first, as
+    ``require_owners`` does for owners.
+    """
+    if category_id is not None and (
+        await session.execute(select(Category.id).where(Category.id == category_id))
+    ).scalar_one_or_none() is None:
+        raise LedgerError("Category not found", 404)
+    wanted = set(tag_ids or [])
+    if wanted:
+        found = set(
+            (await session.execute(select(Tag.id).where(Tag.id.in_(wanted)))).scalars().all()
+        )
+        if wanted - found:
+            raise LedgerError("Tag not found", 404)
 
 
 async def _set_tags(session: AsyncSession, txn_id: uuid.UUID, tag_ids: list[uuid.UUID]) -> None:
@@ -118,6 +143,7 @@ async def create_transaction(session: AsyncSession, household_id: uuid.UUID,
     """
     acct = await _account(session, data.account_id)
     await require_owners(session, [data.owner_id])
+    await _require_refs(session, data.category_id, data.tag_ids)
     conv, rate_date = await compute_base_amount(
         session, household_id,
         amount=data.amount, currency=acct.currency, on=data.transacted_at.date(),
@@ -251,6 +277,7 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         txn.merchant = data.merchant
         _mark(fs, ["merchant"], "user")
     if is_set(data, "category_id"):
+        await _require_refs(session, data.category_id, None)
         txn.category_id = data.category_id
         _mark(fs, ["category"], "user")
     if is_set(data, "owner_id"):
@@ -301,6 +328,7 @@ async def update_transaction(session: AsyncSession, household_id: uuid.UUID,
         # Explicit null clears the set. The schema promises absent = no change and
         # null = clear for the nullable fields; ``is not None`` here quietly broke
         # that promise, so an attempt to clear tags looked like it worked.
+        await _require_refs(session, None, data.tag_ids)
         await _set_tags(session, txn.id, data.tag_ids or [])
 
     if rule_split:

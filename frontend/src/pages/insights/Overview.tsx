@@ -1,3 +1,4 @@
+import DataNotes from "@/components/DataNotes";
 // Reporting: net-worth line (with the currency-revaluation figure surfaced),
 // income-vs-expense cash flow and a spending-by-category donut (ECharts). Every
 // chart is scoped by the same owner filter and cut to the same window.
@@ -19,7 +20,7 @@ import type { Granularity } from "@/api/types";
 import { formatBucket, formatDay } from "@/lib/dates";
 import { donutOption as donutOptionFor } from "@/lib/donutChart";
 import { formatMoney, formatMoneyTick } from "@/lib/format";
-import { coverageNotes, netWorthOption } from "@/lib/netWorthChart";
+import { coverageNotes, coverageSummary, netWorthOption } from "@/lib/netWorthChart";
 import { DEFAULT_PRESET, isUsable, resolvePreset } from "@/lib/reportRange";
 import { buildSankey, sideRows } from "@/lib/sankey";
 import { sankeyOption as sankeyOptionFor } from "@/lib/sankeyChart";
@@ -115,6 +116,7 @@ export default function Overview() {
     [nw.data, t],
   );
   const nwNotes = useMemo(() => coverageNotes(nw.data?.points ?? []), [nw.data]);
+  const nwCoverage = useMemo(() => coverageSummary(nw.data?.points ?? []), [nw.data]);
 
   const cashFlowOption = useCallback(
     (box: ChartBox): EChartsOption => ({
@@ -383,14 +385,7 @@ export default function Overview() {
             )}
             {hasSeries && <Chart option={nwOption} label={nwLabel} testid="net-worth-chart" />}
             {hasSeries && nwNotes.length > 0 && (
-              <div className="mt-2 space-y-1 text-xs text-fg-muted" data-testid="net-worth-coverage">
-                {nwNotes.map((note) => (
-                  <p key={note}>
-                    <span aria-hidden="true">⚠ </span>
-                    {note}
-                  </p>
-                ))}
-              </div>
+              <DataNotes notes={nwNotes} summary={nwCoverage.summary} tone={nwCoverage.tone} testid="net-worth-coverage" />
             )}
             {ownerFilter && nw.data && (
               <p className="mt-2 text-xs text-fg-muted" data-testid="net-worth-attribution">
@@ -489,16 +484,7 @@ export default function Overview() {
                 want of a rate is a missing branch of a picture that claims to be
                 the whole picture, so it is not a footnote on this chart. */}
             {(sankey.data?.warnings.length ?? 0) > 0 && (
-              <div className="mt-3 rounded-control bg-warning/10 p-3" data-testid="sankey-warnings">
-                <p className="text-xs font-medium text-warning">
-                  Some of these flows are missing data
-                </p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-fg-muted">
-                  {sankey.data?.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
+              <DataNotes notes={sankey.data?.warnings ?? []} summary="Some flows have incomplete data" testid="sankey-warnings" />
             )}
             {ownerFilter && sankey.data && (
               <p className="mt-2 text-xs text-fg-muted" data-testid="sankey-attribution">
@@ -566,16 +552,7 @@ export default function Overview() {
                 investment events now, so it can have dropped one, and a fee the
                 reader paid is not a footnote. */}
             {(spending.data?.warnings.length ?? 0) > 0 && (
-              <div className="mt-3 rounded-control bg-warning/10 p-3" data-testid="spending-warnings">
-                <p className="text-xs font-medium text-warning">
-                  Some of this spending is missing data
-                </p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-fg-muted">
-                  {spending.data?.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
+              <DataNotes notes={spending.data?.warnings ?? []} summary="Some spending has incomplete data" testid="spending-warnings" />
             )}
             {ownerFilter && spending.data && (
               <p className="mt-2 text-xs text-fg-muted" data-testid="spending-attribution">

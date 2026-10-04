@@ -87,8 +87,8 @@ export default {
       }),
       borderRadius: {
         control: "0.5rem", //  8px — buttons, inputs, chips
-        card: "0.75rem", //    12px — sections, cards, list containers
-        overlay: "1rem", //    16px — dialogs, sheets
+        card: "0.875rem", //    14px — sections, cards, list containers
+        overlay: "1.375rem", //    22px — dialogs, sheets
       },
       transitionDuration: { state: "120ms", overlay: "200ms" },
       fontFamily: {

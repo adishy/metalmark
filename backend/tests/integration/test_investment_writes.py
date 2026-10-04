@@ -24,11 +24,14 @@ from sqlalchemy import select
 from app.db import scoped_session
 from app.models import Account, Holding, InvestmentTransaction, Owner, Security
 from app.services import investments as inv
+from app.services import reports
 from app.services.errors import LedgerError
 
 pytestmark = pytest.mark.integration
 
 ON = date(2026, 9, 20)
+#: A day before ``ON``, for a price or a value that predates it.
+EARLIER = date(2026, 9, 10)
 BASE = "USD"
 
 
@@ -451,3 +454,221 @@ async def test_a_stated_account_is_never_recomputed(household_factory):
         # ... and the plug is what reconciles the two.
         valuation = await inv.value_account(s, acc, ON, BASE)
         assert valuation.unaccounted_cash_base == Decimal("4900.0000")
+
+
+# ---- a value set by hand (ADR-0059) ----------------------------------------
+
+
+async def _pinned(s, hh, monkeypatch, *, quantity="10", total="500", price="100"):
+    """A manual position priced at ``price`` since before ``ON``, with its total
+    set by hand on ``ON``."""
+    monkeypatch.setattr(inv, "ledger_today", lambda: ON)
+    acc = await _account(s, hh)
+    sec = await _security(s, hh)
+    await inv.upsert_price(
+        s, household_id=hh, security_id=sec.id, price_date=EARLIER, price=Decimal(price)
+    )
+    holding = await inv.upsert_holding(
+        s, household_id=hh, account_id=acc.id, security_id=sec.id,
+        quantity=Decimal(quantity), metadata=_Data(market_value=Decimal(total)),
+    )
+    return acc, sec, holding
+
+
+async def test_a_value_set_by_hand_applies_from_the_day_it_was_set(
+    household_factory, monkeypatch
+):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc, _sec, holding = await _pinned(s, hh, monkeypatch)
+        assert holding.market_value_override_quantity == Decimal("10")
+        assert holding.market_value_override_as_of == ON
+        # `as_of` is when the quantity was confirmed, and nobody said.
+        assert holding.as_of is None
+
+        [before] = (await inv.value_account(s, acc, date(2026, 9, 19), BASE)).holdings
+        assert before.value_native == Decimal("1000")
+        assert before.price_date == EARLIER
+        assert before.market_value_override is None
+
+        valuation = await inv.value_account(s, acc, ON, BASE)
+        [on] = valuation.holdings
+        assert on.value_native == Decimal("500.0000")
+        assert on.price == Decimal("50.00000000")
+        assert on.price_date == ON
+        assert (on.market_value_override, on.market_value_override_as_of) == (
+            Decimal("500.0000"), ON,
+        )
+        # Not a quote, so not the account's oldest one.
+        assert valuation.oldest_price_date is None
+        assert valuation.max_stale_days is None
+
+
+async def test_a_metadata_edit_does_not_move_the_date_a_value_applies_from(
+    household_factory, monkeypatch
+):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        _acc, _sec, holding = await _pinned(s, hh, monkeypatch)
+        monkeypatch.setattr(inv, "ledger_today", lambda: date(2026, 9, 25))
+
+        await inv.update_holding(s, holding.id, _Data(name="Private fund", ticker="  "))
+
+        assert holding.name_override == "Private fund"
+        assert holding.ticker_override is None  # a blank symbol is no symbol
+        assert holding.market_value_override == Decimal("500.0000")
+        assert holding.market_value_override_as_of == ON
+        assert holding.as_of is None
+
+        # Setting it again is a new statement, from the new day.
+        await inv.update_holding(s, holding.id, _Data(market_value=Decimal("600")))
+        assert holding.market_value_override_as_of == date(2026, 9, 25)
+
+        await inv.update_holding(s, holding.id, _Data(market_value=None))
+        assert holding.market_value_override is None
+        assert holding.market_value_override_quantity is None
+        assert holding.market_value_override_as_of is None
+
+
+async def test_a_quantity_edit_scales_a_value_set_by_hand(household_factory, monkeypatch):
+    """The total was for ten units. Twenty are worth twice it, and a short of five
+    is negative — never the same positive total whatever is held."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc, _sec, holding = await _pinned(s, hh, monkeypatch)
+
+        await inv.update_holding(s, holding.id, _Data(quantity=Decimal("20")))
+        assert holding.market_value_override == Decimal("500.0000")
+        assert holding.market_value_override_quantity == Decimal("10")
+        [value] = (await inv.value_account(s, acc, ON, BASE)).holdings
+        assert value.value_native == Decimal("1000.0000")
+        assert acc.current_balance == Decimal("1000.0000")
+
+        await inv.update_holding(s, holding.id, _Data(quantity=Decimal("-5")))
+        [value] = (await inv.value_account(s, acc, ON, BASE)).holdings
+        assert value.value_native == Decimal("-250.0000")
+        assert value.price == Decimal("50.00000000")
+
+        # A total sent with a quantity is for that quantity, and signed like it.
+        with pytest.raises(LedgerError) as refused:
+            await inv.update_holding(s, holding.id, _Data(market_value=Decimal("100")))
+        assert refused.value.status == 422
+        await inv.update_holding(
+            s, holding.id, _Data(quantity=Decimal("4"), market_value=Decimal("100"))
+        )
+        assert holding.market_value_override_quantity == Decimal("4")
+        [value] = (await inv.value_account(s, acc, ON, BASE)).holdings
+        assert value.value_native == Decimal("100.0000")
+
+
+async def test_a_trade_after_a_value_was_set_scales_it(household_factory, monkeypatch):
+    """Ten units set to 500, then ten more bought: the position is worth 1,000.
+    Holding the total at 500 would report the purchase as a loss."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        monkeypatch.setattr(inv, "ledger_today", lambda: ON)
+        acc = await _account(s, hh)
+        sec = await _security(s, hh)
+        await _buy(s, hh, acc, sec, qty="10", amount="-500", on=EARLIER)
+        # No row yet: the trades are the position. A label edit needs one, and the
+        # row's own quantity is not the position's (ADR-0034).
+        holding = Holding(household_id=hh, account_id=acc.id, security_id=sec.id,
+                          quantity=Decimal("3"))
+        s.add(holding)
+        await s.flush()
+        await inv.update_holding(s, holding.id, _Data(market_value=Decimal("500")))
+        # Pinned to what is held — the ten the trades say, not the row's three.
+        assert holding.market_value_override_quantity == Decimal("10")
+
+        await _buy(s, hh, acc, sec, qty="10", amount="-500", on=date(2026, 9, 22))
+
+        [value] = (await inv.value_account(s, acc, date(2026, 9, 22), BASE)).holdings
+        assert value.quantity == Decimal("20")
+        assert value.value_native == Decimal("1000.0000")
+        # And the day before the second buy, through the as-of-a-date path.
+        quantities = await inv.quantities_at(s, account_ids=[acc.id], on=ON)
+        assert await inv.securities_value_base(
+            s, quantities=quantities, on=ON, base_ccy=BASE
+        ) == Decimal("500.0000")
+
+
+async def test_a_local_cash_type_does_not_take_a_fund_out_of_appreciation(
+    household_factory, monkeypatch
+):
+    """Cash is the security's type everywhere. Re-typing a fund as cash in one
+    account is a label: reading it as cash in the market values while its trade
+    stayed in the buys reported the purchase as a 1,000 loss."""
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc = await _account(s, hh)
+        sec = await _security(s, hh)
+        await inv.upsert_price(
+            s, household_id=hh, security_id=sec.id, price_date=EARLIER, price=Decimal("100")
+        )
+        holding = await inv.upsert_holding(
+            s, household_id=hh, account_id=acc.id, security_id=sec.id, quantity=Decimal("10"),
+        )
+        await _buy(s, hh, acc, sec, qty="10", amount="-1000", on=ON)
+        await inv.update_holding(s, holding.id, _Data(security_type="cash"))
+
+        end = date(2026, 9, 30)
+        [value] = (await inv.value_account(s, acc, end, BASE)).holdings
+        assert value.security_type == "cash"  # the label, for display and allocation
+        total, by_account, warnings = await reports._appreciation(
+            s, start=EARLIER, end=end, base_ccy=BASE, account_ids=None
+        )
+        assert total == Decimal("0.0000")
+        assert by_account[acc.id] == Decimal("0.0000")
+        assert warnings == []
+
+
+async def test_a_holding_valued_only_by_hand_is_not_reported_unpriced(
+    household_factory, monkeypatch
+):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        monkeypatch.setattr(inv, "ledger_today", lambda: EARLIER)
+        acc = await _account(s, hh)
+        sec = await _security(s, hh, name="Family LLC", ticker=None)
+        await inv.upsert_holding(
+            s, household_id=hh, account_id=acc.id, security_id=sec.id,
+            quantity=Decimal("1"), metadata=_Data(market_value=Decimal("5000")),
+        )
+
+        total, _by_account, warnings = await reports._appreciation(
+            s, start=ON, end=date(2026, 9, 30), base_ccy=BASE, account_ids=None
+        )
+        assert (total, warnings) == (Decimal("0.0000"), [])
+
+        # Before the value was set there is nothing to value it by, and that is said.
+        _total, _by_account, warnings = await reports._appreciation(
+            s, start=date(2026, 9, 1), end=date(2026, 9, 30), base_ccy=BASE, account_ids=None
+        )
+        assert warnings == [
+            "Family LLC has no price at the start or end of this period: "
+            "its change is not attributed to the market"
+        ]
+
+
+async def test_a_value_set_inside_a_period_is_named_in_its_appreciation(
+    household_factory, monkeypatch
+):
+    hh = await household_factory()
+    async with scoped_session(household_id=hh) as s:
+        acc, _sec, holding = await _pinned(s, hh, monkeypatch, total="1500")
+        await inv.update_holding(s, holding.id, _Data(name="Founders fund"))
+
+        total, by_account, warnings = await reports._appreciation(
+            s, start=EARLIER, end=date(2026, 9, 30), base_ccy=BASE, account_ids=None
+        )
+        assert total == by_account[acc.id] == Decimal("500.0000")
+        assert warnings == [
+            "Founders fund's value was set by hand on 2026-09-20; that change is "
+            "included in market appreciation"
+        ]
+
+        # Set on or before the first day, it is in both ends and moved nothing.
+        _total, _by_account, warnings = await reports._appreciation(
+            s, start=ON, end=date(2026, 9, 30), base_ccy=BASE, account_ids=None
+        )
+        assert warnings == []

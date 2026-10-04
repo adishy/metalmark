@@ -23,7 +23,11 @@ AGENT_BASE = f"{dispatch.PUBLIC_PREFIX}/agent/{AGENT_VERSION}"
 DEBUG_BASE = f"{dispatch.PUBLIC_PREFIX}/anon_debug"
 
 ANONYMIZATION = [
-    "Read-only: every request runs in a database transaction that cannot write.",
+    "GET and debug requests run in database transactions that cannot write. "
+    "Only POST /agent/v1/transactions (transactions:write) and POST "
+    "/agent/v1/investments/holdings (holdings:write) can add entries. "
+    "Both require the household owner role and take ids, numbers and dates only — "
+    "no names or descriptions; their request schemas are in OpenAPI.",
     "Ids (uuids), amounts, dates, counts and flags are real.",
     "Names and free text (accounts, owners, institutions, securities, merchants, "
     "descriptions, notes, custom categories and tags, people) are pseudonyms like "
@@ -40,7 +44,8 @@ ANONYMIZATION = [
 AUTH = (
     "Authorization: Bearer mmk_… — an agent token, issued by an administrator or the "
     "household's owner under Admin → Agent access. /agent needs the 'agent:read' "
-    "scope, /anon_debug needs 'debug:read'."
+    "scope, /anon_debug needs 'debug:read'. Adding transactions needs "
+    "'transactions:write'; adding holdings needs 'holdings:write'."
 )
 
 

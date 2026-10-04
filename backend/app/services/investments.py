@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -92,6 +92,11 @@ class HoldingValue:
     #: when there is no price, which is a stronger statement than "very stale".
     stale_days: int | None
     reason: str | None = None
+    #: Set when this value is a total the household set by hand (ADR-0059) and it
+    #: applies on the valuation date: the stored total, and the day it was set.
+    #: ``price`` is then that total per unit, not a market quote.
+    market_value_override: Decimal | None = None
+    market_value_override_as_of: date | None = None
 
     @property
     def is_priced(self) -> bool:
@@ -146,14 +151,22 @@ class AccountValuation:
     def no_rate(self) -> list[HoldingValue]:
         return [h for h in self.holdings if h.reason == NO_RATE]
 
+    # The two staleness figures are about *quotes*. A value the household set by
+    # hand is not a quote going stale, and the row says when it was set.
     @property
     def oldest_price_date(self) -> date | None:
-        dates = [h.price_date for h in self.holdings if h.price_date is not None]
+        dates = [
+            h.price_date for h in self.holdings
+            if h.price_date is not None and h.market_value_override_as_of is None
+        ]
         return min(dates) if dates else None
 
     @property
     def max_stale_days(self) -> int | None:
-        ages = [h.stale_days for h in self.holdings if h.stale_days is not None]
+        ages = [
+            h.stale_days for h in self.holdings
+            if h.stale_days is not None and h.market_value_override_as_of is None
+        ]
         return max(ages) if ages else None
 
     @property
@@ -192,6 +205,47 @@ async def latest_prices(
     }
 
 
+_PRICE_QUANT = Decimal("0.00000001")  # NUMERIC(19,8), the price scale
+
+
+def override_applies(holding: Holding | None, on: date) -> bool:
+    """Whether a hand-set total (ADR-0059) values this position on ``on``.
+
+    The one predicate: valuation and the appreciation report both ask it, so a
+    position cannot be valued by its override in one and called unpriced in the
+    other.
+    """
+    return (
+        holding is not None
+        and holding.market_value_override is not None
+        and holding.market_value_override_as_of is not None
+        and holding.market_value_override_as_of <= on
+    )
+
+
+def override_value(holding: Holding, quantity: Decimal) -> Decimal:
+    """The hand-set total, for ``quantity`` units, in the security's quote currency.
+
+    Exactly the stored total at the quantity it was set for — a total of 1 for
+    300,000,000 units is 1, which no per-unit price at eight decimals can say.
+    At any other quantity the unit price is what was pinned, so the total scales:
+    a buy after the pin adds value instead of reading as a loss, and a short is
+    negative.
+    """
+    pinned = holding.market_value_override_quantity
+    if quantity == pinned:
+        return holding.market_value_override
+    return quantize_storage(holding.market_value_override * quantity / pinned)
+
+
+def override_unit_price(holding: Holding) -> Decimal:
+    """The per-unit price a hand-set total implies, at the price scale. For
+    display: the value itself never goes through this rounding."""
+    return (holding.market_value_override / holding.market_value_override_quantity).quantize(
+        _PRICE_QUANT, rounding=ROUND_HALF_UP
+    )
+
+
 async def _value_holdings(
     session: AsyncSession,
     positions: list[PositionRecord],
@@ -206,13 +260,20 @@ async def _value_holdings(
     for h in positions:
         sec = securities[h.security_id]
         point = prices.get(h.security_id)
+        held = h.holding
+        overridden = override_applies(held, on)
+        if overridden:
+            point = PricePoint(
+                override_unit_price(held), sec.currency, held.market_value_override_as_of
+            )
         base = HoldingValue(
             holding_id=h.holding_id,
             account_id=h.account_id,
             security_id=h.security_id,
-            name=sec.name,
-            ticker=sec.ticker,
-            security_type=sec.security_type,
+            name=(held.name_override if held else None) or sec.name,
+            ticker=(held.ticker_override if held and held.ticker_override is not None
+                    else sec.ticker),
+            security_type=(held.security_type_override if held else None) or sec.security_type,
             quantity=h.quantity,
             price=None,
             price_date=None,
@@ -227,7 +288,7 @@ async def _value_holdings(
             out.append(base)
             continue
 
-        native = h.quantity * point.price
+        native = override_value(held, h.quantity) if overridden else h.quantity * point.price
         # Two hops, and they are not the same hop: → the account, because that is
         # the unit its balance is denominated in, and → base, because that is the
         # unit net worth is. A holding whose security trades in the account's own
@@ -255,6 +316,9 @@ async def _value_holdings(
         base.value_account = to_account
         base.value_base = to_base
         base.stale_days = (on - point.price_date).days
+        if overridden:
+            base.market_value_override = held.market_value_override
+            base.market_value_override_as_of = held.market_value_override_as_of
         if to_base is None:
             base.reason = NO_RATE
         out.append(base)
@@ -629,7 +693,7 @@ PROVIDER = "provider"
 
 
 def _row_source(holding: Holding) -> str:
-    return PROVIDER if holding.source == "simplefin" else MANUAL
+    return PROVIDER if holding.source == "simplefin" and not holding.is_override else MANUAL
 
 
 @dataclass(frozen=True)
@@ -1022,20 +1086,29 @@ async def securities_valuation_by_account(
         .scalars()
         .all()
     }
-    if exclude_cash:
-        securities = {
-            sid: s for sid, s in securities.items() if s.security_type != CASH_SECURITY_TYPE
-        }
+    holdings = {
+        (h.account_id, h.security_id): h
+        for h in (await session.execute(
+            select(Holding).where(Holding.account_id.in_(account_ids))
+        )).scalars()
+    }
 
     by_account: dict[uuid.UUID, list[PositionRecord]] = {}
     for (account_id, security_id), quantity in quantities.items():
         if security_id not in securities or account_id not in accounts:
             continue
+        held = holdings.get((account_id, security_id))
+        # Cash is the *security's* type, as in `history_positions` and the trade
+        # sum in reports: an account-local type override is a label for display
+        # and allocation, and reading it here would take a fund out of the market
+        # values while its trades stayed in `net_buys`.
+        if exclude_cash and securities[security_id].security_type == CASH_SECURITY_TYPE:
+            continue
         by_account.setdefault(account_id, []).append(
             PositionRecord(
                 account_id=account_id,
                 security_id=security_id,
-                holding=None,
+                holding=held,
                 quantity=quantity,
                 cost_basis=ZERO,
                 source=MANUAL,
@@ -1412,6 +1485,8 @@ async def upsert_holding(
     quantity: Decimal,
     cost_basis: Decimal | None = None,
     as_of: date | None = None,
+    metadata=None,
+    create_only: bool = False,
 ) -> Holding:
     """Create or replace a position. One position per (account, security), so a
     second call updates rather than appending a duplicate that would double the
@@ -1438,6 +1513,10 @@ async def upsert_holding(
             )
         )
     ).scalar_one_or_none()
+    if create_only:
+        history = await history_positions(session, account_ids=[account_id])
+        if holding is not None or (account_id, security_id) in history:
+            raise LedgerError("Position already exists", 409)
     if holding is None:
         holding = Holding(
             household_id=household_id,
@@ -1455,6 +1534,11 @@ async def upsert_holding(
             holding.cost_basis = cost_basis
         if as_of is not None:
             holding.as_of = as_of
+    if metadata is not None:
+        await _apply_holding_metadata(session, holding, metadata)
+    if holding.source == "simplefin":
+        # This write set the quantity, so the bank's stops landing (ADR-0059).
+        holding.is_override = True
     await session.flush()
     await _recompute_accounts(session, {account_id})
     return holding
@@ -1467,11 +1551,30 @@ async def update_holding(session: AsyncSession, holding_id: uuid.UUID, data) -> 
         if data.quantity == 0:
             raise LedgerError("A zero quantity is the absence of a position", 422)
         holding.quantity = data.quantity
-    if is_set(data, "cost_basis") and data.cost_basis is not None:
+    if is_set(data, "cost_basis"):
         await _reject_manual_write(session, holding, "cost_basis")
         holding.cost_basis = data.cost_basis
     if is_set(data, "as_of"):
         holding.as_of = data.as_of
+    if getattr(data, "reset_overrides", False):
+        if holding.source != "simplefin":
+            raise LedgerError("Only bank holdings can return to bank updates", 422)
+        holding.is_override = False
+        holding.name_override = holding.ticker_override = holding.security_type_override = None
+        _clear_value_override(holding)
+    else:
+        # After the quantity above, so a total sent with a new quantity is pinned
+        # to the new one.
+        await _apply_holding_metadata(session, holding, data)
+        # Provenance is per field (ADR-0059): only a quantity, basis or date the
+        # household wrote stops the bank's. A label or a value does not.
+        frozen = (
+            (is_set(data, "quantity") and data.quantity is not None)
+            or is_set(data, "cost_basis")
+            or is_set(data, "as_of")
+        )
+        if frozen and holding.source == "simplefin":
+            holding.is_override = True
     await session.flush()
     await _recompute_accounts(session, {holding.account_id})
     return holding
@@ -1485,21 +1588,50 @@ async def delete_holding(session: AsyncSession, holding_id: uuid.UUID) -> None:
     await _recompute_accounts(session, {account_id})
 
 
+def _clear_value_override(holding: Holding) -> None:
+    holding.market_value_override = None
+    holding.market_value_override_quantity = None
+    holding.market_value_override_as_of = None
+
+
+async def _apply_holding_metadata(session: AsyncSession, holding: Holding, data) -> None:
+    for attr in ("name", "ticker", "security_type"):
+        if is_set(data, attr):
+            value = getattr(data, attr)
+            if attr == "ticker":
+                # A blank symbol is no symbol: the security's own shows instead.
+                value = (value or "").strip() or None
+            setattr(holding, f"{attr}_override", value)
+    if not is_set(data, "market_value"):
+        return
+    value = data.market_value
+    if value is None:
+        _clear_value_override(holding)
+        return
+    # The quantity the total is for is the position's, which recorded trades own
+    # when there are any (ADR-0034) — not the row's scalar they override.
+    quantity = (await effective_position(session, holding)).quantity
+    if quantity == 0:
+        raise LedgerError("A closed position has no value to set", 422)
+    if value != 0 and (value < 0) != (quantity < 0):
+        raise LedgerError("Market value must have the same sign as quantity", 422)
+    # The three are one fact and are written together: the total, the quantity
+    # it is exact at, and the day it applies from. `as_of` is left alone — it is
+    # when the quantity was confirmed.
+    holding.market_value_override = quantize_storage(value)
+    holding.market_value_override_quantity = quantity
+    holding.market_value_override_as_of = ledger_today()
+
+
 async def _reject_manual_write(
     session: AsyncSession, holding: Holding, field: str
 ) -> None:
-    """409 when history owns the field (ADR-0020/0034), or the bank does (ADR-0051).
+    """409 when history owns the field (ADR-0020/0034).
 
     Refused rather than ignored. A silently-dropped write is worse than a
     rejection: the client believes a value was stored and the next read
     contradicts it with nothing to explain the difference.
     """
-    if holding.source == "simplefin":
-        raise LedgerError(
-            f"This position's {field} comes from your bank and is updated on every "
-            f"sync, so it cannot be set by hand.",
-            409,
-        )
     current = (await history_positions(session, account_ids=[holding.account_id])).get(
         (holding.account_id, holding.security_id)
     )

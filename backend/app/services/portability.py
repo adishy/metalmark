@@ -3,7 +3,7 @@
 Two artifacts, each independently useful and each independently testable:
 
 * **The document** (``export_document`` / ``import_document``) is the canonical,
-  lossless, re-importable form: a versioned JSON object, ``metalmark.export`` v1.
+  lossless, re-importable form: a versioned JSON object, ``metalmark.export``.
   It is what "move my household to another instance" means.
 * **The CSV** (``transactions_csv``) is one account's transactions as a
   spreadsheet. It is deliberately shaped so that the file the export writes is a
@@ -51,6 +51,8 @@ depending on whatever rates the target happens to hold.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import hashlib
 import io
@@ -65,11 +67,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.core.money import quantize_storage
 from app.models import (
     Account,
     AccountConnection,
+    AccountDocument,
     BalanceSnapshot,
     Category,
     CategoryGroup,
@@ -91,18 +95,18 @@ from app.models import (
     TransactionTag,
     TransferGroup,
 )
-from app.models.investments import HOLDING_SOURCES
+from app.models.investments import HOLDING_SOURCES, SECURITY_TYPES
+from app.services import documents as documents_svc
 from app.services import fx
 from app.services.balance_sign import LIABILITY_TYPES, positives_are_amounts_owed
 from app.services.errors import LedgerError
+from app.services.ledger import today as ledger_today
 
 FORMAT = "metalmark.export"
-#: 2 since ADR-0043: a liability's balances are signed (debt negative). Version 1
-#: documents are still read — ``_upgrade_v1`` brings their liability balances into
-#: the signed convention first, so a backup taken before the change restores to
-#: the same net worth it was taken at.
-VERSION = 2
-READABLE_VERSIONS = (1, VERSION)
+#: 3 adds account files (ADR-0060); older readers must refuse rather than drop bytes.
+#: Version 2 signed liabilities (ADR-0043). Version 1 still reads through _upgrade_v1.
+VERSION = 3
+READABLE_VERSIONS = (1, 2, VERSION)
 
 #: A ceiling on an imported document, checked before it is parsed. The document is
 #: the whole household, so the bound is generous — it is here to stop a wrong file
@@ -298,7 +302,10 @@ _ACCOUNT_FIELDS = (
 _SNAPSHOT_FIELDS = ("account_id", "balance_date", "balance", "currency")
 _SECURITY_FIELDS = ("id", "name", "ticker", "security_type", "currency", "is_manual")
 _PRICE_FIELDS = ("security_id", "price_date", "price", "currency", "source")
-_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of", "source")
+_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of", "source",
+                   "is_override", "name_override", "ticker_override",
+                   "security_type_override", "market_value_override",
+                   "market_value_override_quantity", "market_value_override_as_of")
 _TRANSFER_GROUP_FIELDS = ("id", "matched_by", "fx_cost_base")
 # ``base_amount`` and ``fx_rate_date`` are absent on purpose; see the module docstring.
 # So is ``import_hash``: it is a digest of the *source* account's uuid, so in the
@@ -370,6 +377,11 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
     prices = await _select(
         session, SecurityPrice, (SecurityPrice.security_id, SecurityPrice.price_date)
     )
+    documents = (await session.execute(select(AccountDocument).options(
+        undefer(AccountDocument.content),
+    ).order_by(
+        AccountDocument.account_id, AccountDocument.created_at, AccountDocument.id,
+    ))).scalars().all()
     holdings = await _select(session, Holding, (Holding.account_id, Holding.security_id))
     transfer_groups = await _select(session, TransferGroup, (TransferGroup.id,))
     # Deterministic order, and not for tidiness: the import derives a manual row's
@@ -425,6 +437,11 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
         "categories": [_row(c, _CATEGORY_FIELDS) for c in categories],
         "tags": [_row(t, _TAG_FIELDS) for t in tags],
         "accounts": [_row(a, _ACCOUNT_FIELDS) for a in accounts],
+        "account_documents": [dict(
+            _row(d, ("id", "account_id", "filename", "media_type",
+                     "size_bytes", "sha256", "created_at")),
+            content_base64=base64.b64encode(d.content).decode("ascii"),
+        ) for d in documents],
         "balance_snapshots": [_row(s, _SNAPSHOT_FIELDS) for s in snapshots],
         "securities": [_row(s, _SECURITY_FIELDS) for s in securities],
         "security_prices": [_row(p, _PRICE_FIELDS) for p in prices],
@@ -750,6 +767,7 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
         await _import_tags(session, household_id, doc, remap, result)
         await _import_connections(session, household_id, doc, remap, result)
         await _import_accounts(session, household_id, doc, remap, result)
+        await _import_documents(session, household_id, doc, remap, result)
         await _import_securities(session, household_id, doc, remap, result)
         await _import_snapshots(session, household_id, doc, remap, result)
         await _import_prices(session, household_id, doc, remap, result)
@@ -1233,17 +1251,80 @@ async def _import_holdings(session: AsyncSession, household_id: uuid.UUID, doc: 
         if found is not None:
             result.found("holdings")
             continue
+        quantity = _money(entry, "quantity", where)
+        as_of = _date(entry, "as_of", where, required=False)
         session.add(Holding(
             household_id=household_id,
             account_id=account_id,
             security_id=security_id,
-            quantity=_money(entry, "quantity", where),
+            quantity=quantity,
             cost_basis=_money(entry, "cost_basis", where, required=False),
-            as_of=_date(entry, "as_of", where, required=False),
+            as_of=as_of,
             source=_holding_source(entry, where),
+            is_override=_bool(entry, "is_override", where, required=False) or False,
+            **_holding_overrides(entry, where, quantity=quantity, as_of=as_of),
         ))
         await session.flush()
         result.made("holdings")
+
+
+def _holding_overrides(
+    entry: dict[str, Any], where: str, *, quantity: Decimal, as_of: date | None
+) -> dict[str, Any]:
+    """The account-local corrections (ADR-0059), checked as the API checks them,
+    so a hand-edited file fails here by name and not in the database.
+
+    ``price_override`` is not read: a column an early build exported and nothing
+    ever wrote.
+    """
+    name = _text(entry, "name_override", where, required=False)
+    if name is not None and not 1 <= len(name) <= 200:
+        raise _fail(f"{where}.name_override", "expected 1 to 200 characters")
+    ticker = _text(entry, "ticker_override", where, required=False)
+    if ticker is not None:
+        ticker = ticker.strip() or None
+    if ticker is not None and len(ticker) > 32:
+        raise _fail(f"{where}.ticker_override", "expected at most 32 characters")
+    kind = _text(entry, "security_type_override", where, required=False)
+    if kind is not None and kind not in SECURITY_TYPES:
+        raise _fail(f"{where}.security_type_override",
+                    f"expected one of {', '.join(SECURITY_TYPES)}")
+
+    total = _money(entry, "market_value_override", where, required=False)
+    pinned = _money(entry, "market_value_override_quantity", where, required=False)
+    set_on = _date(entry, "market_value_override_as_of", where, required=False)
+    if total is None:
+        if pinned is not None or set_on is not None:
+            raise _fail(
+                f"{where}.market_value_override",
+                "missing, but its quantity or date is set: the three travel together",
+            )
+    else:
+        if ("market_value_override_quantity" not in entry
+                and "market_value_override_as_of" not in entry):
+            # Written before the total carried its own quantity and date: it was
+            # for the holding's quantity, from the holding's date.
+            pinned, set_on = quantity, as_of or ledger_today()
+        if pinned is None or set_on is None:
+            raise _fail(
+                f"{where}.market_value_override",
+                "needs market_value_override_quantity and market_value_override_as_of",
+            )
+        if pinned == 0:
+            raise _fail(f"{where}.market_value_override_quantity", "cannot be zero")
+        if total != 0 and (total < 0) != (pinned < 0):
+            raise _fail(f"{where}.market_value_override",
+                        "must have the same sign as the quantity it was set for")
+        if abs(total) >= Decimal(10) ** 15 or abs(pinned) >= Decimal(10) ** 11:
+            raise _fail(f"{where}.market_value_override", "out of range")
+    return {
+        "name_override": name,
+        "ticker_override": ticker,
+        "security_type_override": kind,
+        "market_value_override": total,
+        "market_value_override_quantity": pinned,
+        "market_value_override_as_of": set_on,
+    }
 
 
 def _holding_source(entry: dict[str, Any], where: str) -> str:
@@ -1951,3 +2032,44 @@ async def _import_recurring_series(session: AsyncSession, household_id: uuid.UUI
         remap.put(old_id, series.id)
         result.made("recurring_series")
     await session.flush()
+
+
+async def _import_documents(session: AsyncSession, household_id: uuid.UUID,
+                            doc: dict[str, Any], remap: _Remap, result: ImportResult) -> None:
+    """File identity is account + sanitized name + content digest; bytes travel losslessly."""
+    existing = (await session.execute(select(AccountDocument).order_by(
+        AccountDocument.created_at, AccountDocument.id,
+    ))).scalars().all()
+    by_key: dict[Any, list[AccountDocument]] = {}
+    for row in existing:
+        by_key.setdefault((row.account_id, row.filename, row.sha256), []).append(row)
+    ordinals = _Ordinals()
+    for i, entry in enumerate(_entries(doc, "account_documents")):
+        where = f"account_documents[{i}]"
+        account_id = remap.get(_str_id(_get(entry, "account_id", where), where), where, "account")
+        if account_id is None:
+            raise _fail(where, "account_id is required")
+        encoded = _text(entry, "content_base64", where)
+        if encoded is None or len(encoded) > ((documents_svc.MAX_FILE_BYTES + 2) // 3) * 4:
+            raise _fail(where, "file exceeds 20 MB")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            raise _fail(where, "content_base64 must be valid base64") from None
+        digest = hashlib.sha256(content).hexdigest()
+        size = _int(entry, "size_bytes", where)
+        if _text(entry, "sha256", where) != digest or size != len(content):
+            raise _fail(where, "file size or SHA-256 does not match its content")
+        filename = documents_svc.safe_filename(_text(entry, "filename", where))
+        key = (account_id, filename, digest)
+        row = _nth(by_key, key, ordinals.next(key))
+        if row is not None:
+            result.found("account_documents")
+            continue
+        row = await documents_svc.create_document(session, household_id, account_id, filename,
+                                                  _text(entry, "media_type", where), content)
+        created_at = _dt(entry, "created_at", where, required=False)
+        if created_at is not None:
+            row.created_at = created_at
+        by_key.setdefault(key, []).append(row)
+        result.made("account_documents")

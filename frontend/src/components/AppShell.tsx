@@ -247,7 +247,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           header exactly as well as a fixed one — going `fixed` here would
           only add the cost of reserving its height in `main` manually. */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2">
-        <div className="flex min-w-0 items-center gap-6">
+        <div className="flex min-w-0 items-center gap-3 xl:gap-6">
           {/* Mark and wordmark as one unit, so the `gap-6` above stays the space
               between the brand and the nav rather than creeping in between the
               two halves of the brand. At 28 px the mark is the size of an app
@@ -255,7 +255,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               has to survive next to a lot of other things. */}
           <span className="flex min-w-0 items-center gap-2">
             <MetalMark size={28} />
-            <span className="text-lg font-semibold text-accent">MetalMark Money</span>
+            <span className="text-lg font-semibold text-accent lg:whitespace-nowrap">MetalMark Money</span>
           </span>
           <nav className="hidden gap-1 sm:flex" aria-label="Main">
             {items.map((n) => (
@@ -294,18 +294,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={() => setPaletteOpen(true)}
             aria-keyshortcuts="Meta+K Control+K"
-            className="hidden min-h-11 items-center gap-2 rounded-control border border-border-strong bg-surface-inset px-3 text-sm text-fg-muted hover:text-fg lg:inline-flex"
+            className="hidden min-h-11 min-w-0 items-center gap-2 rounded-control border border-border-strong bg-surface-inset px-3 text-sm text-fg-muted hover:text-fg lg:inline-flex lg:w-40 xl:w-64"
             data-testid="palette-open"
           >
             <SearchIcon aria-hidden="true" className="size-4" />
-            Search
+            <span className="flex-1 text-left">Search</span>
             {/* Decorative: `aria-keyshortcuts` is what tells assistive tech the
                 shortcut, and "Search ⌘K" read aloud is not a name. */}
-            <kbd aria-hidden="true" className="rounded border border-border px-1.5 py-0.5 text-xs">
+            <kbd aria-hidden="true" className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 font-sans text-xs leading-4">
               {MOD}K
             </kbd>
           </button>
-          <span className="hidden sm:inline">{me?.household_name}</span>
           <ThemeButton />
           <button
             type="button"

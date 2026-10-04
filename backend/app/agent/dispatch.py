@@ -47,6 +47,7 @@ from app.models import (
     AccountConnection,
     Category,
     CategoryGroup,
+    Holding,
     Household,
     HouseholdMember,
     Owner,
@@ -66,6 +67,12 @@ PUBLIC_PREFIX = "/api"
 
 #: App ``GET`` routes an agent cannot reach, and why.
 EXCLUDED: dict[str, str] = {
+    "/accounts/{account_id}/documents": (
+        "Private document metadata is outside the anonymized agent API."
+    ),
+    "/accounts/{account_id}/documents/{document_id}/content": (
+        "Private document bytes are never exposed to agents."
+    ),
     "/healthz": "Liveness for the container, not household data; see /anon_debug/system.",
     "/auth/me": "The browser session's own identity, and its CSRF token.",
     "/export": "The whole household as a raw document — not a schema the registry can walk.",
@@ -206,8 +213,7 @@ async def principal_for(request: Request, scope: str) -> AgentPrincipal:
             detail={
                 "code": "invalid_token",
                 "message": (
-                    "Token is unknown, revoked or expired, "
-                    "or its issuer can no longer issue tokens"
+                    "Token is unknown, revoked or expired, or its issuer can no longer issue tokens"
                 ),
                 "hint": NO_TOKEN_HINT,
             },
@@ -263,6 +269,9 @@ async def load_known_names(session: AsyncSession, household_id: uuid.UUID) -> Kn
     for display_name, email in people:
         names.add("Person", display_name)
         names.add("Person", email)
+    # Last, so a holding given the same local name as an institution or a person
+    # cannot take that name's pseudonym over: the first kind wins.
+    names.extend("Security", (r[0] for r in await col(Holding.name_override)))
     return names
 
 

@@ -24,7 +24,11 @@ from app.models.base import TimestampMixin, UUIDPkMixin
 SCOPE_AGENT_READ = "agent:read"
 #: Read the debugging views under ``/anon_debug``.
 SCOPE_DEBUG_READ = "debug:read"
-SCOPES = (SCOPE_AGENT_READ, SCOPE_DEBUG_READ)
+SCOPE_TRANSACTIONS_WRITE = "transactions:write"
+SCOPE_HOLDINGS_WRITE = "holdings:write"
+SCOPES = (SCOPE_AGENT_READ, SCOPE_DEBUG_READ, SCOPE_TRANSACTIONS_WRITE, SCOPE_HOLDINGS_WRITE)
+#: Scopes only the household owner may issue or use.
+WRITE_SCOPES = (SCOPE_TRANSACTIONS_WRITE, SCOPE_HOLDINGS_WRITE)
 
 
 class AgentToken(UUIDPkMixin, TimestampMixin, Base):

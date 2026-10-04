@@ -246,12 +246,14 @@ describe("the budgets tab", () => {
     expect(h.report).toHaveBeenLastCalledWith(null);
   });
 
-  it("shows a dropped flow beside the numbers it affects", () => {
+  it("discloses incomplete spending beside the numbers without expanding every exception", () => {
     h.report.mockImplementation(() =>
       query({ ...REPORT, warnings: ["1 transfer was dropped from this period."] }),
     );
     renderTab();
     expect(screen.getByTestId("budgets-warning").textContent).toMatch(/dropped/);
+    expect(screen.getByTestId("budgets-warning")).not.toHaveAttribute("open");
+    expect(screen.getByText(/Some spending has incomplete data/)).toBeInTheDocument();
   });
 
   it("offers where plans come from when there are none and nothing is spent", () => {

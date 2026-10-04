@@ -8,6 +8,8 @@ import Accounts from "@/pages/Accounts";
 import { formatMoney } from "@/lib/format";
 import { isoDay, todayIso } from "@/lib/dates";
 
+vi.mock("@/auth/AuthContext", () => ({ useAuth: () => ({ me: { role: "owner", csrf_token: "test" } }) }));
+
 // The page's own reads, stubbed. `useCreateAccount`/`useUpdateAccount`/`useDeleteAccount`
 // are never driven here, but the page calls them on every render and they reach the
 // network through TanStack Query otherwise.
@@ -384,6 +386,57 @@ describe("the net-worth window", () => {
     expect(screen.getByTestId("accounts-net-worth-coverage")).toHaveTextContent(
       "Counted partway through: Savings from Sep 01.",
     );
+  });
+
+  it("keeps the collapsed coverage title neutral when accounts only start partway", () => {
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2026-06-01",
+          net_worth: "40.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "not_started" }],
+        },
+        { date: "2026-09-01", net_worth: "100.00", missing: [] },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    const block = screen.getByTestId("accounts-net-worth-coverage");
+    expect(block).not.toHaveAttribute("open");
+    const summary = block.querySelector("summary")!;
+    expect(summary).toHaveTextContent("History coverage · 1 note");
+    expect(summary.className).not.toContain("text-warning");
+  });
+
+  it("says in the collapsed summary that the chart leaves accounts out", () => {
+    // Decided from the points' `missing` reasons, not from the notes' wording.
+    h.series.mockImplementation(() => ({
+      ...SERIES,
+      points: [
+        {
+          date: "2026-06-01",
+          net_worth: "40.00",
+          missing: [
+            { account_id: "acct-2", name: "Savings", reason: "no_rate" },
+            { account_id: "acct-3", name: "Brokerage", reason: "no_price" },
+          ],
+        },
+        {
+          date: "2026-09-01",
+          net_worth: "100.00",
+          missing: [{ account_id: "acct-2", name: "Savings", reason: "no_rate" }],
+        },
+      ],
+    }));
+    render(<MemoryRouter><Accounts /></MemoryRouter>);
+
+    const block = screen.getByTestId("accounts-net-worth-coverage");
+    expect(block).not.toHaveAttribute("open");
+    const summary = block.querySelector("summary")!;
+    expect(summary).toHaveTextContent("Chart leaves out 2 accounts at some points");
+    expect(summary).not.toHaveTextContent("History coverage");
+    expect(summary.className).toContain("text-warning");
   });
 
   it("stays quiet when every point counts everything", () => {

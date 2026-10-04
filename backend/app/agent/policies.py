@@ -561,6 +561,9 @@ register(
     manual_quantity=K,
     manual_cost_basis=K,
     as_of=K,
+    is_override=K,
+    market_value_override=K,
+    market_value_override_as_of=K,
 )
 register(
     inv.InvestmentTransactionOut,
@@ -614,6 +617,8 @@ register(
     value_base=K,
     stale_days=K,
     reason=Code(),
+    market_value_override=K,
+    market_value_override_as_of=K,
 )
 register(
     inv.AllocationOut,

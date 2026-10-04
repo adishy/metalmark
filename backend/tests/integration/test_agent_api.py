@@ -1191,3 +1191,419 @@ async def test_the_sync_log_is_anonymized_but_still_readable(agent):
     assert "account.created" in events
     created = next(e for e in detail["events"] if e["event"] == "account.created")
     assert created["detail"]["name"].startswith(("Account ", "Value "))
+
+
+async def test_transaction_write_scope_is_opt_in_and_response_is_anonymized(app, world):
+    s, ids = world
+    read = await _issue(s)
+    body = {
+        "account_id": ids["checking"],
+        "amount": "-12.3400",
+        "transacted_at": "2026-10-01T12:00:00Z",
+        "note": f"lunch with {OWNER}",
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        denied = await client.post(
+            "/agent/v1/transactions",
+            json=body,
+            headers={"Authorization": f"Bearer {read['token']}"},
+        )
+        assert denied.status_code == 403
+        issued = await _issue(s, scopes=("transactions:write",))
+        response = await client.post(
+            "/agent/v1/transactions",
+            json=body,
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+        assert response.status_code == 201, response.text
+        assert _leaks(response.json()) == []
+        assert response.json()["amount"] == "-12.3400"
+        stored = await s.ok("GET", f"/transactions/{response.json()['id']}")
+        # The household sees who entered it; nothing else was the agent's to set.
+        assert stored["notes"] == f"Added by agent: lunch with {OWNER}"
+        assert stored["description"] is None and stored["merchant"] is None
+        bare = await client.post(
+            "/agent/v1/transactions",
+            json={k: v for k, v in body.items() if k != "note"},
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+        assert (await s.ok("GET", f"/transactions/{bare.json()['id']}"))["notes"] == (
+            "Added by agent"
+        )
+        denied = await client.delete(
+            f"/agent/v1/transactions/{stored['id']}",
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+        assert denied.status_code == 405
+
+
+@pytest.mark.parametrize("field", ["description", "merchant", "notes"])
+async def test_an_agent_cannot_submit_text_it_could_read_back_as_a_pseudonym(app, world, field):
+    """A pseudonym is keyed on the value it hides, so an agent that could choose a
+    merchant and read its pseudonym back would hold a dictionary: one POST per
+    guess, compared against the real rows. The write schema has no such field."""
+    s, ids = world
+    issued = await _issue(s, scopes=("agent:read", "transactions:write"))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        refused = await client.post(
+            "/agent/v1/transactions",
+            headers=headers,
+            json={
+                "account_id": ids["checking"],
+                "amount": "-1",
+                "transacted_at": "2026-10-01T12:00:00Z",
+                field: "Safeway",
+            },
+        )
+        assert refused.status_code == 422, refused.text
+        assert "Safeway" not in refused.text
+
+
+async def test_an_agents_note_cannot_borrow_a_known_names_pseudonym(app, world):
+    """A note that is exactly a real merchant, owner or note would otherwise come
+    back as that value's pseudonym. Behind the fixed prefix it never equals one."""
+    s, ids = world
+    issued = await _issue(s, scopes=("agent:read", "transactions:write"))
+    a = Agent(app, issued["token"])
+    real = (await a.get(f"/agent/v1/transactions/{ids['bakery1']}")).json()
+    owners = {o["name"] for o in (await a.get("/agent/v1/owners")).json()}
+    seen = set()
+    for guess in (OWNER, f"{OWNER}'s Bakery", f"call {EMAIL} about card {CARD}"):
+        added = await a.http.post(
+            "/agent/v1/transactions",
+            json={
+                "account_id": ids["checking"],
+                "amount": "-1",
+                "transacted_at": "2026-10-01T12:00:00Z",
+                "note": guess,
+            },
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+        assert added.status_code == 201, added.text
+        row = (await a.get(f"/agent/v1/transactions/{added.json()['id']}")).json()
+        assert row["notes"].startswith("Note ")
+        assert row["notes"] not in owners | {real["notes"], real["merchant"]}
+        assert row["description"] is None and row["merchant"] is None
+        assert _leaks(row) == []
+        seen.add(row["notes"])
+    assert len(seen) == 3
+    await a.http.aclose()
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"amount": "0"},
+        {"amount": "1e30"},
+        {"amount": "1.00001"},
+        {"transacted_at": "2026-10-01T12:00:00"},
+        {"transacted_at": "1700-01-01T00:00:00Z"},
+        {"transacted_at": "2999-01-01T00:00:00Z"},
+        {"note": "x" * 501},
+        {"tag_ids": [str(uuid.uuid4()) for _ in range(21)]},
+    ],
+)
+async def test_agent_transaction_values_are_bounded(app, world, patch):
+    s, ids = world
+    issued = await _issue(s, scopes=("transactions:write",))
+    body = {"account_id": ids["checking"], "amount": "-1", "transacted_at": "2026-10-01T12:00:00Z"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/agent/v1/transactions",
+            json={**body, **patch},
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+    assert response.status_code == 422, response.text
+
+
+async def test_agent_writes_cannot_name_another_households_category_or_tag(
+    app, world, household_factory
+):
+    from app.db import scoped_session
+    from app.models import Category, CategoryGroup, Tag
+
+    s, ids = world
+    other = await household_factory(name="Other")
+    async with scoped_session(other) as session:
+        group = CategoryGroup(household_id=other, name="Theirs", type="expense")
+        session.add(group)
+        await session.flush()
+        category = Category(household_id=other, group_id=group.id, name="Theirs")
+        tag = Tag(household_id=other, name="Theirs")
+        session.add_all([category, tag])
+        await session.flush()
+        foreign = {"category_id": str(category.id)}, {"tag_ids": [str(tag.id)]}
+    issued = await _issue(s, scopes=("transactions:write",))
+    before = (await s.ok("GET", "/transactions?limit=200"))["items"]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for extra in (*foreign, {"category_id": str(uuid.uuid4())}):
+            response = await client.post(
+                "/agent/v1/transactions",
+                json={
+                    "account_id": ids["checking"],
+                    "amount": "-1",
+                    "transacted_at": "2026-10-01T12:00:00Z",
+                    **extra,
+                },
+                headers={"Authorization": f"Bearer {issued['token']}"},
+            )
+            assert response.status_code == 404, response.text
+            assert response.json()["detail"] == "Transaction could not be added"
+    assert (await s.ok("GET", "/transactions?limit=200"))["items"] == before
+    # The browser's own route gets the same answer rather than a foreign key's 500.
+    for extra in foreign:
+        refused = await s.request(
+            "POST",
+            "/transactions",
+            json={
+                "account_id": ids["checking"],
+                "amount": "-1",
+                "transacted_at": "2026-10-01T12:00:00Z",
+                **extra,
+            },
+        )
+        assert refused.status_code == 404, refused.text
+
+
+async def test_agent_holdings_take_numbers_only(app, world):
+    s, ids = world
+    account = await s.ok(
+        "POST", "/accounts", json={"name": "Numbers only", "type": "investment", "currency": "USD"}
+    )
+    issued = await _issue(s, scopes=("holdings:write",))
+    body = {"account_id": account["id"], "security_id": ids["security"], "quantity": "2"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for extra in (
+            {"name": OWNER},
+            {"ticker": "ABC"},
+            {"security_type": "cash"},
+            {"quantity": "0"},
+            {"quantity": "1e30"},
+            {"market_value": "-5"},
+            {"market_value": "1.00001"},
+            {"as_of": "2999-01-01"},
+        ):
+            response = await client.post(
+                "/agent/v1/investments/holdings",
+                json={**body, **extra},
+                headers={"Authorization": f"Bearer {issued['token']}"},
+            )
+            assert response.status_code == 422, (extra, response.text)
+    assert await s.ok("GET", f"/investments/holdings?account_id={account['id']}") == []
+
+
+async def test_only_the_owner_can_issue_write_permissions(app, world):
+    from app.db import unscoped_session
+    from app.models import User
+
+    member = Session(app)
+    joined = await member.ok(
+        "POST",
+        "/auth/signup",
+        json={"email": "admin3@example.com", "display_name": "Third", "password": "password123"},
+    )
+    async with unscoped_session() as session:
+        await session.execute(
+            update(User).where(User.id == uuid.UUID(joined["user"]["id"])).values(is_admin=True)
+        )
+    for scope in ("transactions:write", "holdings:write"):
+        refused = await member.request(
+            "POST",
+            "/admin/agent-tokens",
+            json={"name": "x", "scopes": ["agent:read", scope], "expires_in_days": 30},
+        )
+        assert refused.status_code == 403, refused.text
+    await _issue(member)
+    await member.http.aclose()
+
+
+async def test_holding_write_scope_adds_but_never_overwrites(app, world):
+    s, ids = world
+    account = await s.ok(
+        "POST",
+        "/accounts",
+        json={"name": "New investments", "type": "investment", "currency": "USD"},
+    )
+    issued = await _issue(s, scopes=("holdings:write",))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    body = {
+        "account_id": account["id"],
+        "security_id": ids["security"],
+        "quantity": "2",
+        "market_value": "45.6700",
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        added = await client.post("/agent/v1/investments/holdings", headers=headers, json=body)
+        assert added.status_code == 201, added.text
+        assert _leaks(added.json()) == []
+        again = await client.post(
+            "/agent/v1/investments/holdings", headers=headers, json={**body, "quantity": "200"}
+        )
+        assert again.status_code == 409
+        rows = await s.ok("GET", f"/investments/holdings?account_id={account['id']}")
+        assert Decimal(rows[0]["quantity"]) == Decimal("2")
+        denied = await client.post(
+            "/agent/v1/transactions",
+            headers=headers,
+            json={
+                "account_id": ids["checking"],
+                "amount": "1",
+                "transacted_at": "2026-10-01T12:00:00Z",
+            },
+        )
+        assert denied.status_code == 403
+
+
+@pytest.mark.parametrize("insert_after_lookup", [False, True])
+async def test_agent_holding_creation_preserves_concurrent_browser_insert(
+    app, world, monkeypatch, insert_after_lookup
+):
+    from app.db import scoped_session
+    from app.services import investments as svc
+
+    s, ids = world
+    account = await s.ok(
+        "POST", "/accounts",
+        json={"name": "Concurrent investments", "type": "investment", "currency": "USD"},
+    )
+    issued = await _issue(s, scopes=("holdings:write",))
+    original_upsert = svc.upsert_holding
+    hook_name = "history_positions" if insert_after_lookup else "get_security"
+    original_hook = getattr(svc, hook_name)
+    inserted = False
+
+    async def interleave_browser_insert(*args, **kwargs):
+        nonlocal inserted
+        if not inserted:
+            inserted = True
+            async with scoped_session(uuid.UUID(ids["household_id"])) as session:
+                await original_upsert(
+                    session, household_id=uuid.UUID(ids["household_id"]),
+                    account_id=uuid.UUID(account["id"]), security_id=uuid.UUID(ids["security"]),
+                    quantity=Decimal("7"), cost_basis=Decimal("123"),
+                )
+        return await original_hook(*args, **kwargs)
+
+    monkeypatch.setattr(svc, hook_name, interleave_browser_insert)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/agent/v1/investments/holdings",
+            headers={"Authorization": f"Bearer {issued['token']}"},
+            json={"account_id": account["id"], "security_id": ids["security"], "quantity": "200"},
+        )
+    assert inserted
+    assert response.status_code == 409, response.text
+    assert response.json() == {"detail": "Holding could not be added"}
+    rows = await s.ok("GET", f"/investments/holdings?account_id={account['id']}")
+    assert len(rows) == 1
+    assert Decimal(rows[0]["quantity"]) == Decimal("7")
+    assert Decimal(rows[0]["cost_basis"]) == Decimal("123")
+
+
+
+@pytest.mark.parametrize("scope", ["transactions:write", "holdings:write"])
+async def test_demoted_owner_cannot_use_write_permissions(app, world, scope):
+    from app.db import unscoped_session
+    from app.models import HouseholdMember, User
+
+    s, ids = world
+    issued = await _issue(s, scopes=(scope,))
+    async with unscoped_session() as session:
+        uid = uuid.UUID(ids["user"])
+        await session.execute(update(User).where(User.id == uid).values(is_admin=False))
+        await session.execute(
+            update(HouseholdMember).where(HouseholdMember.user_id == uid).values(role="member")
+        )
+    path, body = (
+        ("transactions", {"account_id": ids["checking"], "amount": "1",
+                          "transacted_at": "2026-10-01T12:00:00Z"})
+        if scope == "transactions:write" else
+        ("investments/holdings", {"account_id": ids["checking"],
+                                 "security_id": ids["security"], "quantity": "1"})
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/agent/v1/{path}", json=body,
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        )
+    assert response.status_code == 401
+
+
+async def test_write_permissions_cannot_address_another_household(app, world, household_factory):
+    from app.db import scoped_session
+    from app.models import Account
+    from app.services.owners import ensure_shared_owner
+
+    s, ids = world
+    other = await household_factory(name="Other")
+    async with scoped_session(other) as session:
+        shared = await ensure_shared_owner(session, other)
+        account = Account(
+            household_id=other, name=OWNER, type="investment", currency="USD",
+            is_asset=True, owner_id=shared.id,
+        )
+        session.add(account)
+        await session.flush()
+        foreign = str(account.id)
+    issued = await _issue(s, scopes=("transactions:write", "holdings:write"))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        for path, body in [
+            ("transactions", {"account_id": foreign, "amount": "1",
+                              "transacted_at": "2026-10-01T12:00:00Z"}),
+            ("investments/holdings", {"account_id": foreign,
+                                     "security_id": ids["security"], "quantity": "1"}),
+        ]:
+            response = await client.post(
+                f"/agent/v1/{path}", json=body,
+                headers={"Authorization": f"Bearer {issued['token']}"},
+            )
+            assert response.status_code == 404, response.text
+            assert _leaks(response.json()) == []
+
+
+async def test_agent_holding_creation_refuses_a_closed_history_position(app, world):
+    s, ids = world
+    account = await s.ok(
+        "POST", "/accounts",
+        json={"name": "Closed investments", "type": "investment", "currency": "USD"},
+    )
+    for kind, amount in [("buy", "-20"), ("sell", "20")]:
+        await s.ok(
+            "POST", "/investments/transactions",
+            json={"account_id": account["id"], "security_id": ids["security"],
+                  "type": kind, "trade_date": "2026-10-01",
+                  "quantity": "2" if kind == "buy" else "-2",
+                  "price": "10", "amount": amount},
+        )
+    before = await s.ok("GET", f"/investments/holdings?account_id={account['id']}")
+    assert before == []
+    issued = await _issue(s, scopes=("holdings:write",))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/agent/v1/investments/holdings",
+            headers={"Authorization": f"Bearer {issued['token']}"},
+            json={"account_id": account["id"], "security_id": ids["security"], "quantity": "200"},
+        )
+    assert response.status_code == 409, response.text
+    assert await s.ok("GET", f"/investments/holdings?account_id={account['id']}") == before

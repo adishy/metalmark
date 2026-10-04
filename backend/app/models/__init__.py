@@ -2,6 +2,7 @@
 
 from app.models.agent import AgentToken  # noqa: F401
 from app.models.budgets import Budget  # noqa: F401
+from app.models.documents import AccountDocument  # noqa: F401
 from app.models.fx import FxRate  # noqa: F401
 from app.models.identity import (  # noqa: F401
     Household,
@@ -36,6 +37,7 @@ from app.models.sync import SyncJob, SyncRun, SyncRunEvent  # noqa: F401
 
 __all__ = [
     "AgentToken",
+    "AccountDocument",
     "Budget",
     "FxRate",
     "Household",

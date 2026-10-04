@@ -104,9 +104,9 @@ async def import_household(
     raw = await file.read(svc.MAX_IMPORT_BYTES + 1)
     if len(raw) > svc.MAX_IMPORT_BYTES:
         raise LedgerError(
-            f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB. An "
-            f"export of this size is unusual — check that you picked the JSON "
-            f"document and not something else.",
+            f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB, the most "
+            f"an export can be. Check that you picked the JSON document and not "
+            f"something else.",
             400,
         )
     result = await svc.import_document(ctx.session, ctx.household_id, raw)

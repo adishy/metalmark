@@ -140,7 +140,7 @@ function InstitutionRow({ inst }: { inst: Institution }) {
         }}
         data-testid={`institution-file-${inst.key}`}
       />
-      <div className="flex gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button
           variant="secondary"
           onClick={() => file.current?.click()}
