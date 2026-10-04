@@ -4455,7 +4455,18 @@ paths:
 
         per entity — and for why a credential cannot be in the document at all, so an
 
-        imported connection lands ``auth_error`` and needs reconnecting.'
+        imported connection lands ``auth_error`` and needs reconnecting.
+
+
+        The body is not a declared parameter, on purpose. FastAPI reads a declared
+
+        upload to disk *before* it resolves dependencies, so an unauthenticated
+
+        request could spool as much as the proxy lets through. Here the owner and
+
+        CSRF checks have already passed when the first byte is read, and the body is
+
+        counted against ``max_import_upload_bytes`` as it arrives.'
       operationId: import_household_import_post
       parameters:
       - name: metalmark_session
@@ -4466,12 +4477,6 @@ paths:
           - type: string
           - type: 'null'
           title: Metalmark Session
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/Body_import_household_import_post'
       responses:
         '200':
           description: Successful Response
@@ -4485,6 +4490,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The export's JSON document or its .zip archive.
   /institutions:
     get:
       tags:
@@ -4966,7 +4984,11 @@ paths:
 
         Takes a type, a currency and optionally a name, a subtype, an opening balance
 
-        and an owner. Without a name the account is created as "Added by agent". The
+        and an owner. Without a name the account is created as "Added by agent". A
+
+        name another account of the same type and currency already has gets a number
+
+        after it ("Added by agent 2"), so the two stay separate accounts in an export. The
 
         name is the one piece of text an agent may choose (ADR-0062): in the mirror it
 
@@ -5614,7 +5636,8 @@ components:
             pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
           - type: 'null'
           title: Cost Basis
-          description: Total cost of the whole position, in the security's quote currency.
+          description: Total cost of the whole position, in the account's currency — not the security's
+            quote currency, and not per unit.
         as_of:
           anyOf:
           - type: string
@@ -6105,16 +6128,6 @@ components:
       - file
       - account_id
       title: Body_commit_ofx_import_ofx_commit_post
-    Body_import_household_import_post:
-      properties:
-        file:
-          type: string
-          contentMediaType: application/octet-stream
-          title: File
-      type: object
-      required:
-      - file
-      title: Body_import_household_import_post
     Body_preview_csv_import_csv_preview_post:
       properties:
         file:

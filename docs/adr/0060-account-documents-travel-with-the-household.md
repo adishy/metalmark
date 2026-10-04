@@ -70,8 +70,11 @@ An agent reaches them only through the separate `documents:read` scope (ADR-0062
 
 Database backups carry files without external storage dependencies, and so does the archive export.
 Database size grows with attachments, and nothing in the app stops it: the household's disk is the
-budget. The proxy's body limit is raised to clear one file, and lifted for `/api/import`, where the
-API bounds each part as it reads it.
+budget. The proxy's body limit is raised to clear one file, and lifted for `/api/import`. That
+route does not declare its upload as a parameter: the framework would spool a declared upload to disk
+before checking who sent it. It checks the owner's session and CSRF token first, then counts the body
+as it arrives against `METALMARK_MAX_IMPORT_UPLOAD_BYTES` (8 GiB by default), a bound on the API's
+temporary disk rather than on what a household may keep.
 
 The document on its own is no longer a complete copy of a household that has files. The export
 screen says so and offers the archive first. A file over 100 MiB cannot be kept. Downgrading the

@@ -1811,3 +1811,92 @@ async def test_the_archive_restores_files_and_the_document_alone_does_not(app, w
         "POST", "/import", files={"file": ("x.zip", b"PK\x03\x04junk", "application/zip")}
     )
     assert refused.status_code == 400
+
+
+async def test_agent_accounts_keep_distinct_identities_through_an_export(
+    app, world, household_factory
+):
+    """A manual account is restored by name, type and currency. Two agent accounts
+    made with no name must not collapse into one when the export is imported."""
+    from app.db import scoped_session
+    from app.models import Account
+    from app.services import portability
+
+    s, _ids = world
+    issued = await _issue(s, scopes=("accounts:write",))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        made = []
+        for balance, name in (("100", None), ("200", None), ("300", "Rainy day"),
+                              ("400", "rainy day")):
+            body = {"type": "depository", "currency": "USD", "current_balance": balance}
+            if name:
+                body["name"] = name
+            resp = await client.post("/agent/v1/accounts", headers=headers, json=body)
+            assert resp.status_code == 201, resp.text
+            made.append(resp.json()["id"])
+        # A different type or currency is a different identity already.
+        other = await client.post(
+            "/agent/v1/accounts", headers=headers, json={"type": "credit", "currency": "USD"}
+        )
+    names = [(await s.ok("GET", f"/accounts/{i}"))["name"] for i in made]
+    assert names == ["Added by agent", "Added by agent 2", "Rainy day", "rainy day 2"]
+    assert (await s.ok("GET", f"/accounts/{other.json()['id']}"))["name"] == "Added by agent"
+
+    document = (await s.request("GET", "/export")).content
+    target = await household_factory()
+    async with scoped_session(household_id=target) as session:
+        await portability.import_document(session, target, document)
+        restored = {
+            a.name: a.current_balance
+            for a in (
+                await session.execute(select(Account).where(Account.type == "depository"))
+            ).scalars()
+        }
+    assert {n: str(restored[n].normalize()) for n in names} == {
+        "Added by agent": "1E+2", "Added by agent 2": "2E+2",
+        "Rainy day": "3E+2", "rainy day 2": "4E+2",
+    }
+
+
+async def test_an_import_is_authenticated_before_its_body_is_read(app, world, monkeypatch):
+    """An upload is spooled to disk as it is parsed. That must not start until the
+    session and CSRF token are checked, and must stop at the configured size."""
+    from app.settings import get_settings
+
+    s, _ids = world
+    pulled = 0
+
+    async def body(chunks=64):
+        nonlocal pulled
+        yield b'--b\r\nContent-Disposition: form-data; name="file"; filename="x"\r\n\r\n'
+        for _ in range(chunks):
+            pulled += 1
+            yield b"x" * 8192
+
+    multipart = {"content-type": "multipart/form-data; boundary=b"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as anonymous:
+        refused = await anonymous.post("/import", content=body(), headers=multipart)
+    assert refused.status_code in (401, 403), refused.text
+    assert pulled == 0
+
+    # Logged in but without the CSRF token: also refused unread.
+    s.http.cookies.set(SESSION_COOKIE, s.cookie)
+    forged = await s.http.post("/import", content=body(), headers=multipart)
+    assert forged.status_code == 403 and pulled == 0
+
+    # An owner's upload is counted as it arrives and cut off at the limit.
+    monkeypatch.setattr(get_settings(), "max_import_upload_bytes", 20_000)
+    big = await s.request(
+        "POST", "/import", files={"file": ("x.json", b"{" + b" " * 50_000, "application/json")}
+    )
+    assert big.status_code == 413, big.text
+    chunked = await s.request("POST", "/import", content=body(), headers=multipart)
+    assert chunked.status_code == 413 and pulled <= 4
+    monkeypatch.undo()
+    wrong = await s.request("POST", "/import", files={"other": ("x.json", b"{}", "text/plain")})
+    assert wrong.status_code == 400

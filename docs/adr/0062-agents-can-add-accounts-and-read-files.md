@@ -60,4 +60,8 @@ delete and an `agent.write` log line, and the scope is owner-issued. Description
 are not affected: transactions still take no free text. Closing this would need pseudonyms for
 agent-authored rows keyed on the row rather than the value, as ADR-0061 already notes.
 
-A retried POST makes a second account. As with ADR-0061 there is no rate limit and no idempotency key.
+A retried POST makes a second account. Because a manual account is restored from an export by its
+name, type and currency (ADR-0036), two agent-made accounts sharing all three would merge on import
+and one would lose its balance. So the route numbers a name that an account of the same type and
+currency already has: `Added by agent`, `Added by agent 2`. Accounts a person creates are not
+renamed; ADR-0036's rule for those is unchanged. As with ADR-0061 there is no rate limit and no idempotency key.

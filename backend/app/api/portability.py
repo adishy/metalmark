@@ -18,16 +18,20 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
+from python_multipart.exceptions import MultipartParseError
 from sqlalchemy import select
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
 
 from app.deps import RequestContext, get_context, require_owner
 from app.models import Account, Category, Owner, Transaction
 from app.schemas.portability import ImportOut
 from app.services import portability as svc
 from app.services.errors import LedgerError
+from app.settings import get_settings
 
 router = APIRouter(tags=["portability"])
 
@@ -128,9 +132,59 @@ async def export_transactions_csv(
     )
 
 
-@router.post("/import", response_model=ImportOut)
+def _bounded(request: Request, limit: int) -> Request:
+    """The same request, refusing a body longer than ``limit`` as it arrives.
+
+    Counted on the wire rather than trusted from ``Content-Length``, which a
+    chunked upload does not send and a hostile one can misstate.
+    """
+    received = 0
+    too_large = LedgerError(
+        f"This upload is larger than {limit // (1024 * 1024)} MB, the most an import can be.",
+        413,
+    )
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise too_large
+
+    async def receive():
+        nonlocal received
+        message = await request.receive()
+        if message["type"] == "http.request":
+            received += len(message.get("body", b""))
+            if received > limit:
+                raise too_large
+        return message
+
+    return Request(request.scope, receive)
+
+
+@router.post(
+    "/import",
+    response_model=ImportOut,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["file"],
+                        "properties": {
+                            "file": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "The export's JSON document or its .zip archive.",
+                            }
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 async def import_household(
-    file: UploadFile = File(...), ctx: RequestContext = Depends(require_owner)
+    request: Request, ctx: RequestContext = Depends(require_owner)
 ) -> ImportOut:
     """Load an exported document, or the archive holding it, into this household.
 
@@ -141,21 +195,38 @@ async def import_household(
     nothing the second time. See ``services.portability`` for what "the same" means
     per entity — and for why a credential cannot be in the document at all, so an
     imported connection lands ``auth_error`` and needs reconnecting.
+
+    The body is not a declared parameter, on purpose. FastAPI reads a declared
+    upload to disk *before* it resolves dependencies, so an unauthenticated
+    request could spool as much as the proxy lets through. Here the owner and
+    CSRF checks have already passed when the first byte is read, and the body is
+    counted against ``max_import_upload_bytes`` as it arrives.
     """
-    files = None
-    if await file.read(4) == b"PK\x03\x04":
-        # An archive: the document, with the files it lists beside it. Opened
-        # where the upload was spooled, so the files are read one at a time.
-        raw, files = await run_in_threadpool(svc.open_archive, file.file)
-    else:
-        await file.seek(0)
-        raw = await file.read(svc.MAX_IMPORT_BYTES + 1)
-        if len(raw) > svc.MAX_IMPORT_BYTES:
-            raise LedgerError(
-                f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB, the most "
-                f"a household document can be. Check that you picked the export's JSON "
-                f"document or its .zip archive and not something else.",
-                400,
-            )
-    result = await svc.import_document(ctx.session, ctx.household_id, raw, files)
+    bounded = _bounded(request, get_settings().max_import_upload_bytes)
+    try:
+        form = await bounded.form(max_files=1, max_fields=1)
+    except (MultiPartException, MultipartParseError) as exc:
+        raise LedgerError(f"Not a readable upload: {exc}", 400) from exc
+    try:
+        file = form.get("file")
+        if not isinstance(file, UploadFile):
+            raise LedgerError('Send the export as a multipart upload in a field named "file".', 400)
+        files = None
+        if await file.read(4) == b"PK\x03\x04":
+            # An archive: the document, with the files it lists beside it. Opened
+            # where the upload was spooled, so the files are read one at a time.
+            raw, files = await run_in_threadpool(svc.open_archive, file.file)
+        else:
+            await file.seek(0)
+            raw = await file.read(svc.MAX_IMPORT_BYTES + 1)
+            if len(raw) > svc.MAX_IMPORT_BYTES:
+                raise LedgerError(
+                    f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB, the "
+                    f"most a household document can be. Check that you picked the export's "
+                    f"JSON document or its .zip archive and not something else.",
+                    400,
+                )
+        result = await svc.import_document(ctx.session, ctx.household_id, raw, files)
+    finally:
+        await form.close()
     return ImportOut(**result.as_dict())

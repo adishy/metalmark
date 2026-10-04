@@ -284,3 +284,27 @@ Gates after this change: secrets, lint, contract PASS; pytest 1330 passed; front
 — `AppShell.test.tsx` "opens on ⌘K, with focus in the field" failed on focus timing, then passed 3/3
 alone and 644/644 on a full rerun (not touched by this change; treat as flaky). e2e, walkthrough,
 prod and drill not re-run for this backend-schema and copy change.
+
+## 2026-10-04 — fixes for the PR #48 review (`agent_record/2026-10-04-pr48-review.md`)
+
+The review file was swept into commit c31392c by `git add -A`; it stays as the reviewer wrote it.
+
+- **[P1] Unauthenticated, unbounded import body.** `POST /import` no longer declares its upload as a
+  parameter (FastAPI spools a declared upload before resolving dependencies). It takes the request,
+  so `require_owner` (session and CSRF) runs first, then parses the form through a receive wrapper
+  that counts bytes against `METALMARK_MAX_IMPORT_UPLOAD_BYTES` (8 GiB default) and refuses with 413.
+  The OpenAPI request body is declared by hand. Test: an anonymous and a CSRF-less request are refused
+  with zero body chunks pulled; an oversized upload stops within a few chunks.
+- **[P1] Default-named agent accounts merged on import.** The agent route numbers a name that an
+  account of the same type and currency already has (`Added by agent 2`), under a per-household lock.
+  Import matching for accounts is unchanged. Test: four agent accounts (two unnamed, two differing
+  only in case) round-trip into an empty household with all four balances.
+- **[P2] Cost basis currency.** `AgentHoldingCreate.cost_basis` now says the account's currency.
+
+Gates: secrets, lint, contract PASS; pytest 1332 passed; frontend 644 passed + build; e2e 94 passed;
+prod PASS (ports 28790/28791, `mm-prodgate`, so the preview on 18790/18791 stayed up). drill and
+walkthrough not re-run.
+
+Not changed, same shape as the first finding but bounded: the account-file upload and the CSV/OFX
+import routes also declare `UploadFile`, so an unauthenticated request can spool up to the proxy's
+128 MB there before it is refused.

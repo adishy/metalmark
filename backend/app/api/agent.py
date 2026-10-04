@@ -306,7 +306,9 @@ async def agent_add_account(
     """Add one manual account. Requires accounts:write.
 
     Takes a type, a currency and optionally a name, a subtype, an opening balance
-    and an owner. Without a name the account is created as "Added by agent". The
+    and an owner. Without a name the account is created as "Added by agent". A
+    name another account of the same type and currency already has gets a number
+    after it ("Added by agent 2"), so the two stay separate accounts in an export. The
     name is the one piece of text an agent may choose (ADR-0062): in the mirror it
     reads back as a pseudonym, and that pseudonym is shared with anything else in
     the household that has the same name. The institution cannot be set. The
@@ -320,8 +322,13 @@ async def agent_add_account(
     route = "/accounts"
     fields = data.model_dump(exclude={"name"}, exclude_unset=True, exclude_none=True)
     try:
+        # Kept distinct from every account of the same type and currency, so two
+        # agent-made accounts never share the identity an export restores them by.
+        name = await ledger.distinct_account_name(
+            ctx.session, ctx.household_id, data.stored_name(), data.type, data.currency
+        )
         account = await ledger.create_account(
-            ctx.session, ctx.household_id, AccountCreate(name=data.stored_name(), **fields)
+            ctx.session, ctx.household_id, AccountCreate(name=name, **fields)
         )
         result = AccountOut.model_validate(account)
         body = await dispatch.anonymize(request, principal, result)

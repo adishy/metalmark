@@ -142,7 +142,10 @@ class AgentHoldingCreate(BaseModel):
         default=None,
         max_digits=19,
         decimal_places=4,
-        description="Total cost of the whole position, in the security's quote currency.",
+        description=(
+            "Total cost of the whole position, in the account's currency — not the "
+            "security's quote currency, and not per unit."
+        ),
     )
     as_of: date | None = Field(default=None, description="The day the quantity was confirmed.")
     market_value: Decimal | None = Field(
