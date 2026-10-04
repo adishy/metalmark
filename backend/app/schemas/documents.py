@@ -14,3 +14,6 @@ class AccountDocumentOut(BaseModel):
     media_type: str
     size_bytes: int
     created_at: datetime
+    #: Whether ``…/content?preview=true`` shows it in place: ``pdf``, ``image`` or
+    #: ``text``. ``None`` means the file is a download only.
+    preview: str | None = None

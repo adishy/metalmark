@@ -7,21 +7,17 @@ import re
 import unicodedata
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.documents import AccountDocument
 from app.models.ledger import Account
 from app.services.errors import LedgerError
 
-MAX_FILE_BYTES = 20 * 1024 * 1024
-#: Every file the household keeps, together. The export carries the bytes as
-#: base64 (4/3 the size) inside one JSON document, and the import refuses a
-#: document over ``portability.MAX_IMPORT_BYTES`` (64 MiB). Holding the total here
-#: is what keeps "an export this household made can be imported again" true:
-#: 32 MiB of files is ~43 MiB encoded, which leaves ~21 MiB for the ledger itself.
-#: ``tests/unit/test_document_limits.py`` holds the two numbers to each other.
-MAX_HOUSEHOLD_BYTES = 32 * 1024 * 1024
+#: One file. Not a storage budget — there is none (ADR-0060) — but the size up to
+#: which holding a whole file in memory, as an upload, a row and a response, stays
+#: unremarkable. The column is ``bytea``, which is read and written in one piece.
+MAX_FILE_BYTES = 100 * 1024 * 1024
 
 
 def safe_filename(value: str | None) -> str:
@@ -37,10 +33,6 @@ def safe_media_type(value: str | None) -> str:
         if re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", value) and len(value) <= 127
         else "application/octet-stream"
     )
-
-
-def _mb(size: int, places: int = 0) -> str:
-    return f"{size / (1024 * 1024):.{places}f}"
 
 
 async def require_account(session: AsyncSession, account_id: uuid.UUID) -> None:
@@ -62,21 +54,7 @@ async def create_document(
     if not content:
         raise LedgerError("Choose a file that is not empty", 400)
     if len(content) > MAX_FILE_BYTES:
-        raise LedgerError("Files must be 20 MB or smaller", 413)
-    # One upload at a time per household, so two concurrent requests cannot each
-    # see room for themselves and together overshoot the total.
-    await session.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(f"documents:{household_id}", 0)))
-    )
-    used = (
-        await session.execute(select(func.coalesce(func.sum(AccountDocument.size_bytes), 0)))
-    ).scalar_one()
-    if used + len(content) > MAX_HOUSEHOLD_BYTES:
-        raise LedgerError(
-            f"This would take the household's files past {_mb(MAX_HOUSEHOLD_BYTES)} MB in "
-            f"total ({_mb(used, 1)} MB is in use). Delete a file you no longer need first.",
-            413,
-        )
+        raise LedgerError(f"Files must be {MAX_FILE_BYTES // (1024 * 1024)} MB or smaller", 413)
     row = AccountDocument(
         household_id=household_id,
         account_id=account_id,
@@ -89,3 +67,42 @@ async def create_document(
     session.add(row)
     await session.flush()
     return row
+
+
+#: What the app will show in place, and how it is served when it does. Everything
+#: else is a download. The type is decided here, from the bytes where the format
+#: has a signature, and never taken from what the uploader claimed alone: a file
+#: served inline under a type the browser would run is the risk.
+_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "application/pdf": (b"%PDF-",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/gif": (b"GIF87a", b"GIF89a"),
+    "image/webp": (b"RIFF",),
+}
+_TEXT_TYPES = frozenset({
+    "text/plain", "text/csv", "text/markdown", "text/tab-separated-values", "application/json",
+})
+_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".md", ".json", ".log", ".ofx", ".qfx", ".qif")
+
+
+def preview_type(filename: str, media_type: str, head: bytes) -> str | None:
+    """The type to serve ``inline``, or ``None`` when the file is only a download.
+
+    PDFs and raster images are served as themselves when their first bytes agree
+    with their declared type. Text is always served as ``text/plain``, whatever it
+    claimed to be, so HTML or SVG uploaded as "text" is shown as its source.
+    """
+    signatures = _SIGNATURES.get(media_type)
+    if signatures is not None:
+        if not head.startswith(signatures):
+            return None
+        if media_type == "image/webp" and head[8:12] != b"WEBP":
+            return None
+        return media_type
+    if media_type in _TEXT_TYPES or (
+        media_type in ("application/octet-stream", "application/vnd.ms-excel")
+        and filename.lower().endswith(_TEXT_SUFFIXES)
+    ):
+        return None if b"\x00" in head else "text/plain; charset=utf-8"
+    return None

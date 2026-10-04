@@ -5,6 +5,7 @@ import InstitutionsSection from "@/pages/InstitutionsSection";
 import { useAuth } from "@/auth/AuthContext";
 import {
   downloadAccountCsv,
+  downloadArchive,
   downloadExport,
   useImportDocument,
   type ImportResult,
@@ -1488,7 +1489,8 @@ function DataSection() {
   // Downloads as mutations, so the button can say it is working and a failure
   // can land somewhere visible. They are reads on the wire; what they are here
   // is one interaction with a beginning, an end and an error.
-  const exportAll = useMutation({ mutationFn: downloadExport });
+  const exportAll = useMutation({ mutationFn: downloadArchive });
+  const exportLedger = useMutation({ mutationFn: downloadExport });
   const exportCsv = useMutation({ mutationFn: downloadAccountCsv });
   const importDoc = useImportDocument();
 
@@ -1503,9 +1505,13 @@ function DataSection() {
     <div className="space-y-4">
       <Card title="Export everything">
         <p className="text-sm text-fg-muted">
-          Your whole ledger in one JSON document: accounts, transactions and their splits,
-          categories, rules, tags, owners, securities, holdings and the exchange rates behind the
-          conversions.
+          A .zip holding your whole ledger as one JSON document — accounts, transactions and their
+          splits, categories, rules, tags, owners, securities, holdings and the exchange rates
+          behind the conversions — with the files attached to your accounts beside it.
+        </p>
+        <p className="text-sm text-fg-muted">
+          The ledger on its own is the same JSON document without the files. Importing it brings
+          everything back except them, and says how many it left out.
         </p>
         <p className="text-sm text-fg-muted">
           It is a <strong className="text-fg">portable copy, not a backup</strong>. It holds what
@@ -1513,18 +1519,30 @@ function DataSection() {
           deliberately no bank credentials, so an imported connection comes back needing to be
           reconnected. Backing up an instance is <code>scripts/backup.sh</code>.
         </p>
-        <Button
-          onClick={() => exportAll.mutate()}
-          disabled={exportAll.isPending}
-          aria-busy={exportAll.isPending}
-          data-testid="export-download"
-        >
-          {exportAll.isPending && <Spinner />}
-          Download export
-        </Button>
-        {exportAll.isError && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => exportAll.mutate()}
+            disabled={exportAll.isPending}
+            aria-busy={exportAll.isPending}
+            data-testid="export-download"
+          >
+            {exportAll.isPending && <Spinner />}
+            Download export
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => exportLedger.mutate()}
+            disabled={exportLedger.isPending}
+            aria-busy={exportLedger.isPending}
+            data-testid="export-ledger-download"
+          >
+            {exportLedger.isPending && <Spinner />}
+            Ledger only (.json)
+          </Button>
+        </div>
+        {(exportAll.isError || exportLedger.isError) && (
           <p className="text-sm text-negative" role="alert" data-testid="export-error">
-            {(exportAll.error as Error).message}
+            {((exportAll.error ?? exportLedger.error) as Error).message}
           </p>
         )}
       </Card>
@@ -1583,19 +1601,19 @@ function DataSection() {
             }}
           >
             <p className="text-sm text-fg-muted">
-              A document exported from MetalMark Money — this household or another one. It merges:
+              An export from MetalMark Money — this household or another one. It merges:
               nothing here is deleted, and anything the document and this household already agree
               on is left alone rather than duplicated.
             </p>
             <Field
               label="Export file"
               htmlFor={fileField}
-              hint="The .json file a “Download export” saved."
+              hint="The .zip a “Download export” saved, or the .json ledger on its own (without the attached files)."
             >
               <Input
                 id={fileField}
                 type="file"
-                accept=".json,application/json"
+                accept=".zip,.json,application/zip,application/json"
                 onChange={(e) => {
                   setPicked(e.target.files?.[0] ?? null);
                   // The previous result is about the previous file, and leaving

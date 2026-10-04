@@ -68,13 +68,16 @@ PUBLIC_PREFIX = "/api"
 #: App ``GET`` routes an agent cannot reach, and why.
 EXCLUDED: dict[str, str] = {
     "/accounts/{account_id}/documents": (
-        "Private document metadata is outside the anonymized agent API."
+        "File names are not anonymized. With the 'documents:read' scope, "
+        "GET /agent/v1/accounts/{account_id}/documents lists them as they are."
     ),
     "/accounts/{account_id}/documents/{document_id}/content": (
-        "Private document bytes are never exposed to agents."
+        "File contents are not anonymized. With the 'documents:read' scope, "
+        "GET /agent/v1/accounts/{account_id}/documents/{document_id}/content returns them."
     ),
     "/healthz": "Liveness for the container, not household data; see /anon_debug/system.",
     "/auth/me": "The browser session's own identity, and its CSRF token.",
+    "/export/archive": "The whole household and its files as a zip.",
     "/export": "The whole household as a raw document — not a schema the registry can walk.",
     "/export/transactions.csv": "Raw CSV, not a schema the registry can walk.",
     "/institutions/{key}/logo": "An image, not data; and a bank's logo names the bank.",

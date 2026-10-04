@@ -730,9 +730,15 @@ async def test_writes_are_not_routes(agent):
     a, _s, _ids, _issued = agent
     for method in ("POST", "PATCH", "PUT", "DELETE"):
         resp = await a.http.request(
-            method, "/agent/v1/accounts", headers={"Authorization": f"Bearer {a.token}"}, json={}
+            method, "/agent/v1/categories", headers={"Authorization": f"Bearer {a.token}"}, json={}
         )
         assert resp.status_code == 405, method
+    # The explicit write routes exist, and a read token is refused at each.
+    for path in ("accounts", "transactions", "investments/holdings"):
+        resp = await a.http.post(
+            f"/agent/v1/{path}", headers={"Authorization": f"Bearer {a.token}"}, json={}
+        )
+        assert resp.status_code == 403, path
 
 
 async def test_the_agent_transaction_cannot_write(agent):
@@ -1417,7 +1423,7 @@ async def test_only_the_owner_can_issue_write_permissions(app, world):
         await session.execute(
             update(User).where(User.id == uuid.UUID(joined["user"]["id"])).values(is_admin=True)
         )
-    for scope in ("transactions:write", "holdings:write"):
+    for scope in ("transactions:write", "holdings:write", "accounts:write", "documents:read"):
         refused = await member.request(
             "POST",
             "/admin/agent-tokens",
@@ -1516,7 +1522,9 @@ async def test_agent_holding_creation_preserves_concurrent_browser_insert(
 
 
 
-@pytest.mark.parametrize("scope", ["transactions:write", "holdings:write"])
+@pytest.mark.parametrize(
+    "scope", ["transactions:write", "holdings:write", "accounts:write", "documents:read"]
+)
 async def test_demoted_owner_cannot_use_write_permissions(app, world, scope):
     from app.db import unscoped_session
     from app.models import HouseholdMember, User
@@ -1529,18 +1537,20 @@ async def test_demoted_owner_cannot_use_write_permissions(app, world, scope):
         await session.execute(
             update(HouseholdMember).where(HouseholdMember.user_id == uid).values(role="member")
         )
-    path, body = (
-        ("transactions", {"account_id": ids["checking"], "amount": "1",
-                          "transacted_at": "2026-10-01T12:00:00Z"})
-        if scope == "transactions:write" else
-        ("investments/holdings", {"account_id": ids["checking"],
-                                 "security_id": ids["security"], "quantity": "1"})
-    )
+    method, path, body = {
+        "transactions:write": ("POST", "transactions", {
+            "account_id": ids["checking"], "amount": "1",
+            "transacted_at": "2026-10-01T12:00:00Z"}),
+        "holdings:write": ("POST", "investments/holdings", {
+            "account_id": ids["checking"], "security_id": ids["security"], "quantity": "1"}),
+        "accounts:write": ("POST", "accounts", {"type": "depository", "currency": "USD"}),
+        "documents:read": ("GET", f"accounts/{ids['checking']}/documents", None),
+    }[scope]
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.post(
-            f"/agent/v1/{path}", json=body,
+        response = await client.request(
+            method, f"/agent/v1/{path}", json=body,
             headers={"Authorization": f"Bearer {issued['token']}"},
         )
     assert response.status_code == 401
@@ -1607,3 +1617,199 @@ async def test_agent_holding_creation_refuses_a_closed_history_position(app, wor
         )
     assert response.status_code == 409, response.text
     assert await s.ok("GET", f"/investments/holdings?account_id={account['id']}") == before
+
+
+# ---- accounts:write and documents:read (ADR-0062) ----------------------------
+
+
+async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, world):
+    s, ids = world
+    read = await _issue(s)
+    issued = await _issue(s, scopes=("agent:read", "accounts:write"))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    a = Agent(app, issued["token"])
+    known = {x["name"] for x in (await a.get("/agent/v1/accounts")).json()}
+    known |= {x["name"] for x in (await a.get("/agent/v1/owners")).json()}
+    before = len(await s.ok("GET", "/accounts"))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        denied = await client.post(
+            "/agent/v1/accounts",
+            json={"type": "depository", "currency": "USD"},
+            headers={"Authorization": f"Bearer {read['token']}"},
+        )
+        assert denied.status_code == 403
+        # Free text an agent could read back as a pseudonym is not a field.
+        for field in ("name", "institution"):
+            refused = await client.post(
+                "/agent/v1/accounts", headers=headers,
+                json={"type": "depository", "currency": "USD", field: OWNER},
+            )
+            assert refused.status_code == 422 and OWNER not in refused.text
+        for patch in (
+            {"type": "yacht"},
+            {"currency": "US1"},
+            {"subtype": "Zelda's stash"},
+            {"current_balance": "1e30"},
+            {"balance_date": "2026-01-01"},
+            {"type": "investment", "current_balance": "5"},
+            {"label": "x" * 81},
+        ):
+            refused = await client.post(
+                "/agent/v1/accounts", headers=headers,
+                json={"type": "depository", "currency": "USD", **patch},
+            )
+            assert refused.status_code == 422, (patch, refused.text)
+        foreign = await client.post(
+            "/agent/v1/accounts", headers=headers,
+            json={"type": "depository", "currency": "USD", "owner_id": str(uuid.uuid4())},
+        )
+        assert foreign.status_code == 404 and foreign.json()["detail"] == (
+            "Account could not be added"
+        )
+        assert len(await s.ok("GET", "/accounts")) == before
+
+        seen = set()
+        for label in (None, OWNER, INSTITUTION):
+            body = {
+                "type": "credit", "currency": "usd", "subtype": "credit_card",
+                "current_balance": "-250.5000", "balance_date": "2026-09-30",
+            }
+            if label:
+                body["label"] = label
+            made = await client.post("/agent/v1/accounts", headers=headers, json=body)
+            assert made.status_code == 201, made.text
+            out = made.json()
+            assert _leaks(out) == []
+            assert out["current_balance"] == "-250.5000" and out["currency"] == "USD"
+            assert out["is_manual"] is True and out["institution"] is None
+            stored = await s.ok("GET", f"/accounts/{out['id']}")
+            assert stored["name"] == (f"Added by agent: {label}" if label else "Added by agent")
+            # Read back through the mirror, the name is a pseudonym of its own:
+            # it matches no account, owner or institution the household named.
+            mirrored = (await a.get(f"/agent/v1/accounts/{out['id']}")).json()
+            assert mirrored["name"] == out["name"] and mirrored["name"].startswith("Account ")
+            assert mirrored["name"] not in known
+            seen.add(mirrored["name"])
+        assert len(seen) == 3
+        # The new account takes entries like any other.
+        gone = await client.delete(f"/agent/v1/accounts/{out['id']}", headers=headers)
+        assert gone.status_code == 405
+    await a.http.aclose()
+
+
+async def test_an_agent_made_investment_account_takes_holdings(app, world):
+    s, ids = world
+    issued = await _issue(s, scopes=("accounts:write", "holdings:write"))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        made = await client.post(
+            "/agent/v1/accounts", headers=headers,
+            json={"type": "investment", "currency": "USD", "subtype": "roth_ira"},
+        )
+        assert made.status_code == 201, made.text
+        holding = await client.post(
+            "/agent/v1/investments/holdings", headers=headers,
+            json={"account_id": made.json()["id"], "security_id": ids["security"],
+                  "quantity": "2"},
+        )
+        assert holding.status_code == 201, holding.text
+
+
+async def test_files_are_readable_to_an_agent_only_with_the_files_scope(app, world):
+    s, ids = world
+    pdf = b"%PDF-1.7\n" + f"statement for {OWNER}".encode() + b"\x00\xff"
+    uploaded = await s.ok(
+        "POST", f"/accounts/{ids['checking']}/documents", status=201,
+        files={"file": (f"{OWNER} statement.pdf", pdf, "application/pdf")},
+    )
+    assert uploaded["preview"] == "pdf"
+    # The person who uploaded it can open it in the app.
+    shown = await s.request(
+        "GET", f"/accounts/{ids['checking']}/documents/{uploaded['id']}/content?preview=true"
+    )
+    assert shown.status_code == 200 and shown.content == pdf
+    assert shown.headers["content-type"] == "application/pdf"
+    assert shown.headers["content-disposition"].startswith("inline;")
+
+    base = f"/agent/v1/accounts/{ids['checking']}/documents"
+    mirror = Agent(app, (await _issue(s))["token"])
+    # The anonymized mirror never carries files: not the list, not the bytes.
+    for path in (base, f"{base}/{uploaded['id']}/content"):
+        resp = await mirror.http.get(path, headers={"Authorization": f"Bearer {mirror.token}"})
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["code"] == "insufficient_scope"
+        assert _leaks(resp.text) == []
+    await mirror.http.aclose()
+
+    issued = await _issue(s, scopes=("documents:read",))
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        listed = await client.get(base, headers=headers)
+        assert listed.status_code == 200, listed.text
+        (entry,) = listed.json()
+        assert entry["filename"] == f"{OWNER} statement.pdf"
+        assert entry["size_bytes"] == len(pdf) and entry["media_type"] == "application/pdf"
+        assert entry["content"] == f"/api{base}/{uploaded['id']}/content"
+        got = await client.get(f"{base}/{uploaded['id']}/content", headers=headers)
+        assert got.status_code == 200 and got.content == pdf
+        assert got.headers["content-type"] == "application/pdf"
+        assert got.headers["x-content-sha256"] == entry["sha256"]
+        # The files scope is only the files: it does not open the mirror, and an
+        # id outside the household is a plain 404.
+        assert (await client.get("/agent/v1/accounts", headers=headers)).status_code == 403
+        for path in (
+            f"/agent/v1/accounts/{uuid.uuid4()}/documents",
+            f"{base}/{uuid.uuid4()}/content",
+        ):
+            missing = await client.get(path, headers=headers)
+            assert missing.status_code == 404 and missing.json() == {"detail": "File not found"}
+        for method in ("POST", "DELETE"):
+            refused = await client.request(method, f"{base}/{uploaded['id']}", headers=headers)
+            assert refused.status_code == 405
+
+
+async def test_the_archive_restores_files_and_the_document_alone_does_not(app, world):
+    import io
+    import zipfile
+
+    s, ids = world
+    content = b"account,amount\n1,2\n"
+    await s.ok(
+        "POST", f"/accounts/{ids['checking']}/documents", status=201,
+        files={"file": ("rows.csv", content, "text/csv")},
+    )
+    document = await s.request("GET", "/export")
+    assert document.status_code == 200 and b"rows.csv" in document.content
+    archive = await s.request("GET", "/export/archive")
+    assert archive.status_code == 200
+    assert archive.headers["content-type"] == "application/zip"
+    assert archive.headers["content-disposition"].endswith('.zip"')
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as z:
+        (member,) = [n for n in z.namelist() if n.startswith("files/")]
+        assert z.read(member) == content
+
+    listing = f"/accounts/{ids['checking']}/documents"
+    (existing,) = await s.ok("GET", listing)
+    await s.ok("DELETE", f"{listing}/{existing['id']}", status=204)
+    alone = await s.ok(
+        "POST", "/import",
+        files={"file": ("export.json", document.content, "application/json")},
+    )
+    assert any("1 account file was not restored" in w for w in alone["warnings"])
+    assert await s.ok("GET", listing) == []
+    whole = await s.ok(
+        "POST", "/import", files={"file": ("export.zip", archive.content, "application/zip")}
+    )
+    assert whole["created"]["account_documents"] == 1 and whole["warnings"] == []
+    (restored,) = await s.ok("GET", listing)
+    assert restored["filename"] == "rows.csv" and restored["preview"] == "text"
+    refused = await s.request(
+        "POST", "/import", files={"file": ("x.zip", b"PK\x03\x04junk", "application/zip")}
+    )
+    assert refused.status_code == 400

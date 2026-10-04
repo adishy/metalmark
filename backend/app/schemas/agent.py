@@ -21,7 +21,14 @@ from app.schemas.rules import RuleActions, RuleConditions
 from app.schemas.transactions import TransactionOut
 from app.schemas.transfers import TransferDetailOut
 
-Scope = Literal["agent:read", "debug:read", "transactions:write", "holdings:write"]
+Scope = Literal[
+    "agent:read",
+    "debug:read",
+    "transactions:write",
+    "holdings:write",
+    "accounts:write",
+    "documents:read",
+]
 
 # ---- Token administration (session-authenticated, admin or owner) ------------
 
@@ -160,6 +167,83 @@ class AgentHoldingCreate(BaseModel):
         if self.market_value and (self.market_value < 0) != (self.quantity < 0):
             raise ValueError("market_value must have the same sign as quantity")
         return self
+
+
+#: The subtypes an agent may give: the ones the anonymized mirror shows as they
+#: are. Anything else would be free text by another name.
+AgentAccountSubtype = Literal[
+    "checking", "savings", "money_market", "cd", "credit_card", "line_of_credit",
+    "brokerage", "ira", "roth", "roth_ira", "401k", "403b", "457", "529", "hsa",
+    "pension", "mortgage", "auto", "student", "personal", "heloc", "cash", "crypto",
+    "other",
+]
+
+
+class AgentAccountCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["depository", "credit", "investment", "loan", "other"]
+    currency: str = Field(pattern="^[A-Za-z]{3}$", description="ISO 4217 code, e.g. USD.")
+    subtype: AgentAccountSubtype | None = None
+    current_balance: Decimal | None = Field(
+        default=None,
+        max_digits=19,
+        decimal_places=4,
+        description=(
+            "Optional opening balance, signed, in the account's currency: what is "
+            "owed on a card or a loan is negative. Omit it for an investment account, "
+            "whose value is the sum of its holdings."
+        ),
+    )
+    balance_date: date | None = Field(
+        default=None, description="The day the balance was true. Defaults to today."
+    )
+    owner_id: uuid.UUID | None = Field(
+        default=None, description="An existing owner's id. Omitted means the Shared owner."
+    )
+    label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        description=(
+            f"Optional. The account is named '{AGENT_NOTE_PREFIX}: <label>' (or just "
+            f"'{AGENT_NOTE_PREFIX}') until a person renames it. An agent cannot set the "
+            "name itself or the institution."
+        ),
+    )
+
+    @field_validator("balance_date")
+    @classmethod
+    def _in_window(cls, value: date | None) -> date | None:
+        return value if value is None else _bounded_day(value)
+
+    @model_validator(mode="after")
+    def _balance(self) -> AgentAccountCreate:
+        if self.balance_date is not None and self.current_balance is None:
+            raise ValueError("balance_date needs current_balance")
+        if self.type == "investment" and self.current_balance is not None:
+            raise ValueError("an investment account's value comes from its holdings")
+        return self
+
+    def stored_name(self) -> str:
+        label = " ".join((self.label or "").split())
+        return f"{AGENT_NOTE_PREFIX}: {label}" if label else AGENT_NOTE_PREFIX
+
+
+class AgentDocumentOut(BaseModel):
+    """One account file, as it is: this route is not anonymized (ADR-0062)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    account_id: uuid.UUID
+    filename: str
+    media_type: str
+    size_bytes: int
+    sha256: str
+    created_at: datetime
+    #: The path that returns the file's bytes.
+    content: str = ""
 
 
 # ---- Discovery ---------------------------------------------------------------

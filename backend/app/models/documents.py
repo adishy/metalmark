@@ -15,7 +15,7 @@ from app.models.base import TimestampMixin, UUIDPkMixin
 class AccountDocument(UUIDPkMixin, TimestampMixin, Base):
     __tablename__ = "account_documents"
     __table_args__ = (
-        CheckConstraint("size_bytes > 0 AND size_bytes <= 20971520", name="document_size"),
+        CheckConstraint("size_bytes > 0", name="document_size"),
         CheckConstraint("octet_length(content) = size_bytes", name="document_content_size"),
     )
     household_id: Mapped[uuid.UUID] = mapped_column(

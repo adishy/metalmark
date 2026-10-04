@@ -19,6 +19,14 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useIsPhone } from "@/lib/media";
 import { CloseIcon } from "@/components/icons";
 
+/**
+ * The open modals, oldest first. A dialog can open another (a file viewer over
+ * the account it belongs to), and every one of them listens on the document, so
+ * without this Escape would close the whole stack at once. Only the last entry
+ * answers the keyboard.
+ */
+const openModals: symbol[] = [];
+
 /** Past this drag distance (or flick speed) a sheet dismisses. */
 const DISMISS_PX = 120;
 const DISMISS_VELOCITY = 800;
@@ -31,6 +39,7 @@ export default function Dialog({
   footer,
   side = false,
   inline = false,
+  wide = false,
   testid,
 }: {
   open: boolean;
@@ -46,6 +55,8 @@ export default function Dialog({
    * takes the caller's layout instead. `side` is ignored when this is set.
    */
   inline?: boolean;
+  /** A wider centred modal, for content that is looked at rather than filled in. */
+  wide?: boolean;
   testid?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -81,7 +92,11 @@ export default function Dialog({
     );
     (focusables && focusables[0] ? focusables[0] : panelRef.current)?.focus();
 
+    const self = Symbol("dialog");
+    openModals.push(self);
+
     const onKey = (e: KeyboardEvent) => {
+      if (openModals[openModals.length - 1] !== self) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onCloseRef.current();
@@ -109,6 +124,7 @@ export default function Dialog({
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      openModals.splice(openModals.indexOf(self), 1);
       restoreRef.current?.focus?.();
     };
   }, [open, inline]);
@@ -168,7 +184,7 @@ export default function Dialog({
               : // `dvh`, not `vh`: on iOS Safari `vh` is measured against the
                 // largest possible viewport, so an 85vh sheet overflows the screen
                 // while the URL bar is showing — exactly when it matters.
-                "max-h-[85dvh] w-full max-w-lg rounded-t-overlay sm:m-4 sm:max-h-[90vh] sm:rounded-overlay")
+                `max-h-[85dvh] w-full ${wide ? "max-w-4xl" : "max-w-lg"} rounded-t-overlay sm:m-4 sm:max-h-[90vh] sm:rounded-overlay`)
       }
       data-testid={testid}
     >
@@ -183,7 +199,7 @@ export default function Dialog({
         />
       )}
       <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
-        <h2 id={titleId} className="text-base font-semibold text-fg">
+        <h2 id={titleId} className="min-w-0 break-words text-base font-semibold text-fg">
           {title}
         </h2>
         <button

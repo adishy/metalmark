@@ -81,11 +81,30 @@ for (const width of [360, 1280]) {
       ]);
       expect(download.suggestedFilename()).toBe(pdfName);
       expect(readFileSync((await download.path())!)).toEqual(pdfBytes);
-      const view = pdf.getByRole("link", { name: "View PDF", exact: true });
-      const preview = await page.request.get((await view.getAttribute("href"))!);
+      // The file opens in the app, drawn page by page.
+      await pdf.getByRole("button", { name: "View", exact: true }).click();
+      const viewer = page.getByTestId("document-viewer");
+      await expect(viewer.getByTestId("pdf-pages")).toBeVisible();
+      const opened = viewer.getByRole("link", { name: "Open in new tab", exact: true });
+      const preview = await page.request.get((await opened.getAttribute("href"))!);
       expect(preview.headers()["content-disposition"]).toMatch(/^inline;/);
       expect(preview.headers()["content-type"]).toBe("application/pdf");
       expect(await preview.body()).toEqual(pdfBytes);
+      if (width === 360) await expectNoHorizontalOverflow(page);
+      await viewer.screenshot({ path: testInfo.outputPath("document-viewer-pdf.png") });
+      await viewer.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(viewer).toHaveCount(0);
+      await expect(documents).toBeVisible();
+
+      const notesName = `notes-${run}.csv`;
+      await documents.getByLabel("Choose account document").setInputFiles({
+        name: notesName, mimeType: "text/csv", buffer: Buffer.from("date,amount\n2026-10-01,12.50\n"),
+      });
+      const notes = documents.locator("li", { hasText: notesName });
+      await notes.getByRole("button", { name: "View", exact: true }).click();
+      await expect(viewer.locator("pre")).toContainText("2026-10-01,12.50");
+      await viewer.screenshot({ path: testInfo.outputPath("document-viewer-text.png") });
+      await viewer.getByRole("button", { name: "Close", exact: true }).click();
 
       const officeName = `presentation-${run}.pptx`;
       const officeBytes = Buffer.from("PK\x03\x04user presentation bytes", "binary");
@@ -96,7 +115,7 @@ for (const width of [360, 1280]) {
       });
       const office = documents.locator("li", { hasText: officeName });
       await expect(office).toBeVisible();
-      await expect(office.getByRole("link", { name: "View PDF" })).toHaveCount(0);
+      await expect(office.getByRole("button", { name: "View" })).toHaveCount(0);
       const [officeDownload] = await Promise.all([
         page.waitForEvent("download"), office.getByRole("link", { name: "Download", exact: true }).click(),
       ]);
@@ -104,7 +123,7 @@ for (const width of [360, 1280]) {
       expect(readFileSync((await officeDownload.path())!)).toEqual(officeBytes);
       if (width === 360) await expectNoHorizontalOverflow(page);
       await dialog.screenshot({ path: testInfo.outputPath("account-documents.png") });
-      for (const file of [pdf, office]) {
+      for (const file of [pdf, notes, office]) {
         await file.getByRole("button", { name: "Delete", exact: true }).click();
         await expect(file.getByText("Delete this document permanently?")).toBeVisible();
         await file.getByRole("button", { name: "Keep file", exact: true }).click();

@@ -630,6 +630,14 @@ const SCOPE_LABELS: Record<AgentScope, { label: string; hint: string }> = {
     label: "Add holdings",
     hint: "Owner only. New positions in existing securities. No names, no editing, no deleting.",
   },
+  "accounts:write": {
+    label: "Add accounts",
+    hint: "Owner only. A type, currency and opening balance, named “Added by agent” until you rename it. No editing, no deleting.",
+  },
+  "documents:read": {
+    label: "Read account files",
+    hint: "Owner only. Files and their names exactly as uploaded — not anonymized, unlike everything else here.",
+  },
 };
 
 const EXPIRY_DAYS = [7, 30, 90, 365];

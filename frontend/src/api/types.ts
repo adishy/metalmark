@@ -789,7 +789,13 @@ export interface Checks {
 // ---- agent access (ADR-0048) ----------------------------------------------
 
 /** `agent:read` opens `/api/agent`; `debug:read` opens `/api/anon_debug`. */
-export type AgentScope = "agent:read" | "debug:read" | "transactions:write" | "holdings:write";
+export type AgentScope =
+  | "agent:read"
+  | "debug:read"
+  | "transactions:write"
+  | "holdings:write"
+  | "accounts:write"
+  | "documents:read";
 
 export type AgentTokenStatus = "active" | "expired" | "revoked";
 

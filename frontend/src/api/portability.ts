@@ -94,6 +94,14 @@ export function downloadExport(): Promise<void> {
   return download("/export", "metalmark-export.json");
 }
 
+/** The document and every account file it lists, as one zip (ADR-0060).
+ *
+ * The document alone is the whole ledger; this is the ledger and the files.
+ */
+export function downloadArchive(): Promise<void> {
+  return download("/export/archive", "metalmark-export.zip");
+}
+
 /** One account's transactions as a CSV the CSV importer can read back.
  *
  * One account, because the importer is: a file holding several accounts' rows

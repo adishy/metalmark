@@ -4352,6 +4352,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /export/archive:
+    get:
+      tags:
+      - portability
+      summary: Export Archive
+      description: 'The document and every account file it lists, as one zip (ADR-0060).
+
+
+        Built into a temporary file first and streamed from it, so neither the build
+
+        nor the response holds the household''s files in memory, and the database is
+
+        done with before the first byte is sent.'
+      operationId: export_archive_export_archive_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /export/transactions.csv:
     get:
       tags:
@@ -4406,7 +4441,12 @@ paths:
       tags:
       - portability
       summary: Import Household
-      description: 'Load an exported document into this household.
+      description: 'Load an exported document, or the archive holding it, into this household.
+
+
+        The JSON document on its own imports the ledger and leaves the account files
+
+        out, with a warning saying how many. The archive restores those too.
 
 
         Idempotent against natural keys: importing the same document twice creates
@@ -4745,6 +4785,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CatalogOut'
+  /agent/v1/accounts/{account_id}/documents:
+    get:
+      tags:
+      - agent
+      summary: Agent List Documents
+      description: 'An account''s files, with their real names. Requires documents:read.
+
+
+        Not anonymized: a file name is whatever the household called the file.
+
+        ``content`` is the path that returns the bytes.'
+      operationId: agent_list_documents_agent_v1_accounts__account_id__documents_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentDocumentOut'
+                title: Response Agent List Documents Agent V1 Accounts  Account Id  Documents Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/accounts/{account_id}/documents/{document_id}/content:
+    get:
+      tags:
+      - agent
+      summary: Agent Read Document
+      description: 'One file''s bytes, exactly as uploaded. Requires documents:read.
+
+
+        Not anonymized and not parsed: a PDF comes back as that PDF, under the media
+
+        type it was uploaded with, and ``X-Content-SHA256`` is the digest to check it by.'
+      operationId: agent_read_document_agent_v1_accounts__account_id__documents__document_id__content_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent/v1/{path}:
     get:
       tags:
@@ -4835,6 +4950,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HoldingOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/accounts:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Account
+      description: 'Add one manual account. Requires accounts:write.
+
+
+        Takes a type, a currency and optionally a subtype, an opening balance and an
+
+        owner. An agent cannot name the account or its institution: it is created as
+
+        "Added by agent" (plus the optional ``label``) and a person renames it. The
+
+        response is anonymized and carries the new account''s id, which is what the
+
+        transaction and holding routes take. A retried POST creates another account.
+
+        No updates or deletes.'
+      operationId: agent_add_account_agent_v1_accounts_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentAccountCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOut'
         '422':
           description: Validation Error
           content:
@@ -5092,6 +5246,11 @@ components:
           type: string
           format: date-time
           title: Created At
+        preview:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Preview
       type: object
       required:
       - id
@@ -5300,6 +5459,132 @@ components:
       - max_stale_days
       - is_fully_valued
       title: AccountValuationOut
+    AgentAccountCreate:
+      properties:
+        type:
+          type: string
+          enum:
+          - depository
+          - credit
+          - investment
+          - loan
+          - other
+          title: Type
+        currency:
+          type: string
+          pattern: ^[A-Za-z]{3}$
+          title: Currency
+          description: ISO 4217 code, e.g. USD.
+        subtype:
+          anyOf:
+          - type: string
+            enum:
+            - checking
+            - savings
+            - money_market
+            - cd
+            - credit_card
+            - line_of_credit
+            - brokerage
+            - ira
+            - roth
+            - roth_ira
+            - 401k
+            - 403b
+            - '457'
+            - '529'
+            - hsa
+            - pension
+            - mortgage
+            - auto
+            - student
+            - personal
+            - heloc
+            - cash
+            - crypto
+            - other
+          - type: 'null'
+          title: Subtype
+        current_balance:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Current Balance
+          description: 'Optional opening balance, signed, in the account''s currency: what is owed on
+            a card or a loan is negative. Omit it for an investment account, whose value is the sum of
+            its holdings.'
+        balance_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Balance Date
+          description: The day the balance was true. Defaults to today.
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+          description: An existing owner's id. Omitted means the Shared owner.
+        label:
+          anyOf:
+          - type: string
+            maxLength: 80
+            minLength: 1
+          - type: 'null'
+          title: Label
+          description: 'Optional. The account is named ''Added by agent: <label>'' (or just ''Added by
+            agent'') until a person renames it. An agent cannot set the name itself or the institution.'
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      - currency
+      title: AgentAccountCreate
+    AgentDocumentOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        content:
+          type: string
+          title: Content
+          default: ''
+      type: object
+      required:
+      - id
+      - account_id
+      - filename
+      - media_type
+      - size_bytes
+      - sha256
+      - created_at
+      title: AgentDocumentOut
+      description: 'One account file, as it is: this route is not anonymized (ADR-0062).'
     AgentHoldingCreate:
       properties:
         account_id:
@@ -5364,6 +5649,8 @@ components:
             - debug:read
             - transactions:write
             - holdings:write
+            - accounts:write
+            - documents:read
           type: array
           minItems: 1
           title: Scopes

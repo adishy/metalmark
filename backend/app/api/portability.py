@@ -3,8 +3,9 @@
 Three endpoints, and the split between them is the design:
 
 * ``GET /export`` — the whole household as one versioned JSON document.
+* ``GET /export/archive`` — that document and the account files it lists, as a zip.
 * ``GET /export/transactions.csv`` — one account's rows as a spreadsheet.
-* ``POST /import`` — load a document back in.
+* ``POST /import`` — load a document, or an archive, back in.
 
 Export is available to any member, because reading the household's ledger is what
 being a member already is; import is owner-only, because it can change the
@@ -13,10 +14,13 @@ household's base currency and merge a second history into the household's own.
 
 from __future__ import annotations
 
+import tempfile
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
 from app.deps import RequestContext, get_context, require_owner
@@ -48,6 +52,40 @@ async def export_household(ctx: RequestContext = Depends(get_context)) -> Respon
         content=body,
         media_type="application/json",
         headers={"Content-Disposition": _attachment("export", "json")},
+    )
+
+
+@router.get("/export/archive")
+async def export_archive(ctx: RequestContext = Depends(get_context)) -> StreamingResponse:
+    """The document and every account file it lists, as one zip (ADR-0060).
+
+    Built into a temporary file first and streamed from it, so neither the build
+    nor the response holds the household's files in memory, and the database is
+    done with before the first byte is sent.
+    """
+    spool = tempfile.TemporaryFile()  # noqa: SIM115 - closed by the response below
+    try:
+        await svc.write_archive(ctx.session, ctx.household_id, spool)
+        size = spool.tell()
+        spool.seek(0)
+    except BaseException:
+        spool.close()
+        raise
+
+    def chunks():
+        try:
+            while block := spool.read(1024 * 1024):
+                yield block
+        finally:
+            spool.close()
+
+    return StreamingResponse(
+        chunks(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": _attachment("export", "zip"),
+            "Content-Length": str(size),
+        },
     )
 
 
@@ -94,20 +132,30 @@ async def export_transactions_csv(
 async def import_household(
     file: UploadFile = File(...), ctx: RequestContext = Depends(require_owner)
 ) -> ImportOut:
-    """Load an exported document into this household.
+    """Load an exported document, or the archive holding it, into this household.
+
+    The JSON document on its own imports the ledger and leaves the account files
+    out, with a warning saying how many. The archive restores those too.
 
     Idempotent against natural keys: importing the same document twice creates
     nothing the second time. See ``services.portability`` for what "the same" means
     per entity — and for why a credential cannot be in the document at all, so an
     imported connection lands ``auth_error`` and needs reconnecting.
     """
-    raw = await file.read(svc.MAX_IMPORT_BYTES + 1)
-    if len(raw) > svc.MAX_IMPORT_BYTES:
-        raise LedgerError(
-            f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB, the most "
-            f"an export can be. Check that you picked the JSON document and not "
-            f"something else.",
-            400,
-        )
-    result = await svc.import_document(ctx.session, ctx.household_id, raw)
+    files = None
+    if await file.read(4) == b"PK\x03\x04":
+        # An archive: the document, with the files it lists beside it. Opened
+        # where the upload was spooled, so the files are read one at a time.
+        raw, files = await run_in_threadpool(svc.open_archive, file.file)
+    else:
+        await file.seek(0)
+        raw = await file.read(svc.MAX_IMPORT_BYTES + 1)
+        if len(raw) > svc.MAX_IMPORT_BYTES:
+            raise LedgerError(
+                f"File is larger than {svc.MAX_IMPORT_BYTES // (1024 * 1024)} MB, the most "
+                f"a household document can be. Check that you picked the export's JSON "
+                f"document or its .zip archive and not something else.",
+                400,
+            )
+    result = await svc.import_document(ctx.session, ctx.household_id, raw, files)
     return ImportOut(**result.as_dict())

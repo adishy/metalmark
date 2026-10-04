@@ -230,3 +230,43 @@ been seen rendering in a real desktop browser; a bank position's local name cann
 form without "Use bank updates"; the new warning-tone summaries were seen only against mocked
 responses. User then authorised commit, push and PR, asked for a preview on 0.0.0.0, and repeated that
 there are to be no production deploys.
+
+## 2026-10-04 — files leave the JSON; in-app viewer; agent file reading and account creation
+
+User asked why there was a 32 MiB household total, then decided: take files out of the JSON, have the
+document point at an archive and degrade gracefully when the files are not there; no file limits
+beyond performance; after upload a file must be viewable in the app and readable to agents; and the
+agent API should be able to create accounts. Still no production deploys.
+
+What changed:
+
+- **Export/import (ADR-0060 rewritten, still unreleased).** The document lists each file with a
+  `path` (`files/<sha256>`) and carries no bytes. `GET /export/archive` is a zip of `export.json` plus
+  the files, built one file at a time into a temp file and streamed. `POST /import` takes the zip or
+  the JSON; a file whose bytes are absent is skipped and counted in one warning, and importing the
+  archive later adds exactly those. Members are read to the stated size + 1 and checked by size and
+  digest. The household total is gone; one file may be 100 MiB (app constant, no DB bound). nginx body
+  limit 128m, unlimited and unbuffered for `/api/import`.
+- **Viewer.** PDFs (pdf.js, lazy-loaded, first 40 pages), PNG/JPEG/GIF/WebP and text open in a dialog;
+  type decided server-side from the first bytes; text always served as `text/plain`. The first attempt
+  framed the browser's PDF viewer: blank in the test browser and on phones, so replaced. `Dialog` now
+  keeps a stack so Escape closes only the top one, and wraps long titles.
+- **Agents (ADR-0062).** `documents:read`: list and fetch an account's files, not anonymized, owner
+  only, read-only transaction, logged `agent.file`; the mirror still does not expose them.
+  `accounts:write`: `POST /agent/v1/accounts` with type, currency, coded subtype, opening balance,
+  owner; named `Added by agent[: label]` so the name is never a value the household wrote.
+
+Gates on the final tree (`COMPOSE_PROJECT_NAME=mm-dev`): secrets, lint, contract PASS; pytest 1330
+passed; frontend typecheck + 644 tests + production build; e2e 94 passed; walkthrough 90 passed; prod
+PASS on 18790/18791 as `mm-prodgate`. drill and reset PASS on the run just before the pdf.js and
+dialog change (neither touches what they exercise). The first e2e run of this change failed 3: a long
+file name overflowed the viewer at 360px, the viewer nested in the account dialog misbehaved, and one
+insights spec failed on the rows the failed test left behind; fixed by the portal, the dialog stack
+and the wrapping title. Viewer looked at with a real PDF, PNG and CSV at 390 and 1280px, light and dark.
+
+Known limits: a file is read into memory whole on upload, download and agent fetch (hence 100 MiB);
+no range requests; PDFs past 40 pages need "Open in new tab"; office files are download-only; the
+dev/preview databases created before this change keep the old 20 MiB check on `account_documents`
+until reset (0017 was never deployed, so no real database has it); importing a household's own export
+again reports one paystub and paystub line as created (seen in the agent test world; predates this
+change, not investigated); agent writes still have no rate limit or idempotency key.
