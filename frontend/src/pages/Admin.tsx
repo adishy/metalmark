@@ -632,7 +632,7 @@ const SCOPE_LABELS: Record<AgentScope, { label: string; hint: string }> = {
   },
   "accounts:write": {
     label: "Add accounts",
-    hint: "Owner only. A type, currency and opening balance, named “Added by agent” until you rename it. No editing, no deleting.",
+    hint: "Owner only. A name, type, currency and opening balance. No editing, no deleting.",
   },
   "documents:read": {
     label: "Read account files",

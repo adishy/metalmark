@@ -4964,11 +4964,15 @@ paths:
       description: 'Add one manual account. Requires accounts:write.
 
 
-        Takes a type, a currency and optionally a subtype, an opening balance and an
+        Takes a type, a currency and optionally a name, a subtype, an opening balance
 
-        owner. An agent cannot name the account or its institution: it is created as
+        and an owner. Without a name the account is created as "Added by agent". The
 
-        "Added by agent" (plus the optional ``label``) and a person renames it. The
+        name is the one piece of text an agent may choose (ADR-0062): in the mirror it
+
+        reads back as a pseudonym, and that pseudonym is shared with anything else in
+
+        the household that has the same name. The institution cannot be set. The
 
         response is anonymized and carries the new account''s id, which is what the
 
@@ -5529,15 +5533,15 @@ components:
           - type: 'null'
           title: Owner Id
           description: An existing owner's id. Omitted means the Shared owner.
-        label:
+        name:
           anyOf:
           - type: string
-            maxLength: 80
+            maxLength: 200
             minLength: 1
           - type: 'null'
-          title: Label
-          description: 'Optional. The account is named ''Added by agent: <label>'' (or just ''Added by
-            agent'') until a person renames it. An agent cannot set the name itself or the institution.'
+          title: Name
+          description: The account's name, as the household will see it. Omitted, the account is named
+            'Added by agent' until a person renames it. The institution cannot be set by an agent.
       additionalProperties: false
       type: object
       required:

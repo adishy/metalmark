@@ -1622,7 +1622,7 @@ async def test_agent_holding_creation_refuses_a_closed_history_position(app, wor
 # ---- accounts:write and documents:read (ADR-0062) ----------------------------
 
 
-async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, world):
+async def test_account_write_scope_adds_an_account_the_agent_may_name(app, world):
     s, ids = world
     read = await _issue(s)
     issued = await _issue(s, scopes=("agent:read", "accounts:write"))
@@ -1640,8 +1640,8 @@ async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, wor
             headers={"Authorization": f"Bearer {read['token']}"},
         )
         assert denied.status_code == 403
-        # Free text an agent could read back as a pseudonym is not a field.
-        for field in ("name", "institution"):
+        # The name is the one text an agent may choose; nothing else is a field.
+        for field in ("institution", "label"):
             refused = await client.post(
                 "/agent/v1/accounts", headers=headers,
                 json={"type": "depository", "currency": "USD", field: OWNER},
@@ -1654,7 +1654,9 @@ async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, wor
             {"current_balance": "1e30"},
             {"balance_date": "2026-01-01"},
             {"type": "investment", "current_balance": "5"},
-            {"label": "x" * 81},
+            {"name": "x" * 201},
+            {"name": "   "},
+            {"name": "bad\x00name"},
         ):
             refused = await client.post(
                 "/agent/v1/accounts", headers=headers,
@@ -1670,14 +1672,13 @@ async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, wor
         )
         assert len(await s.ok("GET", "/accounts")) == before
 
-        seen = set()
-        for label in (None, OWNER, INSTITUTION):
+        for name in (None, "Roth  IRA"):
             body = {
                 "type": "credit", "currency": "usd", "subtype": "credit_card",
                 "current_balance": "-250.5000", "balance_date": "2026-09-30",
             }
-            if label:
-                body["label"] = label
+            if name:
+                body["name"] = name
             made = await client.post("/agent/v1/accounts", headers=headers, json=body)
             assert made.status_code == 201, made.text
             out = made.json()
@@ -1685,14 +1686,11 @@ async def test_account_write_scope_adds_an_account_an_agent_cannot_name(app, wor
             assert out["current_balance"] == "-250.5000" and out["currency"] == "USD"
             assert out["is_manual"] is True and out["institution"] is None
             stored = await s.ok("GET", f"/accounts/{out['id']}")
-            assert stored["name"] == (f"Added by agent: {label}" if label else "Added by agent")
-            # Read back through the mirror, the name is a pseudonym of its own:
-            # it matches no account, owner or institution the household named.
+            assert stored["name"] == ("Roth IRA" if name else "Added by agent")
+            # The mirror still answers with a pseudonym, never the text itself.
             mirrored = (await a.get(f"/agent/v1/accounts/{out['id']}")).json()
             assert mirrored["name"] == out["name"] and mirrored["name"].startswith("Account ")
             assert mirrored["name"] not in known
-            seen.add(mirrored["name"])
-        assert len(seen) == 3
         # The new account takes entries like any other.
         gone = await client.delete(f"/agent/v1/accounts/{out['id']}", headers=headers)
         assert gone.status_code == 405

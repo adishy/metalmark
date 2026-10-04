@@ -270,3 +270,17 @@ dev/preview databases created before this change keep the old 20 MiB check on `a
 until reset (0017 was never deployed, so no real database has it); importing a household's own export
 again reports one paystub and paystub line as created (seen in the agent test world; predates this
 change, not investigated); agent writes still have no rate limit or idempotency key.
+
+## 2026-10-04 — agents may name the accounts they create
+
+User, on reading that an agent-created account was named `Added by agent` until renamed: "you can
+let agents name it". `AgentAccountCreate` takes an optional `name` (≤200 printable characters,
+whitespace collapsed) in place of `label`; without one the account is still `Added by agent`. The
+institution stays unsettable. ADR-0062 records the accepted cost: with `accounts:write` and
+`agent:read` together, an account name is a per-guess oracle for whether the household has another
+thing of exactly that name. PR #48's description updated to the archive/viewer/agent state.
+
+Gates after this change: secrets, lint, contract PASS; pytest 1330 passed; frontend first run 643/644
+— `AppShell.test.tsx` "opens on ⌘K, with focus in the field" failed on focus timing, then passed 3/3
+alone and 644/644 on a full rerun (not touched by this change; treat as flaky). e2e, walkthrough,
+prod and drill not re-run for this backend-schema and copy change.

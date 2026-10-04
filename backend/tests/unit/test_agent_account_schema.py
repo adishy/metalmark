@@ -14,9 +14,7 @@ def test_every_subtype_an_agent_may_send_is_a_known_code():
     assert set(typing.get_args(AgentAccountSubtype)) <= policies.ACCOUNT_SUBTYPES.allowed
 
 
-def test_the_stored_name_is_always_behind_the_prefix():
+def test_an_account_is_named_by_the_agent_or_marked_as_its_own():
     base = {"type": "depository", "currency": "USD"}
     assert AgentAccountCreate(**base).stored_name() == "Added by agent"
-    assert AgentAccountCreate(**base, label="  Roth \n IRA ").stored_name() == (
-        "Added by agent: Roth IRA"
-    )
+    assert AgentAccountCreate(**base, name="  Roth \n IRA ").stored_name() == "Roth IRA"

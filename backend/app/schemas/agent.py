@@ -201,16 +201,26 @@ class AgentAccountCreate(BaseModel):
     owner_id: uuid.UUID | None = Field(
         default=None, description="An existing owner's id. Omitted means the Shared owner."
     )
-    label: str | None = Field(
+    name: str | None = Field(
         default=None,
         min_length=1,
-        max_length=80,
+        max_length=200,
         description=(
-            f"Optional. The account is named '{AGENT_NOTE_PREFIX}: <label>' (or just "
-            f"'{AGENT_NOTE_PREFIX}') until a person renames it. An agent cannot set the "
-            "name itself or the institution."
+            f"The account's name, as the household will see it. Omitted, the account is "
+            f"named '{AGENT_NOTE_PREFIX}' until a person renames it. The institution "
+            "cannot be set by an agent."
         ),
     )
+
+    @field_validator("name")
+    @classmethod
+    def _printable(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = " ".join(value.split())
+        if not value or not value.isprintable():
+            raise ValueError("name must be printable text")
+        return value
 
     @field_validator("balance_date")
     @classmethod
@@ -226,8 +236,7 @@ class AgentAccountCreate(BaseModel):
         return self
 
     def stored_name(self) -> str:
-        label = " ".join((self.label or "").split())
-        return f"{AGENT_NOTE_PREFIX}: {label}" if label else AGENT_NOTE_PREFIX
+        return self.name or AGENT_NOTE_PREFIX
 
 
 class AgentDocumentOut(BaseModel):

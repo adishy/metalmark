@@ -305,9 +305,11 @@ async def agent_add_account(
 ):
     """Add one manual account. Requires accounts:write.
 
-    Takes a type, a currency and optionally a subtype, an opening balance and an
-    owner. An agent cannot name the account or its institution: it is created as
-    "Added by agent" (plus the optional ``label``) and a person renames it. The
+    Takes a type, a currency and optionally a name, a subtype, an opening balance
+    and an owner. Without a name the account is created as "Added by agent". The
+    name is the one piece of text an agent may choose (ADR-0062): in the mirror it
+    reads back as a pseudonym, and that pseudonym is shared with anything else in
+    the household that has the same name. The institution cannot be set. The
     response is anonymized and carries the new account's id, which is what the
     transaction and holding routes take. A retried POST creates another account.
     No updates or deletes.
@@ -316,14 +318,12 @@ async def agent_add_account(
 
     principal, ctx = writer
     route = "/accounts"
-    fields = data.model_dump(exclude={"label"}, exclude_unset=True, exclude_none=True)
+    fields = data.model_dump(exclude={"name"}, exclude_unset=True, exclude_none=True)
     try:
         account = await ledger.create_account(
             ctx.session, ctx.household_id, AccountCreate(name=data.stored_name(), **fields)
         )
         result = AccountOut.model_validate(account)
-        # The name is behind the fixed prefix, so its pseudonym is its own: it
-        # cannot equal a name the household wrote, whichever kind that name is.
         body = await dispatch.anonymize(request, principal, result)
     except LedgerError as exc:
         raise _refused(principal, route, exc.status, "Account") from None

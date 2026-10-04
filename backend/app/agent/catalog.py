@@ -29,7 +29,7 @@ ANONYMIZATION = [
     "(accounts:write) can add entries. "
     "All require the household owner role and take ids, numbers, dates and fixed "
     "codes only — no names or descriptions; their request schemas are in OpenAPI. "
-    "A new account is named 'Added by agent' until a person renames it.",
+    "The one exception is a new account's name, which the agent may choose.",
     "Account files are the one thing not anonymized, and are outside this mirror: "
     "with the 'documents:read' scope, GET /agent/v1/accounts/{account_id}/documents "
     "lists an account's files with their real names, and "
