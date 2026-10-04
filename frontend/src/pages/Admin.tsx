@@ -622,6 +622,22 @@ const SCOPE_LABELS: Record<AgentScope, { label: string; hint: string }> = {
     label: "Debug views",
     hint: "/api/anon_debug — what a page shows, and why a row or a balance is what it is.",
   },
+  "transactions:write": {
+    label: "Add transactions",
+    hint: "Owner only. Amount, date and category, marked “Added by agent”. No names, no editing, no deleting.",
+  },
+  "holdings:write": {
+    label: "Add holdings",
+    hint: "Owner only. New positions in existing securities. No names, no editing, no deleting.",
+  },
+  "accounts:write": {
+    label: "Add accounts",
+    hint: "Owner only. A name, type, currency and opening balance. No editing, no deleting.",
+  },
+  "documents:read": {
+    label: "Read account files",
+    hint: "Owner only. Files and their names exactly as uploaded — not anonymized, unlike everything else here.",
+  },
 };
 
 const EXPIRY_DAYS = [7, 30, 90, 365];
@@ -650,6 +666,7 @@ export function AgentAccess() {
   const [formError, setFormError] = useState<string | null>(null);
   const [issued, setIssued] = useState<AgentTokenCreated | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
 
   function toggle(scope: AgentScope) {
@@ -659,7 +676,7 @@ export function AgentAccess() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setFormError("Name the token after the agent that will hold it.");
-    if (scopes.length === 0) return setFormError("Choose at least one thing it can read.");
+    if (scopes.length === 0) return setFormError("Choose at least one permission.");
     setFormError(null);
     create.mutate(
       { name: name.trim(), scopes, expires_in_days: days },
@@ -667,6 +684,7 @@ export function AgentAccess() {
         onSuccess: (t) => {
           setIssued(t);
           setCopied(false);
+          setCopyError(null);
           setName("");
         },
         onError: (err) => setFormError((err as Error).message),
@@ -675,20 +693,30 @@ export function AgentAccess() {
   }
 
   async function copy(value: string) {
+    setCopyError(null);
     try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(value);
       setCopied(true);
     } catch {
-      // A browser that refuses the clipboard (an insecure origin) still shows the
-      // token selected in the field, which is the fallback.
+      const input = document.querySelector<HTMLInputElement>('[data-testid="agent-token-value"]');
+      input?.focus();
+      input?.select();
+      try {
+        if (input && document.execCommand("copy")) {
+          setCopied(true);
+          return;
+        }
+      } catch { /* Leave the token selected for a manual copy. */ }
       setCopied(false);
+      setCopyError("Token selected. Press Ctrl+C or ⌘C to copy, or touch and hold to copy.");
     }
   }
 
   return (
     <Card
       title="Agent access"
-      note="Tokens for AI agents: read-only, and names, descriptions, notes and account numbers are replaced on the server before anything leaves."
+      note="Choose what an agent can read or add. Responses anonymize names, descriptions, notes and account numbers. Write permissions are off by default."
     >
       <form className="space-y-3" onSubmit={submit} data-testid="agent-token-form">
         <Field label="Name" htmlFor={nameId} required>
@@ -702,7 +730,7 @@ export function AgentAccess() {
           />
         </Field>
         <fieldset className="space-y-1">
-          <legend className="text-xs font-medium text-fg-muted">Can read</legend>
+          <legend className="text-xs font-medium text-fg-muted">Permissions</legend>
           {(Object.keys(SCOPE_LABELS) as AgentScope[]).map((scope) => (
             <Checkbox
               key={scope}
@@ -759,6 +787,7 @@ export function AgentAccess() {
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
+          {copyError && <p className="text-sm text-fg-muted" role="status">{copyError}</p>}
           <Button type="button" variant="ghost" onClick={() => setIssued(null)}>
             Done
           </Button>

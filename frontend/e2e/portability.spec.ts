@@ -28,7 +28,7 @@ test("export and re-import the household: nothing is duplicated", async ({ page 
   ]);
   // The server names the file, dated — a bare default name would mean the header
   // was lost somewhere between FastAPI and here.
-  expect(download.suggestedFilename()).toMatch(/^metalmark-export-\d{4}-\d{2}-\d{2}\.json$/);
+  expect(download.suggestedFilename()).toMatch(/^metalmark-export-\d{4}-\d{2}-\d{2}\.zip$/);
   const path = await download.path();
   expect(path, "Playwright must hand back a path to the saved file").toBeTruthy();
 

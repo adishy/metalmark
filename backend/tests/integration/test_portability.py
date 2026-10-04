@@ -542,7 +542,7 @@ async def test_the_document_refuses_the_shapes_it_cannot_read(household_factory)
                       "Not a MetalMark export")
         # A future version is refused rather than partially applied.
         await refuses(json.dumps({"format": portability.FORMAT, "version": 99}).encode(),
-                      "reads version 2")
+                      "reads version 3")
 
 
 async def test_money_must_be_a_string_not_a_number(household_factory):
@@ -1164,4 +1164,113 @@ async def test_version_2_is_read_as_written(household_factory):
         account = (await s.execute(select(Account).where(Account.name == "Card"))).scalar_one()
         exported = await portability.export_document(s, hh)
     assert account.current_balance == D("-850.0000")
-    assert exported["version"] == 2
+    assert exported["version"] == 3
+
+
+async def test_holding_account_local_overrides_round_trip(household_factory):
+    source = await household_factory()
+    target = await household_factory()
+    async with scoped_session(source) as session:
+        await _seed(session, source)
+        held = (await session.execute(select(Holding))).scalar_one()
+        held.source = "simplefin"
+        held.is_override = True
+        held.name_override = "Personal instrument label"
+        held.ticker_override = "LOCAL"
+        held.security_type_override = "other"
+        held.market_value_override = D("1.0000")
+        held.market_value_override_quantity = D("150000000.00000001")
+        held.market_value_override_as_of = date(2026, 2, 3)
+        held.quantity = D("300000000")
+    async with scoped_session(source) as session:
+        raw = portability.dumps(await _export(session, source))
+    async with scoped_session(target) as session:
+        await portability.import_document(session, target, raw)
+    async with scoped_session(target) as session:
+        held = (await session.execute(select(Holding))).scalar_one()
+        assert held.is_override
+        assert held.source == "simplefin"
+        assert held.name_override == "Personal instrument label"
+        assert held.ticker_override == "LOCAL"
+        assert held.security_type_override == "other"
+        assert held.market_value_override == D("1.0000")
+        assert held.market_value_override_quantity == D("150000000.00000001")
+        assert held.market_value_override_as_of == date(2026, 2, 3)
+        assert held.quantity == D("300000000")
+        from app.services import investments
+        broker = await session.get(Account, held.account_id)
+        valuation = await investments.value_account(session, broker, ON, "USD")
+        # Twice the quantity the total was set for, to the money scale.
+        assert valuation.market_value_account == D("2.0000")
+
+
+async def _holding_document(household_factory, **changes) -> tuple[uuid.UUID, bytes]:
+    """An export with one holding, its entry edited: a value sets a key, and
+    ``...`` removes one."""
+    source = await household_factory()
+    async with scoped_session(source) as session:
+        await _seed(session, source)
+        doc = json.loads(portability.dumps(await _export(session, source)))
+    [entry] = doc["holdings"]
+    for key, value in changes.items():
+        if value is ...:
+            entry.pop(key, None)
+        else:
+            entry[key] = value
+    return await household_factory(), json.dumps(doc).encode()
+
+
+async def test_an_older_export_pins_its_total_to_the_holdings_quantity(household_factory):
+    """Before the total carried its own quantity and date it was for the holding's
+    quantity, from the holding's date — and ``price_override`` is a column that no
+    longer exists."""
+    target, raw = await _holding_document(
+        household_factory,
+        market_value_override="250.0000", price_override="120.12345678", as_of="2026-02-03",
+        market_value_override_quantity=..., market_value_override_as_of=...,
+    )
+    async with scoped_session(target) as session:
+        await portability.import_document(session, target, raw)
+    async with scoped_session(target) as session:
+        held = (await session.execute(select(Holding))).scalar_one()
+        assert held.market_value_override == D("250.0000")
+        assert held.market_value_override_quantity == held.quantity
+        assert held.market_value_override_as_of == date(2026, 2, 3)
+
+    # With no date on the holding either, the total applies from the import.
+    target, raw = await _holding_document(
+        household_factory,
+        market_value_override="250.0000", as_of=None,
+        market_value_override_quantity=..., market_value_override_as_of=...,
+    )
+    async with scoped_session(target) as session:
+        await portability.import_document(session, target, raw)
+    async with scoped_session(target) as session:
+        held = (await session.execute(select(Holding))).scalar_one()
+        assert held.market_value_override_as_of == ledger.today()
+
+
+@pytest.mark.parametrize(
+    ("changes", "where"),
+    [
+        ({"name_override": "x" * 201}, "name_override"),
+        ({"ticker_override": "T" * 33}, "ticker_override"),
+        ({"security_type_override": "house"}, "security_type_override"),
+        ({"market_value_override": "-5.0000", "market_value_override_quantity": "2",
+          "market_value_override_as_of": "2026-02-03"}, "market_value_override"),
+        ({"market_value_override": "5.0000", "market_value_override_as_of": "2026-02-03"},
+         "market_value_override"),
+        ({"market_value_override_quantity": "5"}, "market_value_override"),
+        ({"market_value_override": "5.0000", "market_value_override_quantity": "0",
+          "market_value_override_as_of": "2026-02-03"}, "market_value_override_quantity"),
+    ],
+)
+async def test_a_malformed_holding_override_is_a_400_not_a_database_error(
+    household_factory, changes, where
+):
+    target, raw = await _holding_document(household_factory, **changes)
+    async with scoped_session(target) as session:
+        with pytest.raises(ledger.LedgerError) as refused:
+            await portability.import_document(session, target, raw)
+    assert refused.value.status == 400
+    assert f".{where}:" in str(refused.value)

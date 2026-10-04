@@ -497,6 +497,170 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents:
+    get:
+      tags:
+      - account documents
+      summary: List Documents
+      operationId: list_documents_accounts__account_id__documents_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountDocumentOut'
+                title: Response List Documents Accounts  Account Id  Documents Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - account documents
+      summary: Upload Document
+      operationId: upload_document_accounts__account_id__documents_post
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_document_accounts__account_id__documents_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountDocumentOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents/{document_id}/content:
+    get:
+      tags:
+      - account documents
+      summary: Download Document
+      operationId: download_document_accounts__account_id__documents__document_id__content_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      - name: preview
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Preview
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /accounts/{account_id}/documents/{document_id}:
+    delete:
+      tags:
+      - account documents
+      summary: Delete Document
+      operationId: delete_document_accounts__account_id__documents__document_id__delete
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /category-groups:
     get:
       tags:
@@ -3795,7 +3959,11 @@ paths:
       tags:
       - investments
       summary: Update Holding
-      description: Edit a hand-entered position. 409 when history owns the column.
+      description: 'Edit a position. A quantity, basis or date written to a bank position stops
+
+        bank updates to it; a label or value does not (ADR-0059). 409 when history owns
+
+        the column.'
       operationId: update_holding_investments_holdings__holding_id__patch
       parameters:
       - name: holding_id
@@ -4184,6 +4352,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /export/archive:
+    get:
+      tags:
+      - portability
+      summary: Export Archive
+      description: 'The document and every account file it lists, as one zip (ADR-0060).
+
+
+        Built into a temporary file first and streamed from it, so neither the build
+
+        nor the response holds the household''s files in memory, and the database is
+
+        done with before the first byte is sent.'
+      operationId: export_archive_export_archive_get
+      parameters:
+      - name: metalmark_session
+        in: cookie
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metalmark Session
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /export/transactions.csv:
     get:
       tags:
@@ -4238,7 +4441,12 @@ paths:
       tags:
       - portability
       summary: Import Household
-      description: 'Load an exported document into this household.
+      description: 'Load an exported document, or the archive holding it, into this household.
+
+
+        The JSON document on its own imports the ledger and leaves the account files
+
+        out, with a warning saying how many. The archive restores those too.
 
 
         Idempotent against natural keys: importing the same document twice creates
@@ -4247,7 +4455,18 @@ paths:
 
         per entity — and for why a credential cannot be in the document at all, so an
 
-        imported connection lands ``auth_error`` and needs reconnecting.'
+        imported connection lands ``auth_error`` and needs reconnecting.
+
+
+        The body is not a declared parameter, on purpose. FastAPI reads a declared
+
+        upload to disk *before* it resolves dependencies, so an unauthenticated
+
+        request could spool as much as the proxy lets through. Here the owner and
+
+        CSRF checks have already passed when the first byte is read, and the body is
+
+        counted against ``max_import_upload_bytes`` as it arrives.'
       operationId: import_household_import_post
       parameters:
       - name: metalmark_session
@@ -4258,12 +4477,6 @@ paths:
           - type: string
           - type: 'null'
           title: Metalmark Session
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/Body_import_household_import_post'
       responses:
         '200':
           description: Successful Response
@@ -4277,6 +4490,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The export's JSON document or its .zip archive.
   /institutions:
     get:
       tags:
@@ -4577,6 +4803,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CatalogOut'
+  /agent/v1/accounts/{account_id}/documents:
+    get:
+      tags:
+      - agent
+      summary: Agent List Documents
+      description: 'An account''s files, with their real names. Requires documents:read.
+
+
+        Not anonymized: a file name is whatever the household called the file.
+
+        ``content`` is the path that returns the bytes.'
+      operationId: agent_list_documents_agent_v1_accounts__account_id__documents_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentDocumentOut'
+                title: Response Agent List Documents Agent V1 Accounts  Account Id  Documents Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/accounts/{account_id}/documents/{document_id}/content:
+    get:
+      tags:
+      - agent
+      summary: Agent Read Document
+      description: 'One file''s bytes, exactly as uploaded. Requires documents:read.
+
+
+        Not anonymized and not parsed: a PDF comes back as that PDF, under the media
+
+        type it was uploaded with, and ``X-Content-SHA256`` is the digest to check it by.'
+      operationId: agent_read_document_agent_v1_accounts__account_id__documents__document_id__content_get
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Account Id
+      - name: document_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Document Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agent/v1/{path}:
     get:
       tags:
@@ -4597,6 +4898,123 @@ paths:
           content:
             application/json:
               schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/transactions:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Transaction
+      description: 'Add one transaction. Requires transactions:write; inputs use real row IDs.
+
+
+        ``amount`` is signed in the account''s currency: negative is money out.
+
+        An agent cannot set a description or merchant; its optional ``note`` is stored
+
+        behind a fixed "Added by agent" prefix. The response is anonymized. A retried
+
+        POST creates another entry, and so does the bank''s own copy arriving later on
+
+        a synced account — check before adding. No updates or deletes.'
+      operationId: agent_add_transaction_agent_v1_transactions_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentTransactionCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/investments/holdings:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Holding
+      description: 'Add one holding using an existing security ID. Requires holdings:write.
+
+
+        Existing positions (including bank/history positions) are refused with 409;
+
+        this permission cannot overwrite them. ``market_value`` is a total in the
+
+        security''s quote currency. Names, symbols and types cannot be set by an agent.'
+      operationId: agent_add_holding_agent_v1_investments_holdings_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentHoldingCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agent/v1/accounts:
+    post:
+      tags:
+      - agent
+      summary: Agent Add Account
+      description: 'Add one manual account. Requires accounts:write.
+
+
+        Takes a type, a currency and optionally a name, a subtype, an opening balance
+
+        and an owner. Without a name the account is created as "Added by agent". A
+
+        name another account of the same type and currency already has gets a number
+
+        after it ("Added by agent 2"), so the two stay separate accounts in an export. The
+
+        name is the one piece of text an agent may choose (ADR-0062): in the mirror it
+
+        reads back as a pseudonym, and that pseudonym is shared with anything else in
+
+        the household that has the same name. The institution cannot be set. The
+
+        response is anonymized and carries the new account''s id, which is what the
+
+        transaction and holding routes take. A retried POST creates another account.
+
+        No updates or deletes.'
+      operationId: agent_add_account_agent_v1_accounts_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentAccountCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountOut'
         '422':
           description: Validation Error
           content:
@@ -4831,6 +5249,43 @@ components:
       - type
       - currency
       title: AccountCreate
+    AccountDocumentOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        preview:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Preview
+      type: object
+      required:
+      - id
+      - account_id
+      - filename
+      - media_type
+      - size_bytes
+      - created_at
+      title: AccountDocumentOut
     AccountOut:
       properties:
         id:
@@ -5030,6 +5485,182 @@ components:
       - max_stale_days
       - is_fully_valued
       title: AccountValuationOut
+    AgentAccountCreate:
+      properties:
+        type:
+          type: string
+          enum:
+          - depository
+          - credit
+          - investment
+          - loan
+          - other
+          title: Type
+        currency:
+          type: string
+          pattern: ^[A-Za-z]{3}$
+          title: Currency
+          description: ISO 4217 code, e.g. USD.
+        subtype:
+          anyOf:
+          - type: string
+            enum:
+            - checking
+            - savings
+            - money_market
+            - cd
+            - credit_card
+            - line_of_credit
+            - brokerage
+            - ira
+            - roth
+            - roth_ira
+            - 401k
+            - 403b
+            - '457'
+            - '529'
+            - hsa
+            - pension
+            - mortgage
+            - auto
+            - student
+            - personal
+            - heloc
+            - cash
+            - crypto
+            - other
+          - type: 'null'
+          title: Subtype
+        current_balance:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Current Balance
+          description: 'Optional opening balance, signed, in the account''s currency: what is owed on
+            a card or a loan is negative. Omit it for an investment account, whose value is the sum of
+            its holdings.'
+        balance_date:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Balance Date
+          description: The day the balance was true. Defaults to today.
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+          description: An existing owner's id. Omitted means the Shared owner.
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+          description: The account's name, as the household will see it. Omitted, the account is named
+            'Added by agent' until a person renames it. The institution cannot be set by an agent.
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      - currency
+      title: AgentAccountCreate
+    AgentDocumentOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        filename:
+          type: string
+          title: Filename
+        media_type:
+          type: string
+          title: Media Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        sha256:
+          type: string
+          title: Sha256
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        content:
+          type: string
+          title: Content
+          default: ''
+      type: object
+      required:
+      - id
+      - account_id
+      - filename
+      - media_type
+      - size_bytes
+      - sha256
+      - created_at
+      title: AgentDocumentOut
+      description: 'One account file, as it is: this route is not anonymized (ADR-0062).'
+    AgentHoldingCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        security_id:
+          type: string
+          format: uuid
+          title: Security Id
+          description: An existing security's id; agents cannot add one.
+        quantity:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
+          title: Quantity
+          description: Units held; negative for a short position.
+        cost_basis:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Cost Basis
+          description: Total cost of the whole position, in the account's currency — not the security's
+            quote currency, and not per unit.
+        as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: As Of
+          description: The day the quantity was confirmed.
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Optional total value of the whole position in the security's quote currency (not
+            the account's). Same sign as quantity.
+      additionalProperties: false
+      type: object
+      required:
+      - account_id
+      - security_id
+      - quantity
+      title: AgentHoldingCreate
     AgentTokenCreate:
       properties:
         name:
@@ -5043,6 +5674,10 @@ components:
             enum:
             - agent:read
             - debug:read
+            - transactions:write
+            - holdings:write
+            - accounts:write
+            - documents:read
           type: array
           minItems: 1
           title: Scopes
@@ -5185,6 +5820,69 @@ components:
       - created_by
       - status
       title: AgentTokenOut
+    AgentTransactionCreate:
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          title: Account Id
+        amount:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          title: Amount
+          description: 'Signed, in the account''s own currency: negative is money out (an expense), positive
+            is money in. Send it as a string.'
+        transacted_at:
+          type: string
+          format: date-time
+          title: Transacted At
+          description: When it happened, with a UTC offset (e.g. 2026-10-01T12:00:00Z).
+        posted_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Posted At
+        category_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Category Id
+        owner_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Owner Id
+        is_pending:
+          type: boolean
+          title: Is Pending
+          default: false
+        tag_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          maxItems: 20
+          title: Tag Ids
+        note:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Note
+          description: 'Optional. Stored as ''Added by agent: <note>'' and shown to the household. Descriptions
+            and merchants cannot be set by an agent.'
+      additionalProperties: false
+      type: object
+      required:
+      - account_id
+      - amount
+      - transacted_at
+      title: AgentTransactionCreate
     AllocationOut:
       properties:
         as_of:
@@ -5296,7 +5994,6 @@ components:
         price:
           anyOf:
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           - type: 'null'
           title: Price
         price_currency:
@@ -5431,16 +6128,6 @@ components:
       - file
       - account_id
       title: Body_commit_ofx_import_ofx_commit_post
-    Body_import_household_import_post:
-      properties:
-        file:
-          type: string
-          contentMediaType: application/octet-stream
-          title: File
-      type: object
-      required:
-      - file
-      title: Body_import_household_import_post
     Body_preview_csv_import_csv_preview_post:
       properties:
         file:
@@ -5461,6 +6148,16 @@ components:
       required:
       - file
       title: Body_preview_ofx_import_ofx_preview_post
+    Body_upload_document_accounts__account_id__documents_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_upload_document_accounts__account_id__documents_post
     BudgetOut:
       properties:
         category_id:
@@ -6484,6 +7181,33 @@ components:
       title: HTTPValidationError
     HoldingCreate:
       properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          anyOf:
+          - type: string
+            pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          - type: 'null'
+          title: Security Type
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Total value of the position in the security's quote currency
         account_id:
           type: string
           format: uuid
@@ -6496,13 +7220,14 @@ components:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
           title: Quantity
+          description: Units held (shares, coins, or the amount for cash); negative for a short
         cost_basis:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
           - type: 'null'
           title: Cost Basis
         as_of:
@@ -6511,6 +7236,7 @@ components:
             format: date
           - type: 'null'
           title: As Of
+          description: The date the quantity was confirmed; it does not date the market value
       type: object
       required:
       - account_id
@@ -6569,6 +7295,22 @@ components:
             format: date
           - type: 'null'
           title: As Of
+        is_override:
+          type: boolean
+          title: Is Override
+          default: false
+        market_value_override:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Market Value Override
+        market_value_override_as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Market Value Override As Of
       type: object
       required:
       - id
@@ -6585,18 +7327,49 @@ components:
       title: HoldingOut
     HoldingUpdate:
       properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Name
+        ticker:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Ticker
+        security_type:
+          anyOf:
+          - type: string
+            pattern: ^(stock|etf|mutual_fund|bond|option|crypto|cash|other)$
+          - type: 'null'
+          title: Security Type
+        market_value:
+          anyOf:
+          - type: number
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
+          - type: 'null'
+          title: Market Value
+          description: Total value of the position in the security's quote currency
+        reset_overrides:
+          type: boolean
+          title: Reset Overrides
+          default: false
         quantity:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,11}|(?=[\d.]{1,20}0*$)\d{0,11}\.\d{0,8}0*$)
           - type: 'null'
           title: Quantity
         cost_basis:
           anyOf:
           - type: number
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+            pattern: ^(?!^[-+.]*$)[+-]?0*(?:\d{0,15}|(?=[\d.]{1,20}0*$)\d{0,15}\.\d{0,4}0*$)
           - type: 'null'
           title: Cost Basis
         as_of:
@@ -6641,7 +7414,6 @@ components:
         price:
           anyOf:
           - type: string
-            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
           - type: 'null'
           title: Price
         price_date:
@@ -6683,6 +7455,18 @@ components:
           - type: string
           - type: 'null'
           title: Reason
+        market_value_override:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Market Value Override
+        market_value_override_as_of:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Market Value Override As Of
       type: object
       required:
       - holding_id

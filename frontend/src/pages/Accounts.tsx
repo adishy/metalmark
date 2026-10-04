@@ -1,3 +1,7 @@
+import { useAuth } from "@/auth/AuthContext";
+import { AccountDocuments } from "@/components/AccountDocuments";
+import AccountHoldings from "@/components/AccountHoldings";
+import DataNotes from "@/components/DataNotes";
 import { useCallback, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
@@ -19,7 +23,7 @@ import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { formatDay, isoDay, todayIso } from "@/lib/dates";
-import { brushWindow, coverageNotes, measuredSpan, netWorthOption } from "@/lib/netWorthChart";
+import { brushWindow, coverageNotes, coverageSummary, measuredSpan, netWorthOption } from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
 import { brushEvents, type ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
@@ -415,9 +419,11 @@ function NetWorthHero({
   // value. The chart marks both on the canvas and withholds the bar it cannot
   // draw, but a mark is silent at rest — ADR-0045 wants the words as well, and
   // they belong to whichever span is on screen, so a brushed window gets its own.
+  const shown = useMemo(() => (win ? points.slice(win[0], win[1] + 1) : points), [points, win]);
+  const coverage = useMemo(() => coverageSummary(shown), [shown]);
   const notes = useMemo(
-    () => coverageNotes(win ? points.slice(win[0], win[1] + 1) : points),
-    [points, win],
+    () => coverageNotes(shown),
+    [shown],
   );
 
   return (
@@ -467,14 +473,7 @@ function NetWorthHero({
       </div>
 
       {points.length > 1 && notes.length > 0 && (
-        <div className="mt-2 space-y-1 text-xs text-fg-muted" data-testid="accounts-net-worth-coverage">
-          {notes.map((note) => (
-            <p key={note}>
-              <span aria-hidden="true">⚠ </span>
-              {note}
-            </p>
-          ))}
-        </div>
+        <DataNotes notes={notes} summary={coverage.summary} tone={coverage.tone} testid="accounts-net-worth-coverage" />
       )}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -761,6 +760,7 @@ function AddAccountForm({
 }
 
 function EditAccountDialog({ account, onClose }: { account: Account; onClose: () => void }) {
+  const { me } = useAuth();
   const update = useUpdateAccount();
   const del = useDeleteAccount();
   const exportCsv = useMutation({ mutationFn: downloadAccountCsv });
@@ -892,6 +892,8 @@ function EditAccountDialog({ account, onClose }: { account: Account; onClose: ()
         )}
 
         <BalanceHistory account={account} />
+        {account.type === "investment" && <AccountHoldings account={account} canEdit={me?.role === "owner"} />}
+        <AccountDocuments accountId={account.id} />
 
         {/* Here rather than in Settings → Data, because this is where someone
             asks the question. The Settings tab can export one account too, but

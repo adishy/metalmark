@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import type { AgentToken, AgentTokenCreate, AgentTokenCreated } from "@/api/types";
 import { AgentAccess } from "@/pages/Admin";
 
@@ -129,5 +129,34 @@ describe("AgentAccess", () => {
     fireEvent.click(screen.getByTestId("agent-token-revoke-t1"));
     fireEvent.click(screen.getByTestId("agent-token-confirm-t1"));
     expect(h.revoke).toHaveBeenCalledWith("t1", expect.anything());
+  });
+});
+
+
+describe("agent token clipboard", () => {
+  function issue() {
+    // secret-scan: allow — deliberately fake clipboard fixture, not an issued key.
+    h.create.mockImplementation((_body: AgentTokenCreate, opts: { onSuccess: (t: AgentTokenCreated) => void }) => opts.onSuccess({ ...ACTIVE, token: "mmk_demo_clipboard" })); // secret-scan: allow
+    render(<AgentAccess />);
+    fireEvent.change(screen.getByTestId("agent-token-name"), { target: { value: "Demo" } });
+    fireEvent.click(screen.getByText("Issue token"));
+  }
+  it("copies on a LAN origin without the modern clipboard API", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => true) });
+    issue();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument());
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
+  });
+  it("selects the token and explains manual copying when both APIs refuse", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => false) });
+    issue();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(screen.getByText(/Token selected/)).toBeInTheDocument());
+    const input = screen.getByTestId("agent-token-value") as HTMLInputElement;
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
   });
 });

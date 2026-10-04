@@ -246,6 +246,27 @@ describe("<PortfolioHoldings />", () => {
     expect(screen.getByTestId("portfolio")).not.toHaveTextContent("$0.00");
   });
 
+  it("says in the collapsed summary how many positions the total leaves out", () => {
+    render(<PortfolioHoldings />);
+
+    const summary = screen.getByTestId("account-valuation-summary-acct-broker");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    expect(summary).toHaveTextContent("Valuation details · 2 positions not counted");
+    expect(screen.getByTestId("account-not-counted-acct-broker").className).toContain("text-warning");
+  });
+
+  it("keeps the collapsed summary quiet when only the price age is in it", () => {
+    h.portfolio.mockImplementation(() =>
+      query({ ...PORTFOLIO, accounts: [{ ...BROKER, unpriced: 0, no_rate: 0 }] }),
+    );
+    render(<PortfolioHoldings />);
+
+    const summary = screen.getByTestId("account-valuation-summary-acct-broker");
+    expect(summary.textContent?.trim()).toBe("Valuation details");
+    expect(screen.queryByTestId("account-not-counted-acct-broker")).toBeNull();
+    expect(summary.innerHTML).not.toContain("text-warning");
+  });
+
   it("renders cash as the money it is (ADR-0033 §4)", () => {
     render(<PortfolioHoldings />);
 
@@ -281,6 +302,36 @@ describe("<PortfolioHoldings />", () => {
     // No row behind the position at all, and no crash for the missing join.
     expect(screen.queryByTestId("holding-manual-acct-broker:sec-cash")).not.toBeInTheDocument();
     expect(screen.getByTestId("holding-acct-broker:sec-cash")).toBeInTheDocument();
+  });
+
+  it("says a value was set by hand instead of quoting a stale price for it (ADR-0059)", () => {
+    const pinned = {
+      ...VTI,
+      price: "50.00000000",
+      price_date: "2026-08-01",
+      stale_days: 50,
+      market_value_override: "500.0000",
+      market_value_override_as_of: "2026-08-01",
+    };
+    h.portfolio.mockImplementation(() =>
+      query({ ...PORTFOLIO, accounts: [{ ...BROKER, holdings: [pinned, EUROBOND] }] }),
+    );
+    render(<PortfolioHoldings />);
+
+    const detail = screen.getByTestId("holding-detail-acct-broker:sec-vti");
+    expect(detail).toHaveTextContent("10 · Value set by you ·");
+    expect(screen.getByTestId("holding-pinned-acct-broker:sec-vti").querySelector("time")).toHaveAttribute(
+      "datetime",
+      "2026-08-01",
+    );
+    // Not a quote: no unit price, no age, and nothing in the warning colour.
+    expect(detail).not.toHaveTextContent("@");
+    expect(detail).not.toHaveTextContent("priced");
+    expect(detail).not.toHaveTextContent("days old");
+    expect(detail.querySelector(".text-warning")).toBeNull();
+    // A row valued from a quote beside it reads as before.
+    expect(screen.queryByTestId("holding-pinned-acct-broker:sec-euro")).not.toBeInTheDocument();
+    expect(screen.getByTestId("holding-detail-acct-broker:sec-euro")).toHaveTextContent("priced");
   });
 
   it("states the age of the oldest price an account's value used", () => {
@@ -375,6 +426,10 @@ describe("<PortfolioHoldings />", () => {
     // worth nothing.
     expect(screen.getByTestId("account-no-rate-acct-broker")).toHaveTextContent(
       "not at zero",
+    );
+    // Collapsed, the summary already says the balance is out of the total.
+    expect(screen.getByTestId("account-not-counted-acct-broker")).toHaveTextContent(
+      "balance and 2 positions not counted",
     );
   });
 

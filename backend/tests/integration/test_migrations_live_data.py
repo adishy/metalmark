@@ -800,3 +800,92 @@ def test_0015_adds_budgets_with_rls_and_cascades_off_the_category(scratch_db):
     with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
         assert _has_table(conn, "budgets")
         assert conn.execute("SELECT count(*) FROM budgets").fetchone()[0] == 0
+
+
+def test_0017_documents_are_additive_secure_and_downgrade_preserves_ledger(scratch_db):
+    _alembic(scratch_db, "upgrade", "0016")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        conn.execute("DROP TABLE IF EXISTS account_documents")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Checking", type_="depository", source=None,
+                        balance="10")
+        _snapshot(conn, hid, acct, "2026-09-01", "10")
+        before = _fingerprint(conn)
+    _alembic(scratch_db, "upgrade", "0017")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert _fingerprint(conn) == before
+        assert conn.execute(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = 'account_documents'"
+        ).fetchone()[0]
+        assert conn.execute(
+            "SELECT count(*) FROM pg_policies WHERE tablename = 'account_documents'"
+        ).fetchone()[0] == 1
+        conn.execute(
+            "INSERT INTO account_documents "
+            "(household_id, account_id, filename, media_type, size_bytes, sha256, content) "
+            "VALUES (%s, %s, 'file.pdf', 'application/pdf', 5, %s, %s)",
+            (hid, acct, "0" * 64, b"hello"),
+        )
+        assert conn.execute("SELECT content FROM account_documents").fetchone()[0] == b"hello"
+    _alembic(scratch_db, "downgrade", "0016")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert not _has_table(conn, "account_documents")
+        assert _fingerprint(conn) == before
+    _alembic(scratch_db, "upgrade", "0017")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute("SELECT count(*) FROM account_documents").fetchone()[0] == 0
+
+
+def test_0016_holding_overrides_preserve_existing_positions(scratch_db):
+    _alembic(scratch_db, "upgrade", "0015")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        # Initial schema follows live metadata; simulate an existing older installation.
+        for column in ("is_override", "name_override", "ticker_override",
+                       "security_type_override", "market_value_override",
+                       "market_value_override_quantity", "market_value_override_as_of"):
+            conn.execute(f"ALTER TABLE holdings DROP COLUMN IF EXISTS {column}")
+        hid, owner = _household(conn)
+        acct = _account(conn, hid, owner, "Brokerage", balance="100")
+        security = conn.execute(
+            "INSERT INTO securities (household_id, name, security_type, currency, is_manual) "
+            "VALUES (%s, 'Apple', 'stock', 'USD', false) RETURNING id", (hid,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO holdings "
+            "(household_id, account_id, security_id, quantity, cost_basis, source, as_of) "
+            "VALUES (%s, %s, %s, 10, 50, 'simplefin', '2026-09-01')", (hid, acct, security),
+        )
+        before = conn.execute(
+            "SELECT id, quantity, cost_basis, source, as_of FROM holdings"
+        ).fetchall()
+    _alembic(scratch_db, "upgrade", "0016")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT id, quantity, cost_basis, source, as_of FROM holdings"
+        ).fetchall() == before
+        assert conn.execute(
+            "SELECT is_override, name_override, market_value_override, "
+            "market_value_override_quantity, market_value_override_as_of FROM holdings"
+        ).fetchone() == (False, None, None, None, None)
+        # The total, its quantity and its date are one fact: all set or none.
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("UPDATE holdings SET market_value_override = 1")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "UPDATE holdings SET market_value_override = 1, "
+                "market_value_override_quantity = 0, market_value_override_as_of = '2026-09-01'"
+            )
+        conn.execute(
+            "UPDATE holdings SET market_value_override = 1, "
+            "market_value_override_quantity = 10, market_value_override_as_of = '2026-09-01'"
+        )
+        conn.execute(
+            "UPDATE holdings SET market_value_override = NULL, "
+            "market_value_override_quantity = NULL, market_value_override_as_of = NULL"
+        )
+    _alembic(scratch_db, "downgrade", "0015")
+    with psycopg.connect(_dsn(scratch_db), autocommit=True) as conn:
+        assert conn.execute(
+            "SELECT id, quantity, cost_basis, source, as_of FROM holdings"
+        ).fetchall() == before
+    _alembic(scratch_db, "upgrade", "0016")

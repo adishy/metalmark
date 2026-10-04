@@ -21,7 +21,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from app.models.investments import INVESTMENT_TX_TYPES, SECURITY_TYPES
 from app.schemas.patch import is_set
@@ -32,6 +32,13 @@ ALLOCATION_GROUPS = ("security", "type", "account", "currency")
 _SECURITY_TYPE_PATTERN = "^(" + "|".join(SECURITY_TYPES) + ")$"
 _TX_TYPE_PATTERN = "^(" + "|".join(INVESTMENT_TX_TYPES) + ")$"
 _GROUP_PATTERN = "^(" + "|".join(ALLOCATION_GROUPS) + ")$"
+
+
+def _fixed_point(value: Decimal | None) -> str | None:
+    """A price on the wire, always in fixed-point. ``str(Decimal)`` switches to
+    scientific notation below ``1e-6`` (``3.3E-7``), and a price that small is a
+    real one here — a hand-set total over a very large quantity derives one."""
+    return None if value is None else format(value, "f")
 
 
 # ---- securities -------------------------------------------------------------
@@ -99,12 +106,31 @@ class PriceOut(BaseModel):
 # ---- holdings ---------------------------------------------------------------
 
 
-class HoldingCreate(BaseModel):
+class HoldingMetadata(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    ticker: str | None = Field(default=None, max_length=32)
+    security_type: str | None = Field(default=None, pattern=_SECURITY_TYPE_PATTERN)
+    # Exact at the position's quantity when it is set, and effective from that
+    # day; a later change in quantity scales it (ADR-0059). Null clears it.
+    market_value: Decimal | None = Field(
+        default=None, max_digits=19, decimal_places=4,
+        description="Total value of the position in the security's quote currency",
+    )
+
+
+class HoldingCreate(HoldingMetadata):
     account_id: uuid.UUID
     security_id: uuid.UUID
-    quantity: Decimal
-    cost_basis: Decimal | None = None
-    as_of: date | None = None
+    # Bounded as their columns are, so an overflow is a 422 and not a database error.
+    quantity: Decimal = Field(
+        max_digits=19, decimal_places=8,
+        description="Units held (shares, coins, or the amount for cash); negative for a short",
+    )
+    cost_basis: Decimal | None = Field(default=None, max_digits=19, decimal_places=4)
+    as_of: date | None = Field(
+        default=None,
+        description="The date the quantity was confirmed; it does not date the market value",
+    )
 
     @model_validator(mode="after")
     def _quantity_nonzero(self) -> HoldingCreate:
@@ -115,13 +141,16 @@ class HoldingCreate(BaseModel):
         return self
 
 
-class HoldingUpdate(BaseModel):
-    quantity: Decimal | None = None
-    cost_basis: Decimal | None = None
+class HoldingUpdate(HoldingMetadata):
+    reset_overrides: bool = False
+    quantity: Decimal | None = Field(default=None, max_digits=19, decimal_places=8)
+    cost_basis: Decimal | None = Field(default=None, max_digits=19, decimal_places=4)
     as_of: date | None = None
 
     @model_validator(mode="after")
     def _quantity_nonzero(self) -> HoldingUpdate:
+        if self.reset_overrides and self.model_fields_set != {"reset_overrides"}:
+            raise ValueError("reset_overrides must be sent on its own")
         if is_set(self, "quantity") and self.quantity == 0:
             raise ValueError("quantity cannot be zero; a closed position has no row")
         return self
@@ -153,6 +182,13 @@ class HoldingOut(BaseModel):
     manual_cost_basis: Decimal | None
 
     as_of: date | None
+    #: True when the household set this bank position's quantity, basis or date,
+    #: so sync leaves those alone (ADR-0059).
+    is_override: bool = False
+    #: A total the household set by hand, in the security's quote currency, and
+    #: the day it applies from. Both null when the value is from prices.
+    market_value_override: Decimal | None = None
+    market_value_override_as_of: date | None = None
 
 
 # ---- investment transactions ------------------------------------------------
@@ -240,7 +276,8 @@ class HoldingValueOut(BaseModel):
     price: Decimal | None
     price_date: date | None
     price_currency: str | None
-    #: ``quantity × price``, in the security's own quote currency.
+    #: ``quantity × price``, in the security's own quote currency — or the total
+    #: the household set, when ``market_value_override`` is not null.
     value_native: Decimal | None
     value_account: Decimal | None
     value_base: Decimal | None
@@ -249,6 +286,14 @@ class HoldingValueOut(BaseModel):
     stale_days: int | None
     #: ``no_price`` | ``no_rate`` | null.
     reason: str | None
+    #: Set when the value above is a total the household set by hand and it
+    #: applies on the valuation date (ADR-0059): the stored total and the day it
+    #: was set. ``price`` is then that total per unit, not a quote, and
+    #: ``price_date`` is the same day.
+    market_value_override: Decimal | None = None
+    market_value_override_as_of: date | None = None
+
+    _price_json = field_serializer("price", when_used="json")(_fixed_point)
 
 
 class AccountValuationOut(BaseModel):
@@ -303,6 +348,8 @@ class AllocationSourceOut(BaseModel):
     price: Decimal | None = None
     price_currency: str | None = None
     price_date: date | None = None
+
+    _price_json = field_serializer("price", when_used="json")(_fixed_point)
 
 
 class AllocationRowOut(BaseModel):

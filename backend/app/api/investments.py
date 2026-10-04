@@ -51,7 +51,12 @@ def _holding_out(record: svc.HoldingRecord) -> HoldingOut:
         id=position.holding_id,
         account_id=position.account_id,
         security_id=position.security_id,
-        security=SecurityOut.model_validate(record.security),
+        security=SecurityOut.model_validate(record.security).model_copy(update={
+            "name": record.holding.name_override or record.security.name,
+            "ticker": (record.holding.ticker_override if record.holding.ticker_override is not None
+                       else record.security.ticker),
+            "security_type": record.holding.security_type_override or record.security.security_type,
+        } if record.holding else {}),
         quantity=position.quantity,
         cost_basis=position.cost_basis,
         quantity_source=position.source,
@@ -59,6 +64,13 @@ def _holding_out(record: svc.HoldingRecord) -> HoldingOut:
         manual_quantity=None if record.holding is None else record.holding.quantity,
         manual_cost_basis=None if record.holding is None else record.holding.cost_basis,
         as_of=position.as_of,
+        is_override=bool(record.holding and record.holding.is_override),
+        market_value_override=(
+            None if record.holding is None else record.holding.market_value_override
+        ),
+        market_value_override_as_of=(
+            None if record.holding is None else record.holding.market_value_override_as_of
+        ),
     )
 
 
@@ -213,6 +225,7 @@ async def upsert_holding(
         quantity=data.quantity,
         cost_basis=data.cost_basis,
         as_of=data.as_of,
+        metadata=data,
     )
     return _holding_out(
         await _record_for(
@@ -227,7 +240,9 @@ async def update_holding(
     data: HoldingUpdate,
     ctx: RequestContext = Depends(require_owner),
 ):
-    """Edit a hand-entered position. 409 when history owns the column."""
+    """Edit a position. A quantity, basis or date written to a bank position stops
+    bank updates to it; a label or value does not (ADR-0059). 409 when history owns
+    the column."""
     holding = await svc.update_holding(ctx.session, holding_id, data)
     return _holding_out(
         await _record_for(

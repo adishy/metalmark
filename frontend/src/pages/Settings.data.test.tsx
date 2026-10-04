@@ -14,6 +14,7 @@ import Settings from "@/pages/Settings";
 // server sends.
 const h = vi.hoisted(() => ({
   downloadExport: vi.fn(),
+  downloadArchive: vi.fn(),
   downloadAccountCsv: vi.fn(),
   import: vi.fn(),
   importState: {} as Record<string, unknown>,
@@ -24,6 +25,7 @@ vi.mock("@/api/portability", async () => {
   return {
     ...actual,
     downloadExport: h.downloadExport,
+    downloadArchive: h.downloadArchive,
     downloadAccountCsv: h.downloadAccountCsv,
     useImportDocument: () => ({ ...h.importState, mutate: h.import, reset: vi.fn() }),
   };
@@ -98,6 +100,7 @@ async function openData() {
 
 beforeEach(() => {
   h.downloadExport.mockReset().mockResolvedValue(undefined);
+  h.downloadArchive.mockReset().mockResolvedValue(undefined);
   h.downloadAccountCsv.mockReset().mockResolvedValue(undefined);
   h.import.mockReset();
   h.importState = {};
@@ -105,12 +108,26 @@ beforeEach(() => {
 });
 
 describe("Settings → Data", () => {
-  it("downloads the household document", async () => {
+  it("downloads the archive, and the ledger on its own when asked", async () => {
     await openData();
 
     await userEvent.click(screen.getByTestId("export-download"));
 
+    expect(h.downloadArchive).toHaveBeenCalledTimes(1);
+    expect(h.downloadExport).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("export-ledger-download"));
+
     expect(h.downloadExport).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the archive or the document on import", async () => {
+    await openData();
+
+    expect(screen.getByTestId("import-document-file")).toHaveAttribute(
+      "accept",
+      expect.stringContaining(".zip"),
+    );
   });
 
   it("downloads one account's CSV, and asks for the account it shows", async () => {

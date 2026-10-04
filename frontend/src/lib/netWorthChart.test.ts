@@ -5,6 +5,8 @@ import {
   brushWindow,
   changesPerPoint,
   coverageNotes,
+  coverageSummary,
+  leftOutAccounts,
   measuredSpan,
   netWorthOption,
   startsHere,
@@ -454,6 +456,35 @@ describe("brushWindow", () => {
   it("declines a series too short to brush, or a window that is not numbers", () => {
     expect(brushWindow(points.slice(0, 2), 0, 50)).toBeNull();
     expect(brushWindow(points, Number.NaN, 100)).toBeNull();
+  });
+});
+
+describe("the collapsed coverage summary", () => {
+  const point = (missing: { account_id: string; name: string; reason: "not_started" | "no_balance" | "no_rate" | "no_price" }[]) =>
+    ({ date: "2026-01-01", net_worth: "1.00", missing });
+
+  it("is a neutral title when nothing is left out, or accounts only start partway", () => {
+    expect(coverageSummary([point([])])).toEqual({ summary: "History coverage", tone: "neutral" });
+    const started = [point([{ account_id: "a", name: "Savings", reason: "not_started" }])];
+    expect(leftOutAccounts(started)).toBe(0);
+    expect(coverageSummary(started).tone).toBe("neutral");
+  });
+
+  it("warns, counting each account once however many points leave it out", () => {
+    const points = [
+      point([{ account_id: "a", name: "Euro", reason: "no_rate" }]),
+      point([
+        { account_id: "a", name: "Euro", reason: "no_rate" },
+        { account_id: "b", name: "Brokerage", reason: "no_price" },
+        { account_id: "c", name: "New", reason: "not_started" },
+      ]),
+    ];
+    expect(leftOutAccounts(points)).toBe(2);
+    expect(coverageSummary(points)).toEqual({
+      summary: "Chart leaves out 2 accounts at some points",
+      tone: "warning",
+    });
+    expect(coverageSummary([points[0]]).summary).toBe("Chart leaves out 1 account at some points");
   });
 });
 

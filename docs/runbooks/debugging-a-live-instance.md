@@ -1,6 +1,6 @@
 # Debugging a live instance through the agent API
 
-The agent API (ADR-0048) is a read-only, anonymized mirror of the app's own API: every
+The agent read API (ADR-0048/0061) is a read-only, anonymized mirror of the app's own API: every
 number and date is real, every name and free-text field is a stable pseudonym
 (`Merchant 9c369d`). It is how an agent — or a person who does not want to look at the
 household's names — debugs a running instance. Never debug through the database.
@@ -72,9 +72,28 @@ checks that flag the account. `agent/v1/checks` runs every data check now.
 `anon_debug/pages/{accounts|transactions|review|reports|investments|settings|admin}`, or
 `anon_debug/view?path=/api/…` for any URL copied from the browser.
 
-## What the API will not do
+## Read and debug boundaries
 
-Write anything (every request runs in a read-only transaction), echo free-text query
+GET and debug routes cannot write (every request runs in a read-only transaction), echo free-text query
 parameters (`search` is refused — it would be an oracle), or return e-mail addresses.
 Deploying and any write — re-running the categorizer, fetching logos, fixing a bank link —
 belongs to the instance's owner.
+
+
+## Optional entry permissions
+
+An owner can issue a separate token with `transactions:write`, `holdings:write` or `accounts:write` in Admin → Agent access. Existing read tokens gain no permissions. These scopes only open:
+
+- `POST /api/agent/v1/transactions`: add an entry (`AgentTransactionCreate`). `amount` is signed in the account's currency: negative is money out. There is no description or merchant; an optional `note` is stored as `Added by agent: <note>`. A retry creates another transaction, and so does the bank's own copy arriving later on a synced account; check first.
+- `POST /api/agent/v1/investments/holdings`: add a position (`AgentHoldingCreate`) using an existing account and security ID. `market_value` is a total in the security's quote currency. Existing bank, manual or history positions are refused with 409.
+
+Inputs are real IDs, numbers and dates from the read API; names and other free text are refused, because a name an agent could submit and read back as a pseudonym would undo the anonymization (ADR-0061). Unknown fields are a 422. Responses remain anonymized. `POST /api/agent/v1/accounts` (`accounts:write`, ADR-0062) creates a manual account from a type, currency, optional name, subtype, opening balance and owner; without a name it is `Added by agent`. The name is the one free-text field an agent may send. All write scopes can be issued only by the household owner and require the issuer's current owner role; no update/delete routes, trades or security management are exposed. Every write is logged as `agent.write`. Request schemas are in `/api/openapi.json`. Production debugging remains read-only unless a separate task explicitly authorizes an entry.
+
+## Account files
+
+Files attached to accounts are not part of the anonymized API. A token with the owner-issued
+`documents:read` scope (ADR-0062) can list them at `GET /api/agent/v1/accounts/{account_id}/documents`
+and fetch one at `…/documents/{document_id}/content`. **Both return real file names and the file's
+bytes exactly as uploaded — nothing is anonymized.** Do not ask for this scope to debug an instance;
+it exists for an owner who wants an agent to read their statements. Each access is logged as
+`agent.file`.

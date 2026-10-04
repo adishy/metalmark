@@ -205,13 +205,13 @@ function AccountCard({
                 one whether or not its holdings do, and Σ(holdings) is the wrong
                 number to put beside the words "balance from the account". */}
             {account.currency !== ccy && (
-              <span className="ml-1" data-testid={`account-native-${account.account_id}`}>
-                · {formatMoney(account.balance_account, account.currency)} {account.currency}
+              <span className="mt-1 block text-base font-semibold" data-testid={`account-native-${account.account_id}`}>
+                {formatMoney(account.balance_account, account.currency)} {account.currency}
               </span>
             )}
           </p>
         </div>
-        <p className="ml-auto shrink-0 font-semibold" data-testid={`account-value-${account.account_id}`}>
+        <p className="ml-auto shrink-0 text-base font-semibold" data-testid={`account-value-${account.account_id}`}>
           {statedUnconvertible ? (
             <span className="text-warning font-medium">No {ccy} rate</span>
           ) : (
@@ -220,43 +220,65 @@ function AccountCard({
         </p>
       </header>
 
-      <div role="status" aria-atomic="true">
-        {statedUnconvertible && (
-          <p className="px-4 pt-2 text-xs text-warning" data-testid={`account-no-rate-${account.account_id}`}>
-            This account's balance is {formatMoney(account.balance_account, account.currency)}{" "}
-            {account.currency} and there is no rate to convert it, so it is counted at nothing in the
-            total above — not at zero.
-          </p>
-        )}
-        {excluded && (
-          <p className="px-4 pt-2 text-xs text-warning" data-testid={`account-excluded-${account.account_id}`}>
-            {excluded}
-          </p>
-        )}
-        {unaccounted && (
-          <p className="px-4 pt-2 text-xs text-fg-muted" data-testid={`account-unaccounted-${account.account_id}`}>
-            Unaccounted cash {formatMoney(account.unaccounted_cash_base, ccy)} — the stated balance
-            less what these positions account for.
-          </p>
-        )}
-        {account.max_stale_days !== null && (
-          <p
-            className={`px-4 pt-2 text-xs ${account.max_stale_days > STALE_DAYS ? "text-warning" : "text-fg-muted"}`}
-            data-testid={`account-stale-${account.account_id}`}
-          >
-            Oldest price used: {account.max_stale_days}{" "}
-            {account.max_stale_days === 1 ? "day" : "days"} old
-            {account.oldest_price_date && (
-              <>
-                {" ("}
-                <Day value={account.oldest_price_date} />
-                {")"}
-              </>
+      {(statedUnconvertible || excluded || unaccounted || account.max_stale_days !== null) && (
+        <details className="m-3 rounded-control border border-border bg-surface-inset/40">
+          <summary className="min-h-11 cursor-pointer rounded-control px-3 py-3 text-sm font-medium text-fg-muted" data-testid={`account-valuation-summary-${account.account_id}`}>
+            Valuation details
+            {/* Collapsed, this line is all there is: "oldest price 1 day old" and
+                "left out of every total" must not read alike. What the total is
+                short of is said here, counted, in the warning tone. */}
+            {(statedUnconvertible || excluded) && (
+              <span className="text-warning" data-testid={`account-not-counted-${account.account_id}`}>
+                {" · "}
+                {[
+                  statedUnconvertible ? "balance" : null,
+                  excluded
+                    ? `${account.unpriced + account.no_rate} ${account.unpriced + account.no_rate === 1 ? "position" : "positions"}`
+                    : null,
+                ].filter(Boolean).join(" and ")}{" "}
+                not counted
+              </span>
             )}
-            .
-          </p>
-        )}
-      </div>
+          </summary>
+          <div role="status" aria-atomic="true">
+            {statedUnconvertible && (
+              <p className="px-3 pb-2 text-sm text-warning" data-testid={`account-no-rate-${account.account_id}`}>
+                This account's balance is {formatMoney(account.balance_account, account.currency)}{" "}
+                {account.currency} and there is no rate to convert it, so it is counted at nothing in the
+                total above — not at zero.
+              </p>
+            )}
+            {excluded && (
+              <p className="px-3 pb-2 text-sm text-warning" data-testid={`account-excluded-${account.account_id}`}>
+                {excluded}
+              </p>
+            )}
+            {unaccounted && (
+              <p className="px-3 pb-2 text-sm text-fg-muted" data-testid={`account-unaccounted-${account.account_id}`}>
+                Unaccounted cash {formatMoney(account.unaccounted_cash_base, ccy)} — the stated balance
+                less what these positions account for.
+              </p>
+            )}
+            {account.max_stale_days !== null && (
+              <p
+                className={`px-3 pb-2 text-sm ${account.max_stale_days > STALE_DAYS ? "text-warning" : "text-fg-muted"}`}
+                data-testid={`account-stale-${account.account_id}`}
+              >
+                Oldest price used: {account.max_stale_days}{" "}
+                {account.max_stale_days === 1 ? "day" : "days"} old
+                {account.oldest_price_date && (
+                  <>
+                    {" ("}
+                    <Day value={account.oldest_price_date} />
+                    {")"}
+                  </>
+                )}
+                .
+              </p>
+            )}
+          </div>
+        </details>
+      )}
 
       {/* A position list is unbounded — a brokerage account can hold forty — and
           an unbounded list inside one of two columns is what made this view
@@ -316,6 +338,8 @@ function HoldingRow({
 }) {
   const unpriced = h.reason !== null;
   const cash = isCash(h.security_type);
+  // The day a hand-set total applies from, when one is what valued this row.
+  const pinned = h.market_value_override_as_of ?? null;
   // The row's identity is the *position*, not the security: one security held in
   // two accounts is two rows, and a testid keyed on the security alone would name
   // both of them. `positionKey` is the same identity the two endpoints join on,
@@ -371,7 +395,9 @@ function HoldingRow({
             "1,200 at $1.00" is strictly worse. Only the price's own currency is
             used to say so — falling back to the account's currency would label
             EUR cash as dollars on an account in USD. */}
-        {cash && h.price_currency !== null ? (
+        {pinned ? (
+          <span>{trimDecimal(h.quantity)}</span>
+        ) : cash && h.price_currency !== null ? (
           <span>{formatMoney(h.quantity, h.price_currency)}</span>
         ) : (
           <span>
@@ -381,10 +407,19 @@ function HoldingRow({
             )}
           </span>
         )}
+        {/* A total the household set (ADR-0059) is not a quote: there is no
+            market price to show beside the quantity and nothing going stale, so
+            the row says whose number it is and since when instead. */}
+        {pinned && (
+          <span data-testid={`holding-pinned-${pos}`}>
+            {" "}
+            · Value set by you · <Day value={pinned} style="compact" />
+          </span>
+        )}
         {/* The age is stated for every priced position, at every value: the
             valuation is only as current as the oldest price in it, and a total
             frozen at an old quote must not read as a flat market. */}
-        {h.price_date !== null && h.stale_days !== null && (
+        {!pinned && h.price_date !== null && h.stale_days !== null && (
           <span className={h.stale_days > STALE_DAYS ? "text-warning" : undefined}>
             {" "}
             · priced <Day value={h.price_date} style="compact" /> ({h.stale_days}{" "}

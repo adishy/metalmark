@@ -395,3 +395,67 @@ async def test_the_writes_require_a_csrf_token(client):
         assert "CSRF" in resp.json()["detail"]
     finally:
         client._csrf = csrf
+
+
+# ---- a value set by hand (ADR-0059) ----------------------------------------
+
+
+async def test_a_value_set_by_hand_is_reported_with_the_day_it_was_set(client):
+    """Both reads say the value is the household's and since when, and the unit
+    price it implies is a plain decimal however small — ``3E-8`` is not a number
+    a client's money parser reads."""
+    from app.services import ledger
+
+    await _signup(client)
+    account = await _brokerage(client)
+    security = await _security(client)
+    today = ledger.today().isoformat()
+
+    resp = await client.post(
+        "/investments/holdings",
+        json={"account_id": account["id"], "security_id": security["id"],
+              "quantity": "300000000", "market_value": "10", "ticker": "  "},
+    )
+    assert resp.status_code == 201, resp.text
+    holding = resp.json()
+    assert holding["market_value_override"] == "10.0000"
+    assert holding["market_value_override_as_of"] == today
+    assert holding["as_of"] is None
+    assert holding["security"]["ticker"] == "VTI"  # a blank symbol is no symbol
+
+    portfolio = (await client.get("/investments/portfolio")).json()
+    [value] = portfolio["accounts"][0]["holdings"]
+    assert value["value_native"] == "10.0000"
+    assert value["price"] == "0.00000003"
+    assert value["price_date"] == today
+    assert value["market_value_override"] == "10.0000"
+    assert value["market_value_override_as_of"] == today
+
+    cleared = await client.patch(
+        f"/investments/holdings/{holding['id']}", json={"market_value": None}
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["market_value_override"] is None
+    assert cleared.json()["market_value_override_as_of"] is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"quantity": "123456789012"},  # twelve whole digits in NUMERIC(19,8)
+        {"quantity": "1", "cost_basis": "1234567890123456"},
+        {"quantity": "1", "market_value": "1234567890123456"},
+        {"quantity": "1", "market_value": "1.00001"},
+        {"quantity": "1", "market_value": "-5"},
+    ],
+)
+async def test_a_number_the_columns_cannot_hold_is_a_422(client, body):
+    await _signup(client)
+    account = await _brokerage(client)
+    security = await _security(client)
+
+    resp = await client.post(
+        "/investments/holdings",
+        json={"account_id": account["id"], "security_id": security["id"], **body},
+    )
+    assert resp.status_code == 422, resp.text

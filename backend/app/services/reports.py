@@ -920,11 +920,28 @@ async def _appreciation(
     securities = {key[1] for key in (*start_quantities, *end_quantities)}
     priced_then = await inv.latest_prices(session, securities, start)
     priced_now = await inv.latest_prices(session, securities, end)
+    # A total set by hand values a position as a price does (ADR-0059), and by
+    # the same predicate the valuation uses: a private holding with no price
+    # series is priced from the day its value was set.
+    held = {
+        (h.account_id, h.security_id): h
+        for h in (
+            await session.execute(select(Holding).where(Holding.account_id.in_(ids)))
+        ).scalars()
+    }
     unpriced = {
         key
         for key in {*start_quantities, *end_quantities}
-        if (start_quantities.get(key) and key[1] not in priced_then)
-        or (end_quantities.get(key) and key[1] not in priced_now)
+        if (
+            start_quantities.get(key)
+            and key[1] not in priced_then
+            and not inv.override_applies(held.get(key), start)
+        )
+        or (
+            end_quantities.get(key)
+            and key[1] not in priced_now
+            and not inv.override_applies(held.get(key), end)
+        )
     }
     warnings: list[str] = []
     if unpriced:
@@ -944,6 +961,42 @@ async def _appreciation(
             )
         start_quantities = {k: q for k, q in start_quantities.items() if k not in unpriced}
         end_quantities = {k: q for k, q in end_quantities.items() if k not in unpriced}
+
+    # A value set by hand inside the window moves the position from its market
+    # price to that total in one step. The step is counted — the two ends are what
+    # they are — and said, because it is the household's number and not the market's.
+    set_by_hand = [
+        (key, h)
+        for key, h in held.items()
+        if key not in unpriced
+        and (key in start_quantities or key in end_quantities)
+        and h.market_value_override_as_of is not None
+        and start < h.market_value_override_as_of <= end
+    ]
+    if set_by_hand:
+        labels = {
+            sid: (label, kind)
+            for sid, label, kind in (
+                await session.execute(
+                    select(
+                        Security.id,
+                        func.coalesce(Security.ticker, Security.name),
+                        Security.security_type,
+                    ).where(Security.id.in_({key[1] for key, _h in set_by_hand}))
+                )
+            ).all()
+        }
+        notes = sorted(
+            (h.name_override or labels[key[1]][0], h.market_value_override_as_of)
+            for key, h in set_by_hand
+            # Cash is in neither value below, so its override moved nothing here.
+            if labels[key[1]][1] != CASH_SECURITY_TYPE
+        )
+        for label, set_on in notes:
+            warnings.append(
+                f"{label}'s value was set by hand on {set_on}; that change is included "
+                f"in market appreciation"
+            )
 
     value_start = await inv.securities_value_base(
         session, quantities=start_quantities, on=start, base_ccy=base_ccy

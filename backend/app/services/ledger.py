@@ -166,6 +166,39 @@ async def create_account(session: AsyncSession, household_id: uuid.UUID,
     return acct
 
 
+async def distinct_account_name(
+    session: AsyncSession, household_id: uuid.UUID, name: str, type_: str, currency: str
+) -> str:
+    """``name``, or ``name 2``, ``name 3``… — whichever no account of this type and
+    currency has yet.
+
+    A manual account's portable identity is its name, type and currency
+    (ADR-0036): two that share all three become one account when an export is
+    imported elsewhere, and one of them loses its balance and gives its rows to
+    the other. A person naming an account sees the clash; a caller that names
+    accounts without looking — an agent, most of all with the default name — does
+    not, so its accounts are kept apart here.
+    """
+    # One namer at a time per household, so two requests cannot pick the same name.
+    lock = func.hashtextextended(f"account-names:{household_id}", 0)
+    await session.execute(select(func.pg_advisory_xact_lock(lock)))
+    taken = {
+        n.strip().lower()
+        for n in (
+            await session.execute(
+                select(Account.name).where(
+                    Account.type == type_, Account.currency == currency.upper()
+                )
+            )
+        ).scalars()
+    }
+    candidate, n = name, 1
+    while candidate.strip().lower() in taken:
+        n += 1
+        candidate = f"{name[: 200 - len(str(n)) - 1]} {n}"
+    return candidate
+
+
 async def list_accounts(session: AsyncSession,
                         owner_id: uuid.UUID | None = None) -> list[Account]:
     stmt = select(Account).order_by(Account.name)

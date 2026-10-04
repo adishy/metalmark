@@ -24,7 +24,23 @@ from app.models.base import TimestampMixin, UUIDPkMixin
 SCOPE_AGENT_READ = "agent:read"
 #: Read the debugging views under ``/anon_debug``.
 SCOPE_DEBUG_READ = "debug:read"
-SCOPES = (SCOPE_AGENT_READ, SCOPE_DEBUG_READ)
+SCOPE_TRANSACTIONS_WRITE = "transactions:write"
+SCOPE_HOLDINGS_WRITE = "holdings:write"
+SCOPE_ACCOUNTS_WRITE = "accounts:write"
+#: Read account files as they were uploaded — not anonymized (ADR-0062).
+SCOPE_DOCUMENTS_READ = "documents:read"
+SCOPES = (
+    SCOPE_AGENT_READ,
+    SCOPE_DEBUG_READ,
+    SCOPE_TRANSACTIONS_WRITE,
+    SCOPE_HOLDINGS_WRITE,
+    SCOPE_ACCOUNTS_WRITE,
+    SCOPE_DOCUMENTS_READ,
+)
+WRITE_SCOPES = (SCOPE_TRANSACTIONS_WRITE, SCOPE_HOLDINGS_WRITE, SCOPE_ACCOUNTS_WRITE)
+#: Scopes only the household owner may issue or use: every write, and the one
+#: read that is not anonymized.
+OWNER_SCOPES = (*WRITE_SCOPES, SCOPE_DOCUMENTS_READ)
 
 
 class AgentToken(UUIDPkMixin, TimestampMixin, Base):

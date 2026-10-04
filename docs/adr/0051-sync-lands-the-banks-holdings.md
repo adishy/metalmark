@@ -1,6 +1,6 @@
 # ADR 0051: Sync lands the bank's holdings as positions
 
-- **Status:** Accepted
+- **Status:** Superseded in part by ADR-0059 (decision 3)
 - **Date:** 2026-09-24
 - **Deciders:** Aditya Shylesh
 - **Related:** ADR-0021 (amended: a synced stated account now has positions), ADR-0033 (amended: the "no

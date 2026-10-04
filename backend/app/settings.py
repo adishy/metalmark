@@ -43,6 +43,14 @@ class Settings(BaseSettings):
 
     default_base_currency: str = Field(default="USD", alias="METALMARK_DEFAULT_BASE_CURRENCY")
 
+    # The most an import upload may be, counted as it arrives (ADR-0060). An
+    # archive holds every file the household attached, so this is disk the API
+    # spools to, not memory. It is a resource bound, not a storage budget: raise it
+    # if the household's archive outgrows it.
+    max_import_upload_bytes: int = Field(
+        default=8 * 1024 * 1024 * 1024, alias="METALMARK_MAX_IMPORT_UPLOAD_BYTES"
+    )
+
     session_idle_minutes: int = Field(default=1440, alias="METALMARK_SESSION_IDLE_MINUTES")
     session_absolute_hours: int = Field(default=720, alias="METALMARK_SESSION_ABSOLUTE_HOURS")
 

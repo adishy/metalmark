@@ -21,6 +21,11 @@ Sync mirrors the bank. A synced position the bank stops reporting is removed. A
 hand-entered position, or one whose trades are recorded (ADR-0034), is never
 written or removed here. When the bank reports that same instrument too, the
 bank's line is skipped and counted, so the hand-entered row is not overwritten.
+
+A synced position whose quantity, basis or date a human set (``is_override``,
+ADR-0059) keeps those: the bank's line still prices the security and is then
+skipped and counted. A local name, symbol, type or value is not a freeze — those
+columns are never written here, and the quantity and basis keep following the bank.
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ NO_SHARES = "no_shares"
 NO_IDENTITY = "no_identity"
 NEGATIVE_PRICE = "negative_price"
 HAND_ENTERED = "hand_entered"
+USER_OVERRIDE = "user_override"
 HAS_HISTORY = "has_history"
 
 
@@ -254,6 +260,12 @@ async def sync_holdings(
             else (line.market_value / line.quantity).quantize(_QTY, rounding=ROUND_HALF_EVEN)
         )
         await _record_price(session, account.household_id, security, on=on, price=price)
+        if held is not None and held.is_override:
+            # The household set this row's quantity or basis and those stay
+            # theirs. The price above is the bank's news about the security,
+            # which was never theirs to freeze.
+            outcome.skipped[USER_OVERRIDE] += line.lines
+            continue
         basis = (
             None if line.cost_basis is None
             else line.cost_basis.quantize(_MONEY, rounding=ROUND_HALF_EVEN)
@@ -278,7 +290,8 @@ async def sync_holdings(
         outcome.written += line.lines
 
     gone = [
-        h.id for sid, h in existing.items() if h.source == SYNCED and sid not in kept
+        h.id for sid, h in existing.items()
+        if h.source == SYNCED and not h.is_override and sid not in kept
     ]
     if gone:
         await session.execute(delete(Holding).where(Holding.id.in_(gone)))

@@ -3,7 +3,7 @@
 Two artifacts, each independently useful and each independently testable:
 
 * **The document** (``export_document`` / ``import_document``) is the canonical,
-  lossless, re-importable form: a versioned JSON object, ``metalmark.export`` v1.
+  lossless, re-importable form: a versioned JSON object, ``metalmark.export``.
   It is what "move my household to another instance" means.
 * **The CSV** (``transactions_csv``) is one account's transactions as a
   spreadsheet. It is deliberately shaped so that the file the export writes is a
@@ -57,11 +57,13 @@ import io
 import json
 import re
 import uuid
+import zipfile
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, BinaryIO, Protocol
 
-from sqlalchemy import select
+import anyio
+from sqlalchemy import String, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +72,7 @@ from app.core.money import quantize_storage
 from app.models import (
     Account,
     AccountConnection,
+    AccountDocument,
     BalanceSnapshot,
     Category,
     CategoryGroup,
@@ -91,24 +94,44 @@ from app.models import (
     TransactionTag,
     TransferGroup,
 )
-from app.models.investments import HOLDING_SOURCES
+from app.models.investments import HOLDING_SOURCES, SECURITY_TYPES
+from app.services import documents as documents_svc
 from app.services import fx
 from app.services.balance_sign import LIABILITY_TYPES, positives_are_amounts_owed
 from app.services.errors import LedgerError
+from app.services.ledger import today as ledger_today
 
 FORMAT = "metalmark.export"
-#: 2 since ADR-0043: a liability's balances are signed (debt negative). Version 1
-#: documents are still read — ``_upgrade_v1`` brings their liability balances into
-#: the signed convention first, so a backup taken before the change restores to
-#: the same net worth it was taken at.
-VERSION = 2
-READABLE_VERSIONS = (1, VERSION)
+#: 3 adds account files (ADR-0060): the document lists them and names where each
+#: one's bytes are in the archive; older readers must refuse rather than drop them.
+#: Version 2 signed liabilities (ADR-0043). Version 1 still reads through _upgrade_v1.
+VERSION = 3
+READABLE_VERSIONS = (1, 2, VERSION)
 
 #: A ceiling on an imported document, checked before it is parsed. The document is
 #: the whole household, so the bound is generous — it is here to stop a wrong file
 #: (a video, a database dump) from being read into memory, not to ration a real
 #: export.
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
+
+#: The archive (ADR-0060): a zip holding the document under this name and each
+#: account file's bytes under ``files/<sha256>``. The document alone is still a
+#: complete ledger; the archive is the document plus the files it lists.
+ARCHIVE_DOCUMENT = "export.json"
+ARCHIVE_FILES = "files"
+
+
+def archive_path(sha256: str) -> str:
+    """Where a file's bytes are in the archive. By digest, so a file attached to
+    two accounts is stored once and no uploaded filename becomes a zip path."""
+    return f"{ARCHIVE_FILES}/{sha256}"
+
+
+class FileSource(Protocol):
+    """Where an import finds the bytes of the files its document lists."""
+
+    async def read(self, path: str, limit: int) -> bytes | None:
+        """At most ``limit`` + 1 bytes of ``path``, or ``None`` when it is absent."""
 
 
 def dumps(document: dict[str, Any]) -> bytes:
@@ -298,7 +321,10 @@ _ACCOUNT_FIELDS = (
 _SNAPSHOT_FIELDS = ("account_id", "balance_date", "balance", "currency")
 _SECURITY_FIELDS = ("id", "name", "ticker", "security_type", "currency", "is_manual")
 _PRICE_FIELDS = ("security_id", "price_date", "price", "currency", "source")
-_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of", "source")
+_HOLDING_FIELDS = ("account_id", "security_id", "quantity", "cost_basis", "as_of", "source",
+                   "is_override", "name_override", "ticker_override",
+                   "security_type_override", "market_value_override",
+                   "market_value_override_quantity", "market_value_override_as_of")
 _TRANSFER_GROUP_FIELDS = ("id", "matched_by", "fx_cost_base")
 # ``base_amount`` and ``fx_rate_date`` are absent on purpose; see the module docstring.
 # So is ``import_hash``: it is a digest of the *source* account's uuid, so in the
@@ -370,6 +396,9 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
     prices = await _select(
         session, SecurityPrice, (SecurityPrice.security_id, SecurityPrice.price_date)
     )
+    documents = (await session.execute(select(AccountDocument).order_by(
+        AccountDocument.account_id, AccountDocument.created_at, AccountDocument.id,
+    ))).scalars().all()
     holdings = await _select(session, Holding, (Holding.account_id, Holding.security_id))
     transfer_groups = await _select(session, TransferGroup, (TransferGroup.id,))
     # Deterministic order, and not for tidiness: the import derives a manual row's
@@ -425,6 +454,11 @@ async def export_document(session: AsyncSession, household_id: uuid.UUID) -> dic
         "categories": [_row(c, _CATEGORY_FIELDS) for c in categories],
         "tags": [_row(t, _TAG_FIELDS) for t in tags],
         "accounts": [_row(a, _ACCOUNT_FIELDS) for a in accounts],
+        "account_documents": [dict(
+            _row(d, ("id", "account_id", "filename", "media_type",
+                     "size_bytes", "sha256", "created_at")),
+            path=archive_path(d.sha256),
+        ) for d in documents],
         "balance_snapshots": [_row(s, _SNAPSHOT_FIELDS) for s in snapshots],
         "securities": [_row(s, _SECURITY_FIELDS) for s in securities],
         "security_prices": [_row(p, _PRICE_FIELDS) for p in prices],
@@ -707,8 +741,11 @@ def _noon(on: date) -> datetime:
 
 
 async def import_document(session: AsyncSession, household_id: uuid.UUID,
-                          raw: bytes) -> ImportResult:
+                          raw: bytes, files: FileSource | None = None) -> ImportResult:
     """Load a document into this household. Idempotent against natural keys.
+
+    ``files`` is where the bytes of the account files it lists are — the archive
+    the document came in. Without it the ledger is imported and the files are not.
 
     Runs wholly inside the caller's scoped transaction, so a document either
     lands whole or not at all; and because the session is household-scoped, RLS
@@ -750,6 +787,7 @@ async def import_document(session: AsyncSession, household_id: uuid.UUID,
         await _import_tags(session, household_id, doc, remap, result)
         await _import_connections(session, household_id, doc, remap, result)
         await _import_accounts(session, household_id, doc, remap, result)
+        await _import_documents(session, household_id, doc, remap, result, files)
         await _import_securities(session, household_id, doc, remap, result)
         await _import_snapshots(session, household_id, doc, remap, result)
         await _import_prices(session, household_id, doc, remap, result)
@@ -1233,17 +1271,80 @@ async def _import_holdings(session: AsyncSession, household_id: uuid.UUID, doc: 
         if found is not None:
             result.found("holdings")
             continue
+        quantity = _money(entry, "quantity", where)
+        as_of = _date(entry, "as_of", where, required=False)
         session.add(Holding(
             household_id=household_id,
             account_id=account_id,
             security_id=security_id,
-            quantity=_money(entry, "quantity", where),
+            quantity=quantity,
             cost_basis=_money(entry, "cost_basis", where, required=False),
-            as_of=_date(entry, "as_of", where, required=False),
+            as_of=as_of,
             source=_holding_source(entry, where),
+            is_override=_bool(entry, "is_override", where, required=False) or False,
+            **_holding_overrides(entry, where, quantity=quantity, as_of=as_of),
         ))
         await session.flush()
         result.made("holdings")
+
+
+def _holding_overrides(
+    entry: dict[str, Any], where: str, *, quantity: Decimal, as_of: date | None
+) -> dict[str, Any]:
+    """The account-local corrections (ADR-0059), checked as the API checks them,
+    so a hand-edited file fails here by name and not in the database.
+
+    ``price_override`` is not read: a column an early build exported and nothing
+    ever wrote.
+    """
+    name = _text(entry, "name_override", where, required=False)
+    if name is not None and not 1 <= len(name) <= 200:
+        raise _fail(f"{where}.name_override", "expected 1 to 200 characters")
+    ticker = _text(entry, "ticker_override", where, required=False)
+    if ticker is not None:
+        ticker = ticker.strip() or None
+    if ticker is not None and len(ticker) > 32:
+        raise _fail(f"{where}.ticker_override", "expected at most 32 characters")
+    kind = _text(entry, "security_type_override", where, required=False)
+    if kind is not None and kind not in SECURITY_TYPES:
+        raise _fail(f"{where}.security_type_override",
+                    f"expected one of {', '.join(SECURITY_TYPES)}")
+
+    total = _money(entry, "market_value_override", where, required=False)
+    pinned = _money(entry, "market_value_override_quantity", where, required=False)
+    set_on = _date(entry, "market_value_override_as_of", where, required=False)
+    if total is None:
+        if pinned is not None or set_on is not None:
+            raise _fail(
+                f"{where}.market_value_override",
+                "missing, but its quantity or date is set: the three travel together",
+            )
+    else:
+        if ("market_value_override_quantity" not in entry
+                and "market_value_override_as_of" not in entry):
+            # Written before the total carried its own quantity and date: it was
+            # for the holding's quantity, from the holding's date.
+            pinned, set_on = quantity, as_of or ledger_today()
+        if pinned is None or set_on is None:
+            raise _fail(
+                f"{where}.market_value_override",
+                "needs market_value_override_quantity and market_value_override_as_of",
+            )
+        if pinned == 0:
+            raise _fail(f"{where}.market_value_override_quantity", "cannot be zero")
+        if total != 0 and (total < 0) != (pinned < 0):
+            raise _fail(f"{where}.market_value_override",
+                        "must have the same sign as the quantity it was set for")
+        if abs(total) >= Decimal(10) ** 15 or abs(pinned) >= Decimal(10) ** 11:
+            raise _fail(f"{where}.market_value_override", "out of range")
+    return {
+        "name_override": name,
+        "ticker_override": ticker,
+        "security_type_override": kind,
+        "market_value_override": total,
+        "market_value_override_quantity": pinned,
+        "market_value_override_as_of": set_on,
+    }
 
 
 def _holding_source(entry: dict[str, Any], where: str) -> str:
@@ -1951,3 +2052,149 @@ async def _import_recurring_series(session: AsyncSession, household_id: uuid.UUI
         remap.put(old_id, series.id)
         result.made("recurring_series")
     await session.flush()
+
+
+async def _import_documents(session: AsyncSession, household_id: uuid.UUID,
+                            doc: dict[str, Any], remap: _Remap, result: ImportResult,
+                            files: FileSource | None) -> None:
+    """File identity is account + sanitized name + content digest.
+
+    The document lists the files; their bytes are in the archive beside it. A file
+    whose bytes are not there — the document was imported on its own, or the
+    archive lost a member — is left out and counted, and the rest of the household
+    still lands. Importing the archive later adds exactly the files left out.
+    """
+    existing = (await session.execute(select(AccountDocument).order_by(
+        AccountDocument.created_at, AccountDocument.id,
+    ))).scalars().all()
+    by_key: dict[Any, list[AccountDocument]] = {}
+    for row in existing:
+        by_key.setdefault((row.account_id, row.filename, row.sha256), []).append(row)
+    ordinals = _Ordinals()
+    missing = 0
+    for i, entry in enumerate(_entries(doc, "account_documents")):
+        where = f"account_documents[{i}]"
+        account_id = remap.get(_str_id(_get(entry, "account_id", where), where), where, "account")
+        if account_id is None:
+            raise _fail(where, "account_id is required")
+        digest = (_text(entry, "sha256", where) or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise _fail(where, "sha256 must be 64 hexadecimal characters")
+        size = _int(entry, "size_bytes", where)
+        if size is None or size <= 0:
+            raise _fail(where, "size_bytes must be a positive number")
+        filename = documents_svc.safe_filename(_text(entry, "filename", where))
+        key = (account_id, filename, digest)
+        row = _nth(by_key, key, ordinals.next(key))
+        if row is not None:
+            result.found("account_documents")
+            continue
+        if size > documents_svc.MAX_FILE_BYTES:
+            raise _fail(
+                where, f"file exceeds {documents_svc.MAX_FILE_BYTES // (1024 * 1024)} MB"
+            )
+        path = _text(entry, "path", where, required=False) or archive_path(digest)
+        content = None if files is None else await files.read(path, size)
+        if content is None:
+            missing += 1
+            continue
+        if len(content) != size or hashlib.sha256(content).hexdigest() != digest:
+            raise _fail(where, "file size or SHA-256 does not match its content")
+        row = await documents_svc.create_document(session, household_id, account_id, filename,
+                                                  _text(entry, "media_type", where), content)
+        created_at = _dt(entry, "created_at", where, required=False)
+        if created_at is not None:
+            row.created_at = created_at
+        # The row is written; let go of its bytes, or the session would hold every
+        # file of the import until the transaction ends.
+        session.expire(row, ["content"])
+        by_key.setdefault(key, []).append(row)
+        result.made("account_documents")
+    if missing:
+        noun = "account file was" if missing == 1 else "account files were"
+        result.warnings.append(
+            f"{missing} {noun} not restored, because the import did not include "
+            f"{'it' if missing == 1 else 'them'}. Everything else was imported. To bring "
+            f"{'it' if missing == 1 else 'them'} back, import the .zip archive that was "
+            "exported with this document."
+        )
+
+
+async def write_archive(session: AsyncSession, household_id: uuid.UUID, out: BinaryIO) -> None:
+    """The household as one zip: the document, and every file it lists.
+
+    One file is in memory at a time, and the archive is written to ``out`` as it
+    goes, so the cost of an export does not grow with how much the household has
+    attached. Files are stored, not deflated: what people attach (PDFs, images,
+    office documents) is compressed already.
+    """
+    document = dumps(await export_document(session, household_id))
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED, allowZip64=True) as archive:
+        await anyio.to_thread.run_sync(
+            lambda: archive.writestr(ARCHIVE_DOCUMENT, document, zipfile.ZIP_DEFLATED)
+        )
+        ids = (await session.execute(
+            # One row per distinct content: the archive is keyed by digest.
+            select(AccountDocument.sha256, func.min(AccountDocument.id.cast(String)))
+            .group_by(AccountDocument.sha256).order_by(AccountDocument.sha256)
+        )).all()
+        for digest, document_id in ids:
+            content = (await session.execute(
+                select(AccountDocument.content).where(AccountDocument.id == uuid.UUID(document_id))
+            )).scalar_one()
+            await anyio.to_thread.run_sync(archive.writestr, archive_path(digest), content)
+
+
+class ArchiveFiles:
+    """The files of an uploaded archive, read one at a time."""
+
+    def __init__(self, archive: zipfile.ZipFile) -> None:
+        self._archive = archive
+
+    def _read(self, path: str, limit: int) -> bytes | None:
+        try:
+            info = self._archive.getinfo(path)
+        except KeyError:
+            return None
+        if info.is_dir():
+            return None
+        # The declared size is the archive's own claim; read past the limit by one
+        # byte at most, so a member that inflates to more than it said is caught
+        # by the caller's size check rather than by running out of memory.
+        with self._archive.open(info) as member:
+            return member.read(limit + 1)
+
+    async def read(self, path: str, limit: int) -> bytes | None:
+        try:
+            return await anyio.to_thread.run_sync(self._read, path, limit)
+        except (zipfile.BadZipFile, OSError, NotImplementedError, RuntimeError) as exc:
+            raise LedgerError(f"The archive could not be read at {path}: {exc}", 400) from exc
+
+
+def open_archive(upload: BinaryIO) -> tuple[bytes, ArchiveFiles]:
+    """An uploaded archive's document, and its files."""
+    try:
+        archive = zipfile.ZipFile(upload)
+        info = archive.getinfo(ARCHIVE_DOCUMENT)
+    except KeyError:
+        raise LedgerError(
+            f"Not a MetalMark archive: it has no {ARCHIVE_DOCUMENT}. Pick the .zip "
+            "the export made, or the JSON document on its own.",
+            400,
+        ) from None
+    except (zipfile.BadZipFile, OSError) as exc:
+        raise LedgerError(f"Not a readable zip archive: {exc}", 400) from exc
+    if info.file_size > MAX_IMPORT_BYTES:
+        raise LedgerError(
+            f"The archive's {ARCHIVE_DOCUMENT} is larger than "
+            f"{MAX_IMPORT_BYTES // (1024 * 1024)} MB, the most a household document can be.",
+            400,
+        )
+    try:
+        with archive.open(info) as member:
+            raw = member.read(MAX_IMPORT_BYTES + 1)
+    except (zipfile.BadZipFile, OSError, NotImplementedError, RuntimeError) as exc:
+        raise LedgerError(f"Not a readable zip archive: {exc}", 400) from exc
+    if len(raw) > MAX_IMPORT_BYTES:
+        raise LedgerError(f"The archive's {ARCHIVE_DOCUMENT} is not the size it claims", 400)
+    return raw, ArchiveFiles(archive)

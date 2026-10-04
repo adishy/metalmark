@@ -673,6 +673,11 @@ export interface HoldingValue {
   stale_days: number | null;
   /** `value_base` is null **iff** this is set. */
   reason: UnpricedReason | null;
+  /** Set when the value is a total the household set by hand and it applies on
+   *  the valuation date (ADR-0059): the stored total, in the quote currency, and
+   *  the day it was set. `price` is then that total per unit, not a quote. */
+  market_value_override?: Money | null;
+  market_value_override_as_of?: string | null;
 }
 
 export interface AccountValuation {
@@ -744,7 +749,14 @@ export interface Holding {
    *  makes "you entered 10; three trades say 0" sayable. */
   manual_quantity: Money | null;
   manual_cost_basis: Money | null;
+  /** When the quantity was confirmed. It does not date a value set by hand. */
   as_of: string | null;
+  /** The household set this bank position's quantity, basis or date, so bank
+   *  updates to it are stopped (ADR-0059). */
+  is_override?: boolean;
+  /** A total the household set by hand and the day it applies from. */
+  market_value_override?: Money | null;
+  market_value_override_as_of?: string | null;
 }
 
 /**
@@ -777,7 +789,13 @@ export interface Checks {
 // ---- agent access (ADR-0048) ----------------------------------------------
 
 /** `agent:read` opens `/api/agent`; `debug:read` opens `/api/anon_debug`. */
-export type AgentScope = "agent:read" | "debug:read";
+export type AgentScope =
+  | "agent:read"
+  | "debug:read"
+  | "transactions:write"
+  | "holdings:write"
+  | "accounts:write"
+  | "documents:read";
 
 export type AgentTokenStatus = "active" | "expired" | "revoked";
 

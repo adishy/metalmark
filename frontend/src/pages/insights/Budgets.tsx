@@ -26,6 +26,7 @@ import { useBudgetReport } from "@/api/hooks";
 import { formatMonth } from "@/lib/dates";
 import { formatMoney, fromMinorUnits, sumMinorUnits } from "@/lib/format";
 import BudgetDialog from "@/components/BudgetDialog";
+import DataNotes from "@/components/DataNotes";
 import { Button, Spinner } from "@/components/form";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/icons";
 import { QueryError, SkeletonRows } from "@/components/QueryStates";
@@ -200,16 +201,7 @@ function BudgetsBody({
             />
           </dl>
 
-          {/* A dropped flow is spending the reader paid and this report does not
-              show, which is exactly the caveat a plan comparison must not hide:
-              a month can be "under budget" only because something is missing. */}
-          <div role="status" aria-atomic="true">
-            {data.warnings.map((w) => (
-              <p key={w} className="text-xs text-warning" data-testid="budgets-warning">
-                {w}
-              </p>
-            ))}
-          </div>
+          <DataNotes notes={data.warnings} summary="Some spending has incomplete data" testid="budgets-warning" />
 
           {/* Planned categories first, then the spend nobody planned for — the
               order the server states, and the order a reader wants: their own

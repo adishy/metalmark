@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.agent import tokens as svc
@@ -17,7 +17,7 @@ from app.db import unscoped_session
 from app.deps import RequestContext, require_admin
 from app.logging import get_logger
 from app.models import User
-from app.models.agent import AgentToken
+from app.models.agent import OWNER_SCOPES, AgentToken
 from app.schemas.agent import AgentTokenCreate, AgentTokenCreated, AgentTokenOut
 
 router = APIRouter(prefix="/admin/agent-tokens", tags=["agent"])
@@ -50,6 +50,12 @@ async def list_tokens(ctx: RequestContext = Depends(require_admin)):
 @router.post("", response_model=AgentTokenCreated, status_code=201)
 async def create_token(data: AgentTokenCreate, ctx: RequestContext = Depends(require_admin)):
     """Issue a token. Its value is in this response and never again."""
+    if ctx.role != "owner" and any(scope in OWNER_SCOPES for scope in data.scopes):
+        # Use is refused for a non-owner's token anyway (ADR-0061); refusing the
+        # mint too means such a token cannot sit dormant and turn live on promotion.
+        raise HTTPException(
+            403, detail="Only the household owner can issue write or file permissions"
+        )
     async with unscoped_session() as session:
         user = (await session.execute(select(User).where(User.id == ctx.user.id))).scalar_one()
         raw, token = await svc.create(
