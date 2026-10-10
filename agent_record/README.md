@@ -23,3 +23,4 @@ capturing the *process*: what was asked, what was researched, what the reviews f
 | 2026-09-24 | 08 | The bank's holdings landed as positions (ADR-0051, migration 0011); worktree + CI notes |
 | 2026-09-25 | 09 | Eight improvements: connection names, Insights + allocations with bank cash, owner income and paystubs, recurring, fixed PWA chrome, a chart pass, an Amazon spike; seven topics landed in one merge |
 | 2026-09-26 | 10 | Every open issue at once: the correctness audit (F1–F5), the desktop/design pass (17 issues), budgets (0058), two stacked PRs plus a tooling one, and the two reviewer agents — which then found seven defects in code that had already passed every gate |
+| 2026-10-10 | 13 | The net-worth chart's value axis follows its figures instead of starting at zero, with a floor so cents are not magnified; its date labels are chosen from the series' own points and spaced to the plot |

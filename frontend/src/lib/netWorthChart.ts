@@ -96,7 +96,70 @@ const BUCKET_MS: Record<Granularity, number> = {
 };
 
 /**
- * What the x axis's labels say, and how close together they may sit.
+ * The least room one x label takes along the axis, in px, per bucket: the label
+ * itself (`Sep 25` is 40 px of glyphs, `Sep` 22, `2026` 28) and the air that
+ * makes the next one a separate word. Measured on the drawn canvas.
+ */
+const LABEL_PITCH: Record<Granularity, number> = {
+  day: 72,
+  week: 72,
+  month: 48,
+  quarter: 44,
+  year: 52,
+};
+
+/**
+ * Which of the series' points the x axis names, as timestamps: every `n`th,
+ * counted back from the newest, with `n` the smallest stride that leaves each
+ * label `LABEL_PITCH` of the plot's width.
+ *
+ * The axis used to leave this to ECharts' tick search under `hideOverlap`, and
+ * that pair fails in both directions. `hideOverlap` drops a label only once it
+ * *touches* the next, so a week on a phone card drew seven of them shoulder to
+ * shoulder — one run of text, not seven dates. And a time axis restarts its
+ * ticks at every month, so a month's window read `Sep 13, Sep 21,` a hole,
+ * `Oct 01, Oct 05, Oct 09`: uneven where it was not crowded.
+ *
+ * Counting **points** rather than days is what keeps the rhythm: the labels sit
+ * on dates the series has a figure for, a constant number of buckets apart. It
+ * counts back from the newest because that is the end a reader looks at, and
+ * the one that must be named.
+ *
+ * The two ends of a window are not buckets like the rest, and each gets a rule:
+ *
+ * - The **newest** point is today, part-way into its bucket, so it can sit a
+ *   third of a month from the month-end before it. It is always named; a label
+ *   the stride put too close to it gives way.
+ * - The **first** point is the window's opening day. On a daily axis that is a
+ *   day like any other and takes its turn in the stride. On any coarser one it
+ *   is not a bucket's end at all, and naming it reads `Jan, Feb, Apr, Jun` — a
+ *   step that looks like a mistake — so it is left to the tooltip.
+ */
+export function xLabelPoints(
+  points: Point[],
+  granularity: Granularity,
+  plotWidth: number,
+): number[] {
+  if (points.length === 0) return [];
+  const ts = points.map((p) => dayTs(p.date));
+  const last = ts.length - 1;
+  const span = ts[last] - ts[0];
+  if (span <= 0) return [ts[last]];
+  const pitch = LABEL_PITCH[granularity];
+  const stride = Math.ceil(last / Math.max(1, Math.floor(plotWidth / pitch)));
+  const first = granularity === "day" ? 0 : 1;
+  // Months are 28 to 31 days, so "too close" is well short of a full pitch: it
+  // is there to catch an end of the window, not a February.
+  const tooClose = (0.75 * pitch * span) / plotWidth;
+  const picked = [ts[last]];
+  for (let i = last - stride; i >= first; i -= stride) {
+    if (picked[picked.length - 1] - ts[i] >= tooClose) picked.push(ts[i]);
+  }
+  return picked.reverse();
+}
+
+/**
+ * What the x axis's labels say, and which points they sit on.
  *
  * The vocabulary is §6.6's, and the entry point is `formatBucket` — the one
  * function that decides what a granularity looks like on screen, and the one the
@@ -110,10 +173,11 @@ const BUCKET_MS: Record<Granularity, number> = {
  * inferred from a tick's own value, which is a second opinion about the window
  * that would disagree exactly where one straddles a month.
  */
-function xAxisLabels(data: NetWorthSeries | undefined) {
+function xAxisLabels(data: NetWorthSeries | undefined, plotWidth: number) {
   const granularity: Granularity = data?.granularity ?? "day";
   return {
     minInterval: BUCKET_MS[granularity],
+    customValues: xLabelPoints(data?.points ?? [], granularity, plotWidth),
     // A time axis's tick value is a timestamp; `dayTs` built it from local
     // components, so `isoDay` reads back the same day in every timezone.
     formatter: (value: number) => formatBucket(isoDay(new Date(Number(value))), granularity),
@@ -378,16 +442,14 @@ const STRIP_GAP = 12;
 const AXIS_BAND = 26;
 
 /**
- * What the last x label needs to the right of the plot, in px — the wide layout
- * only, and the second half of `VALUE_GUTTER`'s argument.
+ * What the last x label needs to the right of the plot, in px.
  *
- * A time axis centres each label on its tick, and the tick for the newest bucket
- * sits within a few px of the plot's right edge. Half of a label therefore hangs
- * outside the canvas, which clips it: the axis read `Sep 2` and lost the day.
- * The phone never had this because a single grid keeps `containLabel`, and
- * `containLabel` sizes the grid box around the labels — including, on the right,
- * the last one's overhang. `VALUE_GUTTER` gives that up so the two grids agree
- * about the left, so the right has to be reserved here instead.
+ * A time axis centres each label on its tick, and the newest point — which the
+ * axis always names (`xLabelPoints`) — sits on the plot's right edge. Half of
+ * its label therefore hangs outside the canvas, which clips it: the axis read
+ * `Sep 2` and lost the day. Both layouts reserve it. The wide one gave up
+ * `containLabel` (see `VALUE_GUTTER`), and on the phone `containLabel` measures
+ * the value labels' gutter but not this overhang: the card read `Oct 1`.
  *
  * 24 px is half of the widest label this axis can be asked for, `Sep 25` — the
  * `day` granularity's `formatBucket` — measured on the drawn canvas. The ticks
@@ -419,6 +481,23 @@ const X_LABEL_ROOM = 24;
  * same chart in two places is not the same chart.
  */
 const VALUE_GUTTER = 68;
+
+/** Where `containLabel` puts a phone card's plot, in px from the canvas's left
+ *  edge: `CANVAS_PAD`, a `$100k` tick, and the 8 px ECharts leaves beside it. */
+const PHONE_GUTTER = 56;
+
+/**
+ * The finest step the value axis may be ruled in, in the series' own currency.
+ *
+ * An axis that follows its data follows it all the way down: a week in which
+ * the only movement is forty cents of interest would be ruled in dimes, drawn
+ * as a climb the height of the plot, and labelled `$100,000.10` — a figure
+ * `formatMoneyTick` cannot shorten, in a gutter (`VALUE_GUTTER`) sized for ones
+ * it can. Ten is the step at which every tick from a thousand up is exact in
+ * two decimals of its unit (`$100.01k`), so the labels stay scale marks and a
+ * movement of cents stays the flat line it is.
+ */
+const VALUE_STEP_MIN = 10;
 
 /** Canvases at or above `PHONE_MAX` carry the strip and the brush. */
 function isWide(box: ChartBox): boolean {
@@ -508,14 +587,25 @@ export function netWorthOption(
   // The gutter both grids share, or the measured one on a canvas with a single
   // grid. `left` is the only difference between the two layouts' x geometry.
   const gutter = wide ? VALUE_GUTTER : CANVAS_PAD;
-  // ...and the right edge, which needs the room the newest label hangs into on
-  // the layout that gave up `containLabel` (see `X_LABEL_ROOM`), and nothing
-  // more than the canvas's own margin on the layout that did not.
-  const right = wide ? CANVAS_PAD + X_LABEL_ROOM : CANVAS_PAD;
+  // ...and the right edge, which keeps the room the newest label hangs into
+  // (see `X_LABEL_ROOM`): that label is centred on the plot's last pixel, and
+  // `containLabel` does not make room for it on the phone either.
+  const right = CANVAS_PAD + X_LABEL_ROOM;
 
   /** The value axis: money, and as many rules as the plot can carry. */
   const valueAxis = {
     type: "value" as const,
+    // The axis spans the figures the window holds, not the distance from zero to
+    // them. A value axis includes zero unless told otherwise, and a household's
+    // net worth is a large number that moves by a small part of itself: $97k to
+    // $105k on a `$0 … $120k` axis is a ruled line with a wobble in its top
+    // tenth, on a chart whose whole question is how it moved. Nothing here is
+    // measured from the baseline — the fill under the line is a tint, the strip
+    // below draws the changes against its own zero — so the baseline is the
+    // thing to give up. A series that reaches or crosses zero still shows it.
+    scale: true,
+    // ...down to a floor: a tick is never finer than `VALUE_STEP_MIN`.
+    minInterval: VALUE_STEP_MIN,
     ...chartAxis(t, {
       grid: true,
       tick: (v: number) => formatMoneyTick(v, ccy),
@@ -523,12 +613,19 @@ export function netWorthOption(
     }),
   };
 
-  // The x axis's labels: §6.6's vocabulary, at the window's own granularity, and
-  // a floor under how close two of them may sit. `hideOverlap` is the phone's:
-  // a 310 px canvas cannot carry a label every day of a fortnight, and the drops
-  // are even because the interval is.
-  const x = xAxisLabels(data);
-  const xLabel = { ...chartAxis(t).axisLabel, formatter: x.formatter, hideOverlap: true };
+  // The x axis's labels: §6.6's vocabulary, at the window's own granularity, on
+  // the points `xLabelPoints` chose for a plot this wide. The phone's gutter is
+  // measured by `containLabel` and so not known here; `PHONE_GUTTER` is what it
+  // measures on the labels this axis draws. `hideOverlap` stays as the backstop
+  // for a label wider than its pitch allowed for.
+  const plotWidth = box.width - right - (wide ? gutter : PHONE_GUTTER);
+  const x = xAxisLabels(data, plotWidth);
+  const xLabel = {
+    ...chartAxis(t).axisLabel,
+    formatter: x.formatter,
+    customValues: x.customValues,
+    hideOverlap: true,
+  };
 
   return {
     // Two grids are two x axes, and the pointer has to cross both or a reader

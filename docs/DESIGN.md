@@ -429,6 +429,28 @@ Seven further chart rules:
   number and not their weight that makes a hatch. `zeroRule` is the one dashed line,
   in the axis colour, so the baseline is never mistaken for one of the grid.
 
+- **A line of balances is ruled around its figures; bars are still measured from zero.**
+  The net-worth axis sets `scale: true`, so it spans what the window holds rather than
+  the distance from zero to it: a household's net worth is a large number that moves by
+  a small part of itself, and `$97k … $105k` on a `$0 … $120k` axis is a ruled line with
+  a wobble in its top tenth. Nothing on that chart is measured from the baseline — the
+  fill is a tint, and the change strip keeps its own zero — and a series that reaches or
+  crosses zero still shows it. The axis does not follow the figures all the way down:
+  `minInterval` keeps a tick no finer than 10, so a week of cents is a flat line and
+  not a climb, and every tick from a thousand up still shortens exactly (`$100.01k`).
+  **A bar chart never does this**: a bar's length *is* its value, and a bar cut off at
+  its foot states a different one.
+
+- **A time axis is told which points to name.** The net-worth axis labels every `n`th
+  point of its series, counted back from the newest, with `n` the smallest stride that
+  gives each label its pitch of the plot's width (`xLabelPoints`; 72 px for a day label,
+  48 px for a month). ECharts' own tick search under `hideOverlap` fails both ways:
+  `hideOverlap` drops a label only once it *touches* the next, so a week on a phone
+  card was seven dates in one run of text, and a time axis restarts its ticks at each
+  month, so a month's window was uneven where it was not crowded. The newest point is
+  always named, and the plot keeps 24 px on its right for the half of that label that
+  hangs past it — on the phone too, where `containLabel` does not.
+
 - **A bar stack is rounded at the end the value is at, and a chart that grows both
   ways rules its baseline.** `barEndRadius("top" | "bottom")` rounds the *outer* end
   of each stack and only that end: the inner ends are joins, and a pill on every

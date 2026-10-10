@@ -11,6 +11,7 @@ import {
   netWorthOption,
   startsHere,
   tooltipBody,
+  xLabelPoints,
 } from "@/lib/netWorthChart";
 import { valueTicks } from "@/theme/chartInteraction";
 import type { ChartTokens } from "@/theme/chartTokens";
@@ -282,8 +283,74 @@ describe("netWorthOption", () => {
     // asserts on the money half rather than on the whole list.
     const money = drawn.filter((text) => text.startsWith("$"));
     expect(money.length).toBeGreaterThan(1);
-    expect(money[0]).toBe("$0");
+    expect(money.every((text) => /^\$\d+(\.\d+)?k$/.test(text))).toBe(true);
     expect(drawn.some((text) => /^\d{1,3},\d{3}$/.test(text))).toBe(false);
+  });
+
+  // What the value axis is ruled in, read off the drawn chart in dollars — the
+  // option only *asks* (`scale`), and what a reader gets is the range ECharts
+  // then chooses, so that is what these assert on.
+  const ruledAt = (values: string[], box = { width: 310, height: 280 }) => {
+    const chart = echarts.init(null as never, null, { renderer: "svg", ssr: true, ...box });
+    chart.setOption(
+      netWorthOption(
+        series(
+          values.map((net_worth, i) => ({
+            date: `2026-0${i + 1}-01`,
+            net_worth,
+            missing: [],
+          })),
+        ),
+        T,
+        box,
+      ),
+    );
+    const drawn = [...chart.renderToSVGString().matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(
+      (m) => m[1],
+    );
+    chart.dispose();
+    return drawn
+      .filter((text) => /^[−$]/.test(text))
+      .map((text) => {
+        const [, sign, digits, unit] = /^(−?)\$([\d.,]+)(k?)$/.exec(text)!;
+        return (sign ? -1 : 1) * Number(digits.replace(/,/g, "")) * (unit ? 1000 : 1);
+      })
+      .sort((a, b) => a - b);
+  };
+
+  // The complaint this axis was changed for: $100k, $101k, $97k, $105k on an axis
+  // that began at zero is four points in the top tenth of the plot — a straight
+  // line. The axis is ruled around the figures instead, closely enough that the
+  // movement is most of the plot's height and not a sliver of it.
+  it("rules the value axis around the figures, not up from zero", () => {
+    const moved = ["100000.0000", "101000.0000", "97000.0000", "105000.0000"];
+    for (const box of [{ width: 310, height: 280 }, WIDE]) {
+      const rules = ruledAt(moved, box);
+      const [low, high] = [rules[0], rules[rules.length - 1]];
+      expect(low).toBeGreaterThan(90000);
+      expect(low).toBeLessThanOrEqual(97000);
+      expect(high).toBeGreaterThanOrEqual(105000);
+      // The $8k the figures moved by is at least half of what the axis spans.
+      expect(high - low).toBeLessThanOrEqual(16000);
+    }
+  });
+
+  // Zero is not banished, only no longer forced: a history that starts at
+  // nothing, or goes under it, is still measured against it.
+  it("keeps zero on the axis when the figures reach or cross it", () => {
+    expect(ruledAt(["0.0000", "22000.0000", "21000.0000"])[0]).toBe(0);
+    const crossed = ruledAt(["-4000.0000", "3000.0000", "6000.0000"]);
+    expect(crossed[0]).toBeLessThanOrEqual(-4000);
+    expect(crossed).toContain(0);
+  });
+
+  // ...and it does not follow the figures all the way down. Forty cents of
+  // interest on $100k is a flat line; ruled in dimes it is a climb the height of
+  // the plot under labels (`$100,000.10`) the gutter was never sized for.
+  it("does not magnify a movement of cents into a slope", () => {
+    const rules = ruledAt(["100000.0000", "100000.1500", "100000.4000"], WIDE);
+    expect(rules[rules.length - 1] - rules[0]).toBeGreaterThanOrEqual(10);
+    for (const rule of rules) expect(rule % 10).toBe(0);
   });
 
   // How many rules the axis draws follows from the *plot's* height, because that
@@ -554,5 +621,92 @@ describe("coverage", () => {
     );
     // Back-compatible: the body a caller without an interval still gets.
     expect(tooltipBody(WHOLE[1], [], "USD")).not.toContain("Change since");
+  });
+});
+
+// Which points the x axis names. ECharts' own tick search under `hideOverlap`
+// drew a week on a phone as seven labels touching, and a month as `Sep 13,
+// Sep 21,` a hole, `Oct 01, Oct 05, Oct 09` — so the axis is told.
+describe("xLabelPoints", () => {
+  const PHONE_PLOT = 222;
+  const WIDE_PLOT = 1004;
+  const at = (dates: string[]) =>
+    dates.map((date) => ({ date, net_worth: "1.0000", missing: [] })) as NetWorthSeries["points"];
+  const days = (from: string, count: number) => {
+    const [y, m, d] = from.split("-").map(Number);
+    return at(
+      Array.from({ length: count }, (_, i) => {
+        const day = new Date(y, m - 1, d + i);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+      }),
+    );
+  };
+  const ts = (date: string) => {
+    const [y, m, d] = date.split("-").map(Number);
+    return new Date(y, m - 1, d).getTime();
+  };
+  /** The picked labels, as the `MM-DD` of the point each sits on. */
+  const named = (points: NetWorthSeries["points"], picked: number[]) =>
+    picked.map((at) => points.find((p) => ts(p.date) === at)!.date.slice(5));
+
+  it("names a week on a phone in three evenly spaced days, ending on the newest", () => {
+    const week = days("2026-10-03", 8);
+    expect(named(week, xLabelPoints(week, "day", PHONE_PLOT))).toEqual(["10-04", "10-07", "10-10"]);
+  });
+
+  it("keeps one stride across a month boundary", () => {
+    const month = days("2026-09-10", 31);
+    expect(named(month, xLabelPoints(month, "day", WIDE_PLOT))).toEqual([
+      "09-10", "09-13", "09-16", "09-19", "09-22", "09-25", "09-28", "10-01", "10-04", "10-07", "10-10",
+    ]);
+  });
+
+  it("names every day when there is room for every day", () => {
+    const week = days("2026-10-03", 8);
+    expect(xLabelPoints(week, "day", WIDE_PLOT)).toHaveLength(8);
+  });
+
+  // The window's two ends are not buckets: its first point is the opening day
+  // and its newest is today, part-way into a month.
+  const YEAR = at([
+    "2025-10-10", "2025-10-31", "2025-11-30", "2025-12-31", "2026-01-31", "2026-02-28",
+    "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31",
+    "2026-09-30", "2026-10-10",
+  ]);
+
+  it("always names the newest point, and drops a month-end that crowds it", () => {
+    const picked = named(YEAR, xLabelPoints(YEAR, "month", WIDE_PLOT));
+    expect(picked[picked.length - 1]).toBe("10-10");
+    expect(picked).not.toContain("09-30");
+    expect(picked).toContain("08-31");
+  });
+
+  it("does not name a coarse window's opening day", () => {
+    for (const width of [PHONE_PLOT, WIDE_PLOT]) {
+      expect(xLabelPoints(YEAR, "month", width)).not.toContain(ts(YEAR[0].date));
+    }
+  });
+
+  it("never puts two labels closer than most of a pitch", () => {
+    for (const [points, granularity, pitch] of [
+      [days("2026-09-26", 15), "day", 72],
+      [days("2026-09-10", 31), "day", 72],
+      [YEAR, "month", 48],
+    ] as const) {
+      const span = ts(points[points.length - 1].date) - ts(points[0].date);
+      for (const width of [PHONE_PLOT, WIDE_PLOT]) {
+        const picked = xLabelPoints(points, granularity, width);
+        expect(picked.length).toBeGreaterThan(1);
+        for (let i = 1; i < picked.length; i++) {
+          expect(((picked[i] - picked[i - 1]) / span) * width).toBeGreaterThanOrEqual(0.75 * pitch);
+        }
+      }
+    }
+  });
+
+  it("has nothing to name on an empty series, and one label on a single point", () => {
+    expect(xLabelPoints([], "day", PHONE_PLOT)).toEqual([]);
+    expect(xLabelPoints(at(["2026-10-10"]), "day", PHONE_PLOT)).toHaveLength(1);
   });
 });
