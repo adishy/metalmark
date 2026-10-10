@@ -268,6 +268,10 @@ export function chartAxis(
  * rules for the two extents this app actually has (8 and 9 before), and never more
  * than six of them for any range tested. Asking for more is what produces the
  * hatch: five intervals returns eight rules on the same data.
+ *
+ * That tuning is for an axis that starts at zero. One ruled around its figures
+ * (`valueExtent` in `lib/netWorthChart`) got seven rules for the same ask, and
+ * sets its own range so that it draws this many steps, give or take one.
  */
 export function valueTicks(box: ChartBox): number {
   return Math.max(3, Math.min(4, Math.round(box.height / 70)));
@@ -695,9 +699,28 @@ export function zoomWindow(params: unknown): [number, number] | null {
  * listens for is part of that vocabulary — a page that wrote `dataZoom` itself
  * could as easily have written its own `tooltip`, and the next chart would spell
  * it `datazoom` and quietly never fire.
+ *
+ * The handler is also handed the chart the event came from, when there is one.
  */
-export function brushEvents(handler: (window: [number, number] | null) => void) {
+export function brushEvents(
+  handler: (window: [number, number] | null, chart: BrushedChart | null) => void,
+) {
   return {
-    dataZoom: (params: unknown) => handler(zoomWindow(params)),
+    dataZoom: (params: unknown, chart?: unknown) =>
+      handler(zoomWindow(params), isBrushedChart(chart) ? chart : null),
   };
+}
+
+/**
+ * The chart a brush event came from, as far as a handler may use it: to merge
+ * in what the new window changes (`brushedAxes` in `lib/netWorthChart`). The
+ * window is the instance's own state, so an option built again from React's
+ * would reset it; a merge is how the picture catches up with a drag.
+ */
+export interface BrushedChart {
+  setOption(option: object): void;
+}
+
+function isBrushedChart(chart: unknown): chart is BrushedChart {
+  return typeof (chart as BrushedChart | null)?.setOption === "function";
 }

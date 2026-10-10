@@ -2,7 +2,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { AccountDocuments } from "@/components/AccountDocuments";
 import AccountHoldings from "@/components/AccountHoldings";
 import DataNotes from "@/components/DataNotes";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import type { EChartsOption } from "echarts";
 import {
@@ -23,7 +23,14 @@ import { connectionName, isStalled } from "@/lib/bankFreshness";
 import type { Account, AccountCreate, AccountType, Owner } from "@/api/types";
 import { formatMoney, negateAmount } from "@/lib/format";
 import { formatDay, isoDay, todayIso } from "@/lib/dates";
-import { brushWindow, coverageNotes, coverageSummary, measuredSpan, netWorthOption } from "@/lib/netWorthChart";
+import {
+  brushedAxes,
+  brushWindow,
+  coverageNotes,
+  coverageSummary,
+  measuredSpan,
+  netWorthOption,
+} from "@/lib/netWorthChart";
 import { useChartTokens } from "@/theme/chartTokens";
 import { brushEvents, type ChartBox } from "@/theme/chartInteraction";
 import { Button, Checkbox, Field, Input, Select, Spinner, useFieldId, validAmount, validCurrency, requiredText } from "@/components/form";
@@ -348,8 +355,15 @@ function NetWorthHero({
   // state the window: a drag reports back through `brushEvents` below and the
   // headline above re-scopes to the same span. A card that cannot say which
   // days its figures cover does not draw one.
+  //
+  // The box is kept: the brush's handler below needs it to choose the date
+  // labels again for the window it is told about.
+  const drawnBox = useRef<ChartBox | null>(null);
   const option = useCallback(
-    (box: ChartBox): EChartsOption => netWorthOption(series.data, t, box, { brush: true }),
+    (box: ChartBox): EChartsOption => {
+      drawnBox.current = box;
+      return netWorthOption(series.data, t, box, { brush: true });
+    },
     [series.data, t],
   );
 
@@ -373,9 +387,20 @@ function NetWorthHero({
   // been rebuilt for the new range and shows the whole of it.
   const win = brushed && brushed[1] < points.length ? brushed : null;
   // Memoised: the wrapper re-binds its handlers when this prop's value changes.
+  //
+  // The handler also re-labels the date axis for the window, on the instance:
+  // the labels are chosen for the points on screen, and the brush changes those
+  // without this component's option being built again.
   const onEvents = useMemo(
-    () => brushEvents((zoom) => setBrushed(zoom ? brushWindow(points, zoom[0], zoom[1]) : null)),
-    [points],
+    () =>
+      brushEvents((zoom, chart) => {
+        const window = zoom ? brushWindow(points, zoom[0], zoom[1]) : null;
+        setBrushed(window);
+        if (chart && drawnBox.current) {
+          chart.setOption(brushedAxes(series.data, drawnBox.current, window));
+        }
+      }),
+    [points, series.data],
   );
 
   // The window on screen, as indices: the whole range, or the brushed part of it.

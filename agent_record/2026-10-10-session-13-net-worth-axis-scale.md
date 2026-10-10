@@ -42,7 +42,21 @@ On a phone card a week read as seven labels touching, and a month as `Sep 13, Se
 - Looked at: all eight ranges (1D, 1W, 2W, 1M, 3M, 6M, 1Y, All) on Accounts at 390 and 1280 px, before and after, plus the Insights chart at both widths.
 - `npm test`: 654 passed; `tsc --noEmit` and `vite build` clean; design-lint clean.
 
+## Third request: review by a separate agent
+
+User: “review the pr with a separate agent, address any comments made and ensure the build completes”
+
+A general-purpose subagent reviewed PR #49 read-only and confirmed its findings by rendering through the SVG renderer. All seven were taken:
+
+1. **A brushed window lost most or all of its date labels** (regression; the labels were chosen once, for the whole series). `brushedAxes` chooses them again for the window, and the brush's handler in `Accounts.tsx` merges that into the drawn chart; `brushEvents` now hands the handler the chart instance. `showMinLabel`/`showMaxLabel` are on, since a time axis hides its end labels by default.
+2. **A movement under $10 drew a stray tick at the data's own minimum** (`$123,456.78`) — the label `minInterval` was said to prevent. 3. **`minInterval: 10` was a USD-sized constant.** 4. **Seven rules on a phone.** One fix for the three: `valueExtent` sets the axis's range — a floor relative to the balance, a step never under ten from a thousand up, and the narrowest round range of `valueTicks` steps give or take one — given to ECharts as `min`/`max` functions so a brush re-rules the axis. A first version pinned the range to exactly `valueTicks` steps; on the screenshots that left the All view on `$0 … $80k` with the line in its lower half, which is the complaint this branch exists for, so the count was loosened by one either way and the figures now fill at least half the plot (tested). ECharts derives its interval from the range, so a range is only offered when its own rounding lands on the step (`ruledIn`).
+5. **Stale comments and dead code**: `BUCKET_MS` and the x axes' `minInterval` removed (nothing drawn read them once the labels were chosen); `VALUE_GUTTER`, `X_LABEL_ROOM`, `xLabelPoints` and DESIGN §2.9 corrected.
+6. **Tests**: the cents test used a minimum that hid finding 2 and now does not; the pitch test that restated the function is replaced by expected labels; added coverage for the labels reaching the right axis, the phone's right margin, week/quarter/year, zoomed windows on the drawn chart, and `valueExtent` directly. The tick parser fails as an assertion.
+7. **A young coarse window had one label**: the opening day is named when it would otherwise be alone.
+
+Verified again: `tsc --noEmit`, design-lint, `npm test` (670 passed); the brush dragged in a real browser on 3M and 1Y with the console watched (no ECharts warnings from the merge) and the zoomed charts looked at; e2e and CI as recorded in the PR.
+
 ## Left as it is
 
 - A window just above a unit boundary can mix units on one axis (`$1238k`, `$1.24M`), because `formatMoneyTick` shortens only where the result is exact to two decimals. The formatter already did this for any range crossing a boundary; a tighter axis makes it more common above $1M.
-- A perfectly flat series gets ECharts' own range for a single value (`$30k … $150k` around $100k) — a flat line mid-plot, as it should be.
+- A history that is all zeros is left to ECharts' own range (`$0 … $1.20`).

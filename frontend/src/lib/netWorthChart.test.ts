@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as echarts from "echarts";
 import type { NetWorthSeries } from "@/api/types";
 import {
+  brushedAxes,
   brushWindow,
   changesPerPoint,
   coverageNotes,
@@ -11,6 +12,7 @@ import {
   netWorthOption,
   startsHere,
   tooltipBody,
+  valueExtent,
   xLabelPoints,
 } from "@/lib/netWorthChart";
 import { valueTicks } from "@/theme/chartInteraction";
@@ -312,8 +314,11 @@ describe("netWorthOption", () => {
     return drawn
       .filter((text) => /^[−$]/.test(text))
       .map((text) => {
-        const [, sign, digits, unit] = /^(−?)\$([\d.,]+)(k?)$/.exec(text)!;
-        return (sign ? -1 : 1) * Number(digits.replace(/,/g, "")) * (unit ? 1000 : 1);
+        const tick = /^(−?)\$([\d.,]+)([kM]?)$/.exec(text);
+        expect(tick, `an axis tick this helper cannot read: ${text}`).not.toBeNull();
+        const [, sign, digits, unit] = tick!;
+        const scale = unit === "M" ? 1e6 : unit === "k" ? 1e3 : 1;
+        return (sign ? -1 : 1) * Number(digits.replace(/,/g, "")) * scale;
       })
       .sort((a, b) => a - b);
   };
@@ -346,11 +351,39 @@ describe("netWorthOption", () => {
 
   // ...and it does not follow the figures all the way down. Forty cents of
   // interest on $100k is a flat line; ruled in dimes it is a climb the height of
-  // the plot under labels (`$100,000.10`) the gutter was never sized for.
-  it("does not magnify a movement of cents into a slope", () => {
-    const rules = ruledAt(["100000.0000", "100000.1500", "100000.4000"], WIDE);
-    expect(rules[rules.length - 1] - rules[0]).toBeGreaterThanOrEqual(10);
-    for (const rule of rules) expect(rule % 10).toBe(0);
+  // the plot under labels (`$100,003.10`) the gutter was never sized for. The
+  // figures are off any round number on purpose: ECharts adds a tick at the
+  // data's own minimum when it is left to rule a range this narrow.
+  it("does not magnify a movement of cents, or print the figure as a tick", () => {
+    for (const box of [{ width: 310, height: 280 }, WIDE]) {
+      const rules = ruledAt(["100003.1000", "100003.2500", "100003.4000"], box);
+      expect(rules[rules.length - 1] - rules[0]).toBeGreaterThanOrEqual(30);
+      for (const rule of rules) expect(rule % 10).toBe(0);
+    }
+  });
+
+  // The count is the canvas's (`valueTicks`), give or take one, and the rules
+  // are evenly spaced: left to its own search ECharts drew seven on a phone for
+  // the second of these, and an extra one at the data's own minimum for others.
+  it("draws about as many rules as it was asked for, evenly spaced", () => {
+    for (const values of [
+      ["100000.0000", "101000.0000", "97000.0000", "105000.0000"],
+      ["500.0000", "552.0000"],
+      ["1234500.0000", "1235410.0000"],
+      ["30100.0000", "52829.2400"],
+      ["123456.7800", "123459.7800"],
+      ["100000.0000", "100000.0000"],
+    ]) {
+      for (const box of [INSIGHTS, WIDE]) {
+        const rules = ruledAt(values, box);
+        // The wide canvas keeps the line's share of its height, as the option does.
+        const y = [netWorthOption(series(), T, box).yAxis].flat()[0] as { splitNumber: number };
+        expect(rules.length).toBeGreaterThanOrEqual(y.splitNumber);
+        expect(rules.length).toBeLessThanOrEqual(y.splitNumber + 2);
+        const steps = rules.slice(1).map((rule, i) => rule - rules[i]);
+        for (const step of steps) expect(step).toBeCloseTo(steps[0], 6);
+      }
+    }
   });
 
   // How many rules the axis draws follows from the *plot's* height, because that
@@ -664,7 +697,7 @@ describe("xLabelPoints", () => {
 
   it("names every day when there is room for every day", () => {
     const week = days("2026-10-03", 8);
-    expect(xLabelPoints(week, "day", WIDE_PLOT)).toHaveLength(8);
+    expect(xLabelPoints(week, "day", WIDE_PLOT)).toEqual(week.map((p) => ts(p.date)));
   });
 
   // The window's two ends are not buckets: its first point is the opening day
@@ -688,25 +721,183 @@ describe("xLabelPoints", () => {
     }
   });
 
-  it("never puts two labels closer than most of a pitch", () => {
-    for (const [points, granularity, pitch] of [
-      [days("2026-09-26", 15), "day", 72],
-      [days("2026-09-10", 31), "day", 72],
-      [YEAR, "month", 48],
-    ] as const) {
-      const span = ts(points[points.length - 1].date) - ts(points[0].date);
-      for (const width of [PHONE_PLOT, WIDE_PLOT]) {
-        const picked = xLabelPoints(points, granularity, width);
-        expect(picked.length).toBeGreaterThan(1);
-        for (let i = 1; i < picked.length; i++) {
-          expect(((picked[i] - picked[i - 1]) / span) * width).toBeGreaterThanOrEqual(0.75 * pitch);
-        }
-      }
+  // Asserted as the labels a reader gets, not as the rule that chose them.
+  it("names a fortnight on a phone every fifth day, and a year every fourth month", () => {
+    const fortnight = days("2026-09-26", 15);
+    expect(named(fortnight, xLabelPoints(fortnight, "day", PHONE_PLOT))).toEqual([
+      "09-30", "10-05", "10-10",
+    ]);
+    expect(named(YEAR, xLabelPoints(YEAR, "month", PHONE_PLOT))).toEqual([
+      "10-31", "02-28", "06-30", "10-10",
+    ]);
+  });
+
+  it("names weeks, quarters and years on their own points", () => {
+    const weeks = at(["2026-07-10", "2026-07-12", "2026-07-19", "2026-07-26", "2026-08-02",
+      "2026-08-09", "2026-08-16", "2026-08-23", "2026-08-30", "2026-09-06", "2026-09-13",
+      "2026-09-20", "2026-09-27", "2026-10-04", "2026-10-10"]);
+    expect(named(weeks, xLabelPoints(weeks, "week", PHONE_PLOT))).toEqual(["08-02", "09-06", "10-10"]);
+    const quarters = at(["2025-01-01", "2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31",
+      "2026-03-31", "2026-06-30", "2026-09-30", "2026-10-10"]);
+    expect(named(quarters, xLabelPoints(quarters, "quarter", WIDE_PLOT))).toEqual([
+      "03-31", "06-30", "09-30", "12-31", "03-31", "06-30", "10-10",
+    ]);
+    const years = at(["2022-03-01", "2022-12-31", "2023-12-31", "2024-12-31", "2025-12-31", "2026-10-10"]);
+    expect(xLabelPoints(years, "year", WIDE_PLOT).map((at) => new Date(at).getFullYear())).toEqual([
+      2022, 2023, 2024, 2025, 2026,
+    ]);
+  });
+
+  // A label says where it is; two say what the axis spans.
+  it("names the opening day rather than leave a coarse axis with one label", () => {
+    const young = at(["2026-10-01", "2026-10-10"]);
+    expect(named(young, xLabelPoints(young, "month", WIDE_PLOT))).toEqual(["10-01", "10-10"]);
+    const crowded = at(["2026-09-02", "2026-09-30", "2026-10-01"]);
+    expect(named(crowded, xLabelPoints(crowded, "month", WIDE_PLOT))).toEqual(["09-02", "10-01"]);
+  });
+
+  it("keeps the newest point alone when the plot has no width to share", () => {
+    const week = days("2026-10-03", 8);
+    for (const width of [0, 10, Number.NaN]) {
+      const picked = named(week, xLabelPoints(week, "day", width));
+      expect(picked[picked.length - 1]).toBe("10-10");
+      expect(picked.length).toBeLessThanOrEqual(2);
     }
   });
 
   it("has nothing to name on an empty series, and one label on a single point", () => {
     expect(xLabelPoints([], "day", PHONE_PLOT)).toEqual([]);
     expect(xLabelPoints(at(["2026-10-10"]), "day", PHONE_PLOT)).toHaveLength(1);
+  });
+});
+
+// The chosen labels have to reach the axis that draws them, and keep up with a
+// brush: the window is ECharts' state, so the option is not built again for it.
+describe("the date labels on the drawn axis", () => {
+  const daily = (count: number) =>
+    ({
+      base_currency: "USD",
+      granularity: "day",
+      points: Array.from({ length: count }, (_, i) => {
+        const day = new Date(2026, 6, 13 + i);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return {
+          date: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`,
+          net_worth: String(100000 + i * 100),
+          missing: [],
+        };
+      }),
+    }) as unknown as NetWorthSeries;
+  type Labelled = { axisLabel: { show?: boolean; customValues?: number[] } };
+
+  it("go to the axis under the strip on a wide canvas, and to the only one on a phone", () => {
+    const data = daily(31);
+    const [top, bottom] = netWorthOption(data, T, WIDE).xAxis as Labelled[];
+    expect(top.axisLabel).toEqual({ show: false });
+    expect(bottom.axisLabel.customValues).toHaveLength(11);
+    const phone = netWorthOption(data, T, INSIGHTS).xAxis as Labelled;
+    expect(phone.axisLabel.customValues).toHaveLength(4);
+  });
+
+  // The newest label is centred on the plot's last pixel; without the room it
+  // was drawn `Oct 1`.
+  it("keeps room on a phone for the half of the newest label that overhangs", () => {
+    expect(netWorthOption(daily(31), T, INSIGHTS).grid).toMatchObject({ right: 32 });
+  });
+
+  const drawnDates = (data: NetWorthSeries, zoom: [number, number] | null) => {
+    const chart = echarts.init(null as never, null, { renderer: "svg", ssr: true, ...WIDE });
+    chart.setOption({ ...netWorthOption(data, T, WIDE, { brush: true }), animation: false });
+    if (zoom) {
+      chart.dispatchAction({ type: "dataZoom", start: zoom[0], end: zoom[1] });
+      chart.setOption(brushedAxes(data, WIDE, brushWindow(data.points, zoom[0], zoom[1])));
+    }
+    const drawn = [...chart.renderToSVGString().matchAll(/<text[^>]*>([^<]*)<\/text>/g)]
+      .map((m) => m[1])
+      .filter((text) => /^[A-Z][a-z]{2} \d{2}$/.test(text));
+    chart.dispose();
+    return drawn;
+  };
+
+  it("draws both ends of the window, which a time axis hides by default", () => {
+    const drawn = drawnDates(daily(31), null);
+    expect(drawn[0]).toBe("Jul 13");
+    expect(drawn[drawn.length - 1]).toBe("Aug 12");
+    expect(drawn).toHaveLength(11);
+  });
+
+  // The labels chosen for ninety days are a week apart. Zoomed to nine of those
+  // days they were one label, or none.
+  it("re-labels a brushed window for the points it holds", () => {
+    const data = daily(90);
+    expect(drawnDates(data, [40, 50])).toEqual([
+      "Aug 18", "Aug 19", "Aug 20", "Aug 21", "Aug 22", "Aug 23", "Aug 24", "Aug 25", "Aug 26",
+    ]);
+    expect(drawnDates(data, [45, 48]).length).toBeGreaterThanOrEqual(2);
+    expect(drawnDates(data, [30, 60]).length).toBeGreaterThan(8);
+  });
+
+  it("hands back the whole series' labels when the window is given back", () => {
+    const data = daily(90);
+    const whole = (netWorthOption(data, T, WIDE).xAxis as Labelled[])[1].axisLabel.customValues;
+    expect(brushedAxes(data, WIDE, null).xAxis[1]).toEqual({ axisLabel: { customValues: whole } });
+  });
+});
+
+// The value axis's range, as numbers: the drawn-axis tests above say ECharts
+// honours it, these say what it is.
+describe("valueExtent", () => {
+  it("is the narrowest round range around the figures", () => {
+    expect(valueExtent(97000, 105000, 4)).toEqual([96000, 108000]);
+    expect(valueExtent(97000, 105000, 3)).toEqual([96000, 105000]);
+    expect(valueExtent(17372.22, 38579.24, 4)).toEqual([15000, 40000]);
+    expect(valueExtent(-105000, -97000, 3)).toEqual([-105000, -96000]);
+    expect(valueExtent(1234500, 1235410, 4)).toEqual([1234500, 1235700]);
+  });
+
+  // The figures fill most of the plot: the reason the axis was changed at all.
+  it("leaves the figures at least half of the plot", () => {
+    for (const splits of [3, 4]) {
+      for (const [lo, hi] of [
+        [97000, 105000], [30100, 52829], [17372, 52829], [48079, 52829], [500, 552], [12, 14],
+        [-4000, 6000], [1234500, 1235410], [99100, 100900], [0, 22000], [250000, 261000],
+      ]) {
+        const [min, max] = valueExtent(lo, hi, splits)!;
+        expect(min).toBeLessThanOrEqual(lo);
+        expect(max).toBeGreaterThanOrEqual(hi);
+        expect((hi - lo) / (max - min), `${lo}–${hi} in ${splits}`).toBeGreaterThanOrEqual(0.5);
+      }
+    }
+  });
+
+  it("starts at zero for figures that do, and has zero on a rule for ones that cross it", () => {
+    expect(valueExtent(0, 22000, 4)).toEqual([0, 25000]);
+    expect(valueExtent(-4000, 6000, 4)).toEqual([-6000, 6000]);
+    expect(valueExtent(-4000, 6000, 3)).toEqual([-5000, 10000]);
+  });
+
+  // The floor is relative: a fixed one is a guess at the currency.
+  it("does not rule a large balance finer than a fraction of itself", () => {
+    expect(valueExtent(100003.1, 100003.4, 4)).toEqual([100000, 100030]);
+    expect(valueExtent(123456.78, 123459.78, 4)).toEqual([123450, 123480]);
+    expect(valueExtent(15_000_000, 15_000_006, 4)).toEqual([15_000_000, 15_003_000]);
+  });
+
+  it("rules a small balance in its own units", () => {
+    expect(valueExtent(1.2, 1.24, 4)).toEqual([1.2, 1.24]);
+    expect(valueExtent(3, 5, 4)).toEqual([3, 5]);
+    expect(valueExtent(500, 552, 4)).toEqual([500, 580]);
+  });
+
+  it("puts a flat line mid-plot, and never rules under zero for it", () => {
+    expect(valueExtent(100000, 100000, 4)).toEqual([99980, 100020]);
+    expect(valueExtent(5, 5, 4)).toEqual([4.98, 5.02]);
+    expect(valueExtent(0.01, 0.01, 4)).toEqual([0, 0.04]);
+  });
+
+  it("leaves ECharts to it when there is nothing to rule around", () => {
+    expect(valueExtent(0, 0, 4)).toBeNull();
+    expect(valueExtent(Number.NaN, Number.NaN, 4)).toBeNull();
+    expect(valueExtent(Infinity, -Infinity, 4)).toBeNull();
   });
 });
