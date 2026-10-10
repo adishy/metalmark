@@ -82,6 +82,18 @@ describe("zoomWindow", () => {
     map.dataZoom({ start: 10, end: 60 });
     expect(seen).toEqual([[10, 60]]);
   });
+
+  // The window is the instance's state, so what a drag changes about the picture
+  // is merged into the chart the event came from — which the handler is given.
+  it("hands the handler the chart the event came from, when it is one", () => {
+    const charts: unknown[] = [];
+    const map = brushEvents((_, chart) => charts.push(chart));
+    const chart = { setOption: () => {} };
+    map.dataZoom({ start: 10, end: 60 }, chart);
+    map.dataZoom({ start: 10, end: 60 });
+    map.dataZoom({ start: 10, end: 60 }, { notAChart: true });
+    expect(charts).toEqual([chart, null, null]);
+  });
 });
 
 describe("emphasisStrip", () => {
